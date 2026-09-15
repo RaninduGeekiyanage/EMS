@@ -1,0 +1,35 @@
+﻿# M03 — Payroll Detailed Tasks
+
+## Phase 1: Payroll Run Core Engine
+- [ ] Database Schema & Run Orchestration
+  - [ ] File: database/migrations/2026_01_01_000060_create_payroll_runs_table.php
+  - [ ] File: database/migrations/2026_01_01_000061_create_payroll_employees_table.php
+  - [ ] File: database/migrations/2026_01_01_000062_create_apit_tax_slabs_table.php
+  - [ ] File: app/Models/PayrollRun.php
+  - [ ] File: app/Models/PayrollEmployee.php
+  - [ ] File: app/Services/PayrollCalculationService.php
+  - [ ] File: app/Http/Controllers/PayrollRunController.php
+  - [ ] File: resources/js/Pages/Payroll/Index.tsx
+  - [ ] File: resources/js/Pages/Payroll/Run.tsx
+
+## Phase 2: Statutory Modules (EPF, ETF & APIT)
+- [ ] Statutory Calculators
+  - [ ] File: app/Services/Statutory/EpfEtfCalculatorService.php
+  - [ ] File: app/Services/Statutory/ApitTaxCalculatorService.php
+  - [ ] File: tests/Unit/Payroll/EpfCalculationTest.php
+  - [ ] File: tests/Unit/Payroll/ApitCalculationTest.php
+
+## Phase 3: Payslips & Bank Disbursal
+- [ ] PDF & Export Engines
+  - [ ] File: resources/views/pdf/payslip.blade.php
+  - [ ] File: app/Services/PayslipGeneratorService.php
+  - [ ] File: app/Services/BankExportService.php
+  - [ ] File: app/Services/BankGenerators/BocGenerator.php
+  - [ ] File: app/Services/BankGenerators/CommercialBankGenerator.php
+  - [ ] File: app/Services/BankGenerators/SampathBankGenerator.php
+  - [ ] File: app/Services/BankGenerators/HnbGenerator.php
+  - [ ] File: app/Services/BankGenerators/PeoplesBankGenerator.php
+  - [ ] File: app/Services/BankGenerators/NsbGenerator.php
+  - [ ] File: app/Http/Controllers/PayslipController.php
+  - [ ] File: app/Http/Controllers/BankExportController.php
+  - [ ] File: tests/Feature/M03/FullPayrollRunTest.php

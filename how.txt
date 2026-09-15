@@ -1,0 +1,54 @@
+Read AGENT.md and docs/rules/AGENT_RULES.md. 
+We are working on Module 1 (M01 - Master). 
+Check docs/modules/M01-master/TASKS.md, identify Task 1, mark it [/], and implement it.
+
+What the Agent Will Automatically Do:
+Reads context: Loads AGENT.md and docs/rules/AGENT_RULES.md.
+Finds Task 1: In docs/modules/M01-master/TASKS.md:
+Phase 1: Initialize Laravel 11 project, configure composer.json, .env, and install packages (spatie/laravel-permission, barryvdh/laravel-dompdf, intervention/image-laravel, laravel/horizon, Inertia React dependencies).
+Marks Progress: Changes - [ ] to - [/] in TASKS.md.
+Executes: Creates the files and runs the setup commands.
+Verifies & Tests: Ensures code conforms to strict types and builds cleanly.
+Marks Complete: Updates - [/] to - [x] in both docs/modules/M01-master/TASKS.md and docs/tasks/MASTER_TASK_LIST.md.
+
+
+
+
+
+
+
+
+Step 3: How to Move to the Next Task
+Once Task 1 is completed and marked [x], simply prompt:
+
+Run the next task in docs/modules/M01-master/TASKS.md. Follow the standard development workflow and update the checkboxes when done.
+
+The agent will:
+
+Scan docs/modules/M01-master/TASKS.md for the first unchecked item ([ ]).
+Consult docs/rules/READ_ORDER.md to see which spec and data-model files to read (e.g. docs/modules/M01-master/data-models.md for tenant migrations).
+Mark it [/] (in progress).
+Write the migrations/services/controllers/pages.
+Run tests: php artisan test.
+Mark it [x] upon pass.
+
+
+
+
+
+
+
+
+Useful Shortcuts & Commands for Subsequent Prompts
+ 
+Check Progress
+"Give me a summary of current progress across all modules according to MASTER_TASK_LIST.md."
+
+Run All Tests
+"Run all tests for the current active module and report any failures."
+
+Complete Module 1
+"Complete the rest of Phase 2 in M01 TASKS and write the corresponding feature tests."
+
+Switch to Module 2 (AMS)
+(Only after M01 checklist passes): "M01 sign-off checklist is complete. Update AGENT.md to activate M02-AMS and start Phase 1."
