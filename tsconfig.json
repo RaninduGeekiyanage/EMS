@@ -12,15 +12,15 @@
         "strictNullChecks": true,
         "forceConsistentCasingInFileNames": true,
         "module": "ESNext",
-        "moduleResolution": "Node",
+        "moduleResolution": "bundler",
         "resolveJsonModule": true,
         "isolatedModules": true,
         "noEmit": true,
         "jsx": "react-jsx",
-        "baseUrl": ".",
         "paths": {
-            "@/*": ["resources/js/*"]
-        }
+            "@/*": ["./resources/js/*"]
+        },
+        "types": ["vite/client"]
     },
     "include": ["resources/js/**/*", "vite.config.ts"]
 }
