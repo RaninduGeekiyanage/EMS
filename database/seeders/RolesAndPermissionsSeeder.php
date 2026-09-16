@@ -51,6 +51,11 @@ final class RolesAndPermissionsSeeder extends Seeder
         'shift.delete',
         'work-calendar.view',
         'work-calendar.manage',
+
+        // M02 Biometric & Attendance Ingestion
+        'attendance.import',
+        'attendance.view',
+        'attendance.correct',
     ];
 
     /**
@@ -101,6 +106,8 @@ final class RolesAndPermissionsSeeder extends Seeder
             'shift.create',
             'shift.update',
             'work-calendar.view',
+            'attendance.view',
+            'attendance.import',
         ]);
 
         $staff = Role::firstOrCreate([

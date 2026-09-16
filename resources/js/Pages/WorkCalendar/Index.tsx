@@ -16,6 +16,7 @@ import {
     Clock,
     Landmark,
     Filter,
+    Fingerprint,
 } from 'lucide-react';
 
 interface PublicHoliday {
@@ -23,7 +24,7 @@ interface PublicHoliday {
     tenant_id: string;
     holiday_date: string;
     name: string;
-    type: 'statutory' | 'mercantile' | 'poya';
+    type: 'statutory' | 'mercantile' | 'poya' | 'company' | 'special';
     description: string | null;
 }
 
@@ -48,7 +49,7 @@ export default function Index({ holidays, stats, currentYear }: Props) {
     const holidayForm = useForm({
         name: '',
         holiday_date: `${currentYear}-01-01`,
-        type: 'statutory' as 'statutory' | 'mercantile' | 'poya',
+        type: 'statutory' as 'statutory' | 'mercantile' | 'poya' | 'company' | 'special',
         description: '',
     });
 
@@ -140,8 +141,24 @@ export default function Index({ holidays, stats, currentYear }: Props) {
                         <Sun className="w-3 h-3" /> Mercantile Holiday
                     </span>
                 );
+            case 'company':
+                return (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Company Holiday (2.0x OT)
+                    </span>
+                );
+            case 'special':
+                return (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/10 text-pink-400 border border-pink-500/20 flex items-center gap-1">
+                        <CalendarIcon className="w-3 h-3" /> Special Holiday
+                    </span>
+                );
             default:
-                return null;
+                return (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                        {type}
+                    </span>
+                );
         }
     };
 
@@ -168,11 +185,25 @@ export default function Index({ holidays, stats, currentYear }: Props) {
 
                     <div className="flex items-center gap-3">
                         <a
+                            href="/attendance/daily"
+                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
+                        >
+                            <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                            Daily Attendance Ledger
+                        </a>
+                        <a
                             href="/shifts"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Clock className="w-3.5 h-3.5 text-sky-400" />
-                            ← Shift Rosters
+                            Shift Rosters
+                        </a>
+                        <a
+                            href="/attendance/import"
+                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
+                        >
+                            <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
+                            Biometric Import
                         </a>
                         <button
                             type="button"
@@ -392,7 +423,7 @@ export default function Index({ holidays, stats, currentYear }: Props) {
                                         onChange={(e) =>
                                             holidayForm.setData(
                                                 'type',
-                                                e.target.value as 'statutory' | 'mercantile' | 'poya'
+                                                e.target.value as 'statutory' | 'mercantile' | 'poya' | 'company' | 'special'
                                             )
                                         }
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -400,6 +431,8 @@ export default function Index({ holidays, stats, currentYear }: Props) {
                                         <option value="poya">Poya Day (2.0x OT)</option>
                                         <option value="statutory">Statutory Holiday (2.0x OT)</option>
                                         <option value="mercantile">Mercantile Holiday (1.5x OT)</option>
+                                        <option value="company">Special Company Holiday (2.0x OT)</option>
+                                        <option value="special">Special Declared Holiday</option>
                                     </select>
                                 </div>
                             </div>

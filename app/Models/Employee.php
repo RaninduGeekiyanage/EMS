@@ -140,5 +140,15 @@ final class Employee extends Model
             ->withPivot(['id', 'effective_from', 'effective_to'])
             ->withTimestamps();
     }
+
+    /**
+     * Get the attendance logs for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<AttendanceLog, $this>
+     */
+    public function attendanceLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(AttendanceLog::class, 'employee_id');
+    }
 }
 

@@ -73,4 +73,24 @@ final class Tenant extends Model
             ['value' => is_scalar($value) || $value === null ? (string) $value : json_encode($value, JSON_THROW_ON_ERROR)]
         );
     }
+
+    /**
+     * Get all attendance import jobs for this tenant.
+     *
+     * @return HasMany<AttendanceImport, $this>
+     */
+    public function attendanceImports(): HasMany
+    {
+        return $this->hasMany(AttendanceImport::class, 'tenant_id');
+    }
+
+    /**
+     * Get all attendance logs for this tenant.
+     *
+     * @return HasMany<AttendanceLog, $this>
+     */
+    public function attendanceLogs(): HasMany
+    {
+        return $this->hasMany(AttendanceLog::class, 'tenant_id');
+    }
 }

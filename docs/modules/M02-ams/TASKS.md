@@ -13,25 +13,28 @@
   - [x] File: resources/js/Pages/WorkCalendar/Index.tsx
 
 ## Phase 2: Biometric Ingestion & Adapters
-- [ ] Import Engine
-  - [ ] File: database/migrations/2026_01_01_000040_create_attendance_imports_table.php
-  - [ ] File: database/migrations/2026_01_01_000041_create_attendance_logs_table.php
-  - [ ] File: app/Contracts/BiometricImportAdapterInterface.php
-  - [ ] File: app/Services/Biometric/ZKTecoAdapter.php
-  - [ ] File: app/Services/Biometric/GenericCsvAdapter.php
-  - [ ] File: app/Services/Biometric/ExcelAdapter.php
-  - [ ] File: app/Services/AttendanceImportService.php
-  - [ ] File: app/Http/Controllers/AttendanceImportController.php
-  - [ ] File: resources/js/Pages/Attendance/Import.tsx
+- [x] Import Engine
+  - [x] File: database/migrations/2026_01_01_000040_create_attendance_imports_table.php
+  - [x] File: database/migrations/2026_01_01_000041_create_attendance_logs_table.php
+  - [x] File: app/Contracts/BiometricImportAdapterInterface.php
+  - [x] File: app/Services/Biometric/ZKTecoAdapter.php
+  - [x] File: app/Services/Biometric/GenericCsvAdapter.php
+  - [x] File: app/Services/Biometric/ExcelAdapter.php
+  - [x] File: app/Services/AttendanceImportService.php
+  - [x] File: app/Http/Controllers/AttendanceImportController.php
+  - [x] File: resources/js/Pages/Attendance/Import.tsx
 
 ## Phase 3: Attendance Processing & OT
-- [ ] Daily Ledger Calculation
-  - [ ] File: database/migrations/2026_01_01_000042_create_attendance_daily_table.php
-  - [ ] File: app/Models/AttendanceDaily.php
-  - [ ] File: app/Services/AttendanceProcessingService.php
-  - [ ] File: app/Services/OvertimeCalculationService.php
-  - [ ] File: app/Http/Controllers/AttendanceDailyController.php
-  - [ ] File: resources/js/Pages/Attendance/Daily.tsx
+- [x] Daily Ledger Calculation
+  - [x] File: database/migrations/2026_01_01_000042_create_attendance_daily_table.php
+  - [x] File: database/migrations/2026_01_01_000043_create_attendance_rules_table.php
+  - [x] File: app/Models/AttendanceDaily.php
+  - [x] File: app/Models/AttendanceRule.php
+  - [x] File: app/Services/AttendanceProcessingService.php
+  - [x] File: app/Services/OvertimeCalculationService.php
+  - [x] File: app/Http/Controllers/AttendanceDailyController.php
+  - [x] File: resources/js/Pages/Attendance/Daily.tsx
+  - [x] File: tests/Feature/M02/AttendanceProcessingTest.php
 
 ## Phase 4: Leave Management
 - [ ] Leave Entitlements & Requests
@@ -43,4 +46,3 @@
   - [ ] File: app/Services/LeaveService.php
   - [ ] File: app/Http/Controllers/LeaveRequestController.php
   - [ ] File: resources/js/Pages/Leave/Requests.tsx
-  - [ ] File: tests/Feature/M02/AttendanceProcessingTest.php

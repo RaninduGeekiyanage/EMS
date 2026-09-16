@@ -21,7 +21,7 @@ final class UpdatePublicHolidayRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:150'],
             'holiday_date' => ['required', 'date'],
-            'type' => ['required', 'string', 'in:statutory,mercantile,poya'],
+            'type' => ['required', 'string', 'in:statutory,mercantile,poya,company,special'],
             'description' => ['nullable', 'string', 'max:500'],
         ];
     }

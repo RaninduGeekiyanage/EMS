@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AttendanceDailyController;
+use App\Http\Controllers\AttendanceImportController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\DepartmentController;
@@ -54,5 +56,19 @@ Route::middleware(['tenant'])->group(function (): void {
     Route::put('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'updateHoliday'])->name('work-calendar.holidays.update');
     Route::delete('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'destroyHoliday'])->name('work-calendar.holidays.destroy');
     Route::post('/work-calendar/seed-holidays', [WorkCalendarController::class, 'seedHolidays'])->name('work-calendar.holidays.seed');
+
+    // M02 Biometric Attendance Ingestion
+    Route::get('/attendance/import', [AttendanceImportController::class, 'index'])->name('attendance.import.index');
+    Route::post('/attendance/import/preview', [AttendanceImportController::class, 'preview'])->name('attendance.import.preview');
+    Route::post('/attendance/import', [AttendanceImportController::class, 'store'])->name('attendance.import.store');
+    Route::delete('/attendance/import/{import}', [AttendanceImportController::class, 'destroy'])->name('attendance.import.destroy');
+    Route::get('/attendance/import/template/{type}', [AttendanceImportController::class, 'downloadTemplate'])->name('attendance.import.template');
+    Route::post('/attendance/import/map-employee', [AttendanceImportController::class, 'mapEmployee'])->name('attendance.import.map-employee');
+
+    // M02 Attendance Daily Ledger & Overtime Engine
+    Route::get('/attendance/daily', [AttendanceDailyController::class, 'index'])->name('attendance.daily.index');
+    Route::post('/attendance/daily/process', [AttendanceDailyController::class, 'process'])->name('attendance.daily.process');
+    Route::put('/attendance/daily/{attendanceDaily}', [AttendanceDailyController::class, 'update'])->name('attendance.daily.update');
+    Route::post('/attendance/rules', [AttendanceDailyController::class, 'saveRule'])->name('attendance.rules.store');
 });
 

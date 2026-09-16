@@ -21,6 +21,7 @@ import {
     ChevronRight,
     Search,
     UserMinus,
+    Fingerprint,
 } from 'lucide-react';
 
 interface Shift {
@@ -265,7 +266,14 @@ export default function Index({ shifts, employees, stats }: Props) {
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                            Work Calendar →
+                            Work Calendar
+                        </a>
+                        <a
+                            href="/attendance/import"
+                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
+                        >
+                            <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
+                            Biometric Import
                         </a>
                         <a
                             href="/employees"
