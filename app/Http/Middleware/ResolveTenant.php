@@ -40,7 +40,15 @@ final class ResolveTenant
      */
     private function resolveTenant(Request $request): ?Tenant
     {
-        // 1. Check custom headers
+        // 1. Check custom headers or query param
+        $tenantQuery = $request->query('tenant') ?? $request->query('tenant_id');
+        if (! empty($tenantQuery)) {
+            $tenant = Tenant::where('slug', $tenantQuery)->orWhere('id', $tenantQuery)->first();
+            if ($tenant !== null) {
+                return $tenant;
+            }
+        }
+
         $tenantHeaderId = $request->header('X-Tenant-ID');
         if (! empty($tenantHeaderId)) {
             return Tenant::find($tenantHeaderId);
@@ -50,6 +58,7 @@ final class ResolveTenant
         if (! empty($tenantHeaderSlug)) {
             return Tenant::where('slug', $tenantHeaderSlug)->first();
         }
+
 
         // 2. Check session
         if ($request->hasSession()) {
