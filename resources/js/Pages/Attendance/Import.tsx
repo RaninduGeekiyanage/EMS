@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { Head, useForm, router } from '@inertiajs/react';
+import { Head, useForm, router, Link } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     UploadCloud,
     FileSpreadsheet,
@@ -342,59 +343,59 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white pb-24">
-            <Head title="Biometric Ingestion & Punch Imports — EMS" />
-
-            {/* Top Navigation Bar */}
-            <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <AuthenticatedLayout title="Biometric Attendance Ingestion" backUrl="/attendance/daily">
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
                             <Fingerprint className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <span className="text-lg font-bold tracking-tight text-white">
-                                Biometric Attendance Ingestion
-                            </span>
-                            <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                                M02 Phase 2
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    Biometric Attendance Ingestion
+                                </h1>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                                    M02 Phase 2
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Direct USB/CSV/Excel upload, ZKTeco biometric log parser, and punch validation pipeline
+                            </p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                        <a
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Link
                             href="/attendance/daily"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Clock className="w-3.5 h-3.5 text-indigo-400" />
                             Daily Attendance Ledger
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/shifts"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Clock className="w-3.5 h-3.5 text-indigo-400" />
                             Shifts Roster
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/work-calendar"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Calendar className="w-3.5 h-3.5 text-indigo-400" />
                             Work Calendar
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/employees"
                             className="text-xs font-medium text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition"
                         >
                             Employees Directory
-                        </a>
+                        </Link>
                     </div>
                 </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-6 pt-8 space-y-8">
                 {/* Metric Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group hover:border-indigo-500/50 transition">
@@ -898,7 +899,6 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                         </div>
                     )}
                 </div>
-            </main>
 
             {/* Modal: Quick Biometric ID Mapping */}
             {isMapModalOpen && (
@@ -1022,6 +1022,7 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

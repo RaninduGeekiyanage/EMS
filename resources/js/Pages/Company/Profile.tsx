@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Head, useForm, router } from '@inertiajs/react';
+import { Head, useForm, router, Link } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Building2,
     MapPin,
@@ -139,38 +140,38 @@ export default function Profile({ company, branches }: Props) {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white pb-24">
-            <Head title={`Company Profile — ${company.name}`} />
-
-            {/* Top Navigation Bar */}
-            <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <AuthenticatedLayout title="Company Profile" backUrl="/dashboard">
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-sky-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
                             <Building2 className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <span className="text-lg font-bold tracking-tight text-white">
-                                {company.name}
-                            </span>
-                            <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                Organization Master
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    {company.name}
+                                </h1>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    Organization Master
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Legal registrations, statutory configurations, and multi-branch management
+                            </p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <a
+                        <Link
                             href="/departments"
                             className="text-xs font-medium text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition"
                         >
                             Departments Hierarchy →
-                        </a>
+                        </Link>
                     </div>
                 </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-6 pt-10">
                 {/* Header Profile Card */}
                 <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800/80 shadow-2xl relative overflow-hidden backdrop-blur-sm mb-8">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -524,7 +525,6 @@ export default function Profile({ company, branches }: Props) {
                         </div>
                     </div>
                 )}
-            </main>
 
             {/* Branch Create / Edit Modal */}
             {isBranchModalOpen && (
@@ -649,6 +649,7 @@ export default function Profile({ company, branches }: Props) {
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

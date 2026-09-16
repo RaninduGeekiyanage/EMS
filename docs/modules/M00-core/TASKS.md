@@ -53,3 +53,32 @@
   - [x] File: `tests/Feature/SuperAdmin/CompanyManagementTest.php`
   - [x] File: `tests/Feature/Tenant/ModuleRestrictionTest.php`
   - [x] File: `tests/Feature/Dashboard/TenantDashboardTest.php`
+
+## Phase 8: User Account & Password Reset Management
+- [x] User Management Engine & Role Assignments
+  - [x] File: `app/Http/Controllers/UserAccountController.php` — Index, store, update, destroy, and resetPassword
+  - [x] File: `app/Http/Requests/Users/StoreUserRequest.php` — Validates name, email, password, and Spatie role assignment
+  - [x] File: `app/Http/Requests/Users/UpdateUserRequest.php` — Validates user details and role mutation
+  - [x] File: `app/Http/Requests/Users/ResetUserPasswordRequest.php` — Secure administrative password reset validation
+  - [x] File: `app/Http/Controllers/SuperAdmin/CompanyController.php` — `resetUserPassword()` handler for super admin
+  - [x] File: `resources/js/Pages/Users/Index.tsx` — Full User Accounts & Access Management UI screen
+  - [x] File: `tests/Feature/UserAccountManagementTest.php` — 6 automated feature test cases verifying tenant isolation, role management, and password resets
+
+## Phase 9: Unified Collapsible SPA Layout & Navigation Standard
+- [x] Global Collapsible Sidebar & Universal Back Navigation
+  - [x] File: `resources/js/Layouts/AuthenticatedLayout.tsx` — Collapsible sidebar state persistence in `localStorage` (`ems_sidebar_collapsed`), universal SPA back button, breadcrumbs, and active navigation highlighting
+  - [x] Integration across all authenticated pages:
+    - [x] `resources/js/Pages/Dashboard/Index.tsx`
+    - [x] `resources/js/Pages/Users/Index.tsx`
+    - [x] `resources/js/Pages/Company/Profile.tsx`
+    - [x] `resources/js/Pages/Departments/Index.tsx`
+    - [x] `resources/js/Pages/Employees/Index.tsx`
+    - [x] `resources/js/Pages/Employees/Create.tsx`
+    - [x] `resources/js/Pages/Employees/Edit.tsx`
+    - [x] `resources/js/Pages/Attendance/Daily.tsx`
+    - [x] `resources/js/Pages/Attendance/Import.tsx`
+    - [x] `resources/js/Pages/Shifts/Index.tsx`
+    - [x] `resources/js/Pages/WorkCalendar/Index.tsx`
+    - [x] `resources/js/Pages/Leave/Requests.tsx`
+    - [x] `resources/js/Pages/SuperAdmin/Dashboard.tsx`
+  - [x] Zero hard-reloads: all inter-module links converted from `<a>` to Inertia `<Link>` for true Single Page Application behavior

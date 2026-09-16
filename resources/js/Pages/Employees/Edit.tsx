@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Head, useForm, Link } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Edit3,
     Building2,
@@ -76,26 +77,30 @@ export default function Edit({
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white pb-24">
-            <Head title={`Edit ${employee.full_name} — EMS`} />
-
-            {/* Top Navigation Bar */}
-            <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <AuthenticatedLayout title={`Edit Employee: ${employee.full_name}`} backUrl="/employees">
+            <div className="max-w-5xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                         <Link
                             href="/employees"
                             className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition"
+                            title="Back to Employee List"
                         >
                             <ArrowLeft className="w-4 h-4" />
                         </Link>
                         <div>
-                            <span className="text-lg font-bold tracking-tight text-white">
-                                Edit Employee Profile
-                            </span>
-                            <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
-                                {employee.emp_no}
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    Edit Employee Profile
+                                </h1>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
+                                    {employee.emp_no}
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Updating core details, salary structure, and bank disbursements for {employee.full_name}
+                            </p>
                         </div>
                     </div>
 
@@ -111,9 +116,6 @@ export default function Edit({
                         </button>
                     </div>
                 </div>
-            </header>
-
-            <main className="max-w-5xl mx-auto px-6 pt-10">
                 {/* Stepper Tabs */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
                     <button
@@ -580,7 +582,7 @@ export default function Edit({
                         </button>
                     </div>
                 </form>
-            </main>
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

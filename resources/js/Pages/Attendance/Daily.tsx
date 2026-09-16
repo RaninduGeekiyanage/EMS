@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Head, useForm, router } from '@inertiajs/react';
+import { Head, useForm, router, Link } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Calendar as CalendarIcon,
     Clock,
@@ -342,55 +343,58 @@ export default function Daily({
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white pb-24">
-            <Head title={`Daily Attendance Ledger (${selectedDate}) — EMS`} />
-
-            {/* Navigation Header */}
-            <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <AuthenticatedLayout title="Daily Attendance Ledger" backUrl="/dashboard">
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
                             <Clock className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <span className="text-lg font-bold tracking-tight text-white">
-                                Daily Attendance Ledger
-                            </span>
-                            <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                M02 Phase 3
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    Daily Attendance Ledger
+                                </h1>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    M02 Phase 3
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Real-time punch pairing, overtime threshold calculations, and exception approvals
+                            </p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                        <a
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Link
                             href="/shifts"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Briefcase className="w-3.5 h-3.5 text-indigo-400" />
                             Shifts Roster
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/work-calendar"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Calendar className="w-3.5 h-3.5 text-amber-400" />
                             Work Calendar
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/attendance/import"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
                             Biometric Ingestion
-                        </a>
-                        <a
+                        </Link>
+                        <Link
                             href="/leave/requests"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <HeartHandshake className="w-3.5 h-3.5 text-emerald-400" />
                             Leave Portal
-                        </a>
+                        </Link>
                         <button
                             type="button"
                             onClick={() => openRuleModal()}
@@ -401,9 +405,6 @@ export default function Daily({
                         </button>
                     </div>
                 </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-6 pt-8 space-y-8">
                 {/* Date Navigator Toolbar */}
                 <div className="p-4 md:p-6 rounded-3xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
@@ -762,7 +763,6 @@ export default function Daily({
                         </table>
                     </div>
                 </div>
-            </main>
 
             {/* Manual Adjustment Modal */}
             {adjustModalRecord && (
@@ -1147,6 +1147,7 @@ export default function Daily({
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

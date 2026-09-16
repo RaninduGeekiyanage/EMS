@@ -66,15 +66,40 @@
 ## 5. Responsive Application Shell (`AuthenticatedLayout`)
 1. **Desktop Sidebar**:
    - Brand Logo & Company switcher indicator.
-   - Collapsible toggle (expanded mode: icons + labels; collapsed mode: icons with tooltips).
+   - Collapsible toggle with local state persistence in `localStorage` (`ems_sidebar_collapsed`):
+     - Expanded mode: 260px wide, categorized section headers, icons, labels, status pills.
+     - Collapsed mode: 80px compact, centered icons with tooltip labels.
    - Grouped Navigation:
      - Core: Dashboard
-     - Organization (M01): Company Profile, Departments, Employees
-     - Attendance (M02, if enabled): Daily Ledger, Biometric Ingestion, Shifts, Work Calendar, Leave Requests
-     - Payroll (M03, if enabled): Payroll Runs, Payslips
+     - Organization (M01): Company Profile, Departments, Employees, User Accounts
+     - Attendance (M02, if enabled): Daily Attendance, Biometric Ingestion, Shifts Roster, Work Calendar, Leave Management
+     - Payroll (M03, if enabled): Payroll Runs
+     - Platform Hub (Super Admin only): Super Admin Panel
 2. **Mobile Drawer**:
    - Hamburger icon in mobile header opens smooth slide-over sidebar with backdrop.
 3. **Top Navigation Bar**:
    - Mobile menu toggle button.
-   - Current Tenant badge.
+   - **Universal SPA Back Button**: Context-aware back button (`ArrowLeft`), navigates via `backUrl` if provided, or `window.history.back()` / fallback to `/dashboard`.
+   - Current Page Title & Breadcrumb indicator.
+   - Current Tenant status & Slug badge.
    - User Profile Dropdown: Name, Email, Role pill (`Company Owner`, `HR Manager`, `Super Admin`), and Logout button.
+4. **Single Page Application (SPA) Standard**:
+   - 100% of internal links utilize Inertia `<Link>` tags with zero hard browser refreshes.
+
+---
+
+## 6. User Accounts & Access Management (`/users`)
+1. **Header Row**:
+   - Title, M01 Security & Governance pill, "Add New User" button.
+2. **Summary KPI Cards**:
+   - Total Accounts, Active User Accounts, Protected Roles Count, Administrative Tier.
+3. **User Accounts Data Table**:
+   - Columns: User Details (Name, Email, Initial Avatar), Spatie RBAC Role Badge (Company Admin, HR Manager, Attendance Officer, Supervisor, Staff), Created Date, Actions.
+   - Action Buttons: "Reset Password" (key icon), "Edit User" (pen icon), "Deactivate Account" (trash icon).
+4. **Add New User Modal**:
+   - Fields: Full Name, Email Address, Password (with auto-generate option), Role Selection dropdown.
+5. **Administrative Password Reset Modal**:
+   - Target User Name & Email display.
+   - New Password field with toggle visibility and one-click "Generate Strong Password" feature.
+   - Instant cryptographic hash submission via `POST /users/{user}/reset-password`.
+

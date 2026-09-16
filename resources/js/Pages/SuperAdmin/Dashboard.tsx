@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Building2,
     Users,
@@ -158,38 +159,42 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
-            <Head title="Super Admin Platform Dashboard" />
-
-            {/* Top Bar */}
-            <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30 px-6 h-16 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
-                        <ShieldAlert className="w-5 h-5 text-white" />
+        <AuthenticatedLayout title="Super Admin Platform Hub" showBackButton={false}>
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                            <ShieldAlert className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    EMS Super Admin Hub
+                                </h1>
+                                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                    Platform Root
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Multi-Company Architecture, Tenant Provisioning & Platform Governance
+                            </p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                            EMS Super Admin Hub
-                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                Platform Root
-                            </span>
-                        </h1>
-                        <p className="text-xs text-slate-400">Multi-Company Architecture & Tenant Governance</p>
+
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => {
+                                createForm.reset();
+                                setCreateModalOpen(true);
+                            }}
+                            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition active:scale-95"
+                        >
+                            <Plus className="w-4 h-4" />
+                            <span>Provision New Company</span>
+                        </button>
                     </div>
                 </div>
-
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={handleLogout}
-                        className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-red-500/40 text-xs font-semibold text-slate-300 hover:text-red-400 flex items-center gap-2 transition"
-                    >
-                        <LogOut className="w-3.5 h-3.5" />
-                        Sign Out
-                    </button>
-                </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-6 py-8 flex-1 w-full space-y-8">
                 {/* Flash Messages */}
                 {flash?.success && (
                     <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-xs flex items-center gap-2.5 shadow-lg">
@@ -411,7 +416,6 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                         </table>
                     </div>
                 </div>
-            </main>
 
             {/* Create Company Modal */}
             {createModalOpen && (
@@ -792,6 +796,7 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

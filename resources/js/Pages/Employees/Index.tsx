@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Head, router, Link } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Users,
     UserPlus,
@@ -69,33 +70,36 @@ export default function Index({ employees, departments, branches, filters }: Pro
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white pb-24">
-            <Head title="Employee Directory — EMS" />
-
-            {/* Top Navigation Bar */}
-            <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <AuthenticatedLayout title="Employee Directory" backUrl="/dashboard">
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header Subnavigation Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-sky-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
                             <Users className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <span className="text-lg font-bold tracking-tight text-white">
-                                Employee Master
-                            </span>
-                            <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                Profiles & Payroll Specs
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl font-bold tracking-tight text-white">
+                                    Employee Master
+                                </h1>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    Profiles & Payroll Specs
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                                Unified profiles, designations, NIC encryption, and multi-tier compensation models
+                            </p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <a
+                        <Link
                             href="/company/profile"
                             className="text-xs font-medium text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition"
                         >
                             Company Profile
-                        </a>
+                        </Link>
                         <Link
                             href="/employees/create"
                             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition"
@@ -105,9 +109,6 @@ export default function Index({ employees, departments, branches, filters }: Pro
                         </Link>
                     </div>
                 </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-6 pt-10">
                 {/* Metric Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
                     <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800">
@@ -340,7 +341,7 @@ export default function Index({ employees, departments, branches, filters }: Pro
                         </div>
                     )}
                 </div>
-            </main>
-        </div>
+            </div>
+        </AuthenticatedLayout>
     );
 }

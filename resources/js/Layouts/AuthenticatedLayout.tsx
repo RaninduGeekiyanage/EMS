@@ -20,6 +20,7 @@ import {
     User as UserIcon,
     UserCheck,
     ArrowLeftRight,
+    ArrowLeft,
     CheckCircle2,
     AlertCircle,
 } from 'lucide-react';
@@ -57,10 +58,17 @@ interface PageProps {
 
 interface LayoutProps {
     title?: string;
+    backUrl?: string;
+    showBackButton?: boolean;
     children: React.ReactNode;
 }
 
-export default function AuthenticatedLayout({ title, children }: LayoutProps) {
+export default function AuthenticatedLayout({
+    title,
+    backUrl,
+    showBackButton,
+    children,
+}: LayoutProps) {
     const { auth, flash } = usePage<PageProps>().props;
     const [collapsed, setCollapsed] = useState<boolean>(() => {
         return localStorage.getItem('ems_sidebar_collapsed') === 'true';
@@ -89,15 +97,34 @@ export default function AuthenticatedLayout({ title, children }: LayoutProps) {
         if (path === '/dashboard') {
             return currentPath === '/dashboard';
         }
+        if (path === '/admin/dashboard') {
+            return currentPath === '/admin/dashboard';
+        }
         return currentPath.startsWith(path);
     };
 
     const navItemClass = (path: string) => `
         flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition duration-200 group
+        ${collapsed ? 'justify-center' : ''}
         ${isLinkActive(path)
-            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-semibold'
             : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900/80'}
     `;
+
+    // Determine back button visibility
+    const shouldShowBack = showBackButton !== undefined
+        ? showBackButton
+        : Boolean(backUrl || (currentPath && currentPath !== '/dashboard' && currentPath !== '/admin/dashboard' && currentPath !== '/'));
+
+    const handleBack = () => {
+        if (backUrl) {
+            router.visit(backUrl);
+        } else if (typeof window !== 'undefined' && window.history.length > 1) {
+            window.history.back();
+        } else {
+            router.visit(auth?.user?.is_super_admin && !auth?.tenant ? '/admin/dashboard' : '/dashboard');
+        }
+    };
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
@@ -370,13 +397,34 @@ export default function AuthenticatedLayout({ title, children }: LayoutProps) {
                             <button
                                 onClick={() => setMobileOpen(true)}
                                 className="lg:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-900 transition"
+                                title="Open navigation menu"
                             >
                                 <Menu className="w-5 h-5" />
                             </button>
-                            <div className="flex items-center gap-2">
+
+                            {shouldShowBack && (
+                                <button
+                                    onClick={handleBack}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition shadow-sm active:scale-95 group"
+                                    title="Go back to previous page"
+                                >
+                                    <ArrowLeft className="w-4 h-4 text-indigo-400 group-hover:-translate-x-0.5 transition-transform" />
+                                    <span>Back</span>
+                                </button>
+                            )}
+
+                            {title && (
+                                <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-800/80">
+                                    <span className="text-xs font-bold text-slate-200 tracking-tight">
+                                        {title}
+                                    </span>
+                                </div>
+                            )}
+
+                            <div className="hidden md:flex items-center gap-2">
                                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                                 <span className="text-xs font-medium text-slate-300">
-                                    {auth?.tenant?.name ?? 'EMS Enterprise'}
+                                    {auth?.tenant?.name ?? (auth?.user?.is_super_admin ? 'Super Admin System' : 'EMS Enterprise')}
                                 </span>
                                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                     {auth?.tenant?.slug ?? 'system'}
