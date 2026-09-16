@@ -1,11 +1,11 @@
-﻿# AGENT.md — EMS Project Agent Guide
+# AGENT.md — EMS Project Agent Guide
 > **READ THIS FILE FIRST at the start of every session.**
 
 ## What Is This Project?
 EMS (Employee Management System) is a multi-tenant SaaS platform for Sri Lankan businesses.
 It manages employee attendance and payroll in compliance with Sri Lanka labor law.
 
-**Stack:** Laravel 11 + Inertia.js + React 18 + TypeScript + MySQL 8 + Redis
+**Stack:** Laravel 11 + Inertia.js + React 18 + TypeScript + MariaDB 10.11+ / MySQL 8.0+ + Redis (PHP 8.4+)
 **Pattern:** Repository + Service layer, strict types, tenant-scoped Global Scope
 
 ---
@@ -65,6 +65,7 @@ Before writing a single line of code, read these files **in order**:
 | Banks | BoC, Commercial Bank, Sampath, HNB, People's Bank, NSB |
 | Company | One company per tenant + multiple branches |
 | Tenancy | Single DB + tenant_id Global Scope strategy |
+| Database & Runtime | MariaDB 10.11+ (target 10.11.19-cll-lve) / MySQL 8.0+, PHP 8.4+ (8.4.24) |
 
 ---
 

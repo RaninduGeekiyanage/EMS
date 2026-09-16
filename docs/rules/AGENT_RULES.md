@@ -1,4 +1,4 @@
-﻿# AGENT_RULES.md — Mandatory Rules for AI Agent
+# AGENT_RULES.md — Mandatory Rules for AI Agent
 
 > ⚠️ These rules are NON-NEGOTIABLE. Read this file at the start of every session.
 > Violating these rules produces insecure, broken, or unmaintainable code.
@@ -40,6 +40,7 @@
 7. **Every migration must have a `down()` method**
 8. **Always add indexes** on `(tenant_id, employee_id)` and `(tenant_id, date)` pairs
 9. Read `docs/rules/database-rules.md` before writing any migration
+10. **Target MariaDB 10.11+ & MySQL 8.0+, PHP 8.4+** — All migrations and models must strictly align with MariaDB 10.11.x LTS (`10.11.19-MariaDB-cll-lve` or later), MySQL 8.0+, and PHP 8.4+ (`8.4.24`), bounded string indexes, and explicit PHP nullability types.
 
 ---
 

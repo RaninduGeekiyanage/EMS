@@ -10,14 +10,14 @@
   - [x] File: tsconfig.json — TypeScript strict compiler options
 
 ## Phase 2: Multi-Tenant Architecture & Scoping
-- [ ] Tenant Database Migrations & Models
-  - [ ] File: database/migrations/2026_01_01_000001_create_tenants_table.php
-  - [ ] File: database/migrations/2026_01_01_000002_create_tenant_settings_table.php
-  - [ ] File: app/Models/Tenant.php — With ULID and configuration relations
-  - [ ] File: app/Models/TenantSetting.php
-  - [ ] File: app/Scopes/TenantScope.php — Global scope enforcing tenant_id filtering
-  - [ ] File: app/Traits/BelongsToTenant.php — Auto-assigning & scoping tenant_id
-  - [ ] File: app/Http/Middleware/ResolveTenant.php — Identify tenant from session/domain
+- [x] Tenant Database Migrations & Models
+  - [x] File: database/migrations/2026_01_01_000001_create_tenants_table.php
+  - [x] File: database/migrations/2026_01_01_000002_create_tenant_settings_table.php
+  - [x] File: app/Models/Tenant.php — With ULID and configuration relations
+  - [x] File: app/Models/TenantSetting.php
+  - [x] File: app/Scopes/TenantScope.php — Global scope enforcing tenant_id filtering
+  - [x] File: app/Traits/BelongsToTenant.php — Auto-assigning & scoping tenant_id
+  - [x] File: app/Http/Middleware/ResolveTenant.php — Identify tenant from session/domain
 
 ## Phase 3: Organization & Branch Hierarchy
 - [ ] Company, Branch & Department Structure
