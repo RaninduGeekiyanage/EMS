@@ -20,25 +20,26 @@
   - [x] File: app/Http/Middleware/ResolveTenant.php — Identify tenant from session/domain
 
 ## Phase 3: Organization & Branch Hierarchy
-- [ ] Company, Branch & Department Structure
-  - [ ] File: database/migrations/2026_01_01_000010_create_companies_table.php
-  - [ ] File: database/migrations/2026_01_01_000011_create_branches_table.php
-  - [ ] File: database/migrations/2026_01_01_000012_create_departments_table.php
-  - [ ] File: database/migrations/2026_01_01_000013_create_designations_table.php
-  - [ ] File: database/migrations/2026_01_01_000014_create_wages_board_categories_table.php
-  - [ ] File: app/Models/Company.php
-  - [ ] File: app/Models/Branch.php
-  - [ ] File: app/Models/Department.php — Recursive hierarchy (parent_id)
-  - [ ] File: app/Models/Designation.php
-  - [ ] File: app/Models/WagesBoardCategory.php
-  - [ ] File: app/Repositories/Contracts/CompanyRepositoryInterface.php
-  - [ ] File: app/Repositories/Eloquent/CompanyRepository.php
-  - [ ] File: app/Services/CompanyService.php
-  - [ ] File: app/Http/Controllers/CompanyController.php
-  - [ ] File: app/Http/Controllers/BranchController.php
-  - [ ] File: app/Http/Controllers/DepartmentController.php
-  - [ ] File: resources/js/Pages/Company/Profile.tsx
-  - [ ] File: resources/js/Pages/Departments/Index.tsx
+- [x] Company, Branch & Department Structure
+  - [x] File: database/migrations/2026_01_01_000010_create_companies_table.php
+  - [x] File: database/migrations/2026_01_01_000011_create_branches_table.php
+  - [x] File: database/migrations/2026_01_01_000012_create_departments_table.php
+  - [x] File: database/migrations/2026_01_01_000013_create_wages_board_categories_table.php
+  - [x] File: database/migrations/2026_01_01_000014_create_designations_table.php
+  - [x] File: app/Models/Company.php
+  - [x] File: app/Models/Branch.php
+  - [x] File: app/Models/Department.php — Recursive hierarchy (parent_id)
+  - [x] File: app/Models/Designation.php
+  - [x] File: app/Models/WagesBoardCategory.php
+  - [x] File: app/Repositories/Contracts/CompanyRepositoryInterface.php
+  - [x] File: app/Repositories/Eloquent/CompanyRepository.php
+  - [x] File: app/Services/CompanyService.php
+  - [x] File: app/Http/Controllers/CompanyController.php
+  - [x] File: app/Http/Controllers/BranchController.php
+  - [x] File: app/Http/Controllers/DepartmentController.php
+  - [x] File: resources/js/Pages/Company/Profile.tsx
+  - [x] File: resources/js/Pages/Departments/Index.tsx
+
 
 ## Phase 4: Employee Master & Payment Profiles
 - [ ] Employee Core Profiles & Records
