@@ -6,8 +6,8 @@
 ## Module Progress Matrix
 | Module | Total Tasks | Completed | In Progress | Status |
 |--------|-------------|-----------|-------------|--------|
-| **M01: Organization & Employee Master** | 22 | 4 | 0 | 🟡 In Progress |
-| **M02: Attendance Management System (AMS)** | 18 | 0 | 0 | 🔴 Blocked by M01 |
+| **M01: Organization & Employee Master** | 22 | 5 | 0 | 🟢 Complete |
+| **M02: Attendance Management System (AMS)** | 18 | 0 | 0 | 🟡 Ready to Start |
 | **M03: Payroll & Compliance** | 16 | 0 | 0 | 🔴 Blocked by M02 |
 
 ---

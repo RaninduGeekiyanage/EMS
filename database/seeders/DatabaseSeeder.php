@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -15,7 +16,9 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        User::updateOrCreate(
+        $this->call(RolesAndPermissionsSeeder::class);
+
+        $user = User::updateOrCreate(
             ['email' => 'ranindu.rag@gmail.com'],
             [
                 'name' => 'Ranindu',
@@ -23,5 +26,21 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]
         );
+
+        $tenant = Tenant::firstOrCreate(
+            ['slug' => 'ceylon-tea'],
+            [
+                'name' => 'Ceylon Tea Co.',
+                'is_active' => true,
+            ]
+        );
+
+        if (function_exists('setPermissionsTeamId')) {
+            setPermissionsTeamId($tenant->id);
+        }
+
+        if (! $user->hasRole('Super Admin')) {
+            $user->assignRole('Super Admin');
+        }
     }
 }

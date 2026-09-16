@@ -29,24 +29,44 @@ final class EmployeeController extends Controller
      */
     public function index(Request $request): Response
     {
+        if ($request->user() !== null) {
+            $this->authorize('viewAny', \App\Models\Employee::class);
+        }
+
         $filters = $request->only(['search', 'department_id', 'branch_id', 'employment_status']);
         $employees = $this->employeeService->paginateEmployees(15, $filters);
         $departments = $this->companyService->listDepartments();
         $branches = Branch::orderBy('name')->get();
+
+        $canViewSensitive = $request->user() === null || $request->user()->can('employee.view-sensitive');
+
+        if (! $canViewSensitive) {
+            $employees->getCollection()->transform(function ($emp) {
+                if (! empty($emp->nic)) {
+                    $emp->nic = str_repeat('*', max(0, strlen((string) $emp->nic) - 4)) . substr((string) $emp->nic, -4);
+                }
+                return $emp;
+            });
+        }
 
         return Inertia::render('Employees/Index', [
             'employees' => $employees,
             'departments' => $departments,
             'branches' => $branches,
             'filters' => $filters,
+            'canViewSensitive' => $canViewSensitive,
         ]);
     }
 
     /**
      * Show the form for creating a new employee.
      */
-    public function create(): Response
+    public function create(Request $request): Response
     {
+        if ($request->user() !== null) {
+            $this->authorize('create', \App\Models\Employee::class);
+        }
+
         return Inertia::render('Employees/Create', [
             'nextEmpNo' => $this->employeeService->getNextEmpNo(),
             'departments' => $this->companyService->listDepartments(),
@@ -68,6 +88,10 @@ final class EmployeeController extends Controller
      */
     public function store(StoreEmployeeRequest $request): RedirectResponse
     {
+        if ($request->user() !== null) {
+            $this->authorize('create', \App\Models\Employee::class);
+        }
+
         $this->employeeService->createEmployee(
             $request->employeeData(),
             $request->paymentData(),
@@ -81,12 +105,16 @@ final class EmployeeController extends Controller
     /**
      * Show the form for editing the specified employee.
      */
-    public function edit(string $employee): Response
+    public function edit(Request $request, string $employee): Response
     {
         $emp = $this->employeeService->getEmployee($employee);
 
         if ($emp === null) {
             abort(404, 'Employee not found.');
+        }
+
+        if ($request->user() !== null) {
+            $this->authorize('update', $emp);
         }
 
         return Inertia::render('Employees/Edit', [
@@ -110,6 +138,16 @@ final class EmployeeController extends Controller
      */
     public function update(UpdateEmployeeRequest $request, string $employee): RedirectResponse
     {
+        $emp = $this->employeeService->getEmployee($employee);
+
+        if ($emp === null) {
+            abort(404, 'Employee not found.');
+        }
+
+        if ($request->user() !== null) {
+            $this->authorize('update', $emp);
+        }
+
         $this->employeeService->updateEmployee(
             $employee,
             $request->employeeData(),
@@ -124,8 +162,18 @@ final class EmployeeController extends Controller
     /**
      * Remove the specified employee (soft delete).
      */
-    public function destroy(string $employee): RedirectResponse
+    public function destroy(Request $request, string $employee): RedirectResponse
     {
+        $emp = $this->employeeService->getEmployee($employee);
+
+        if ($emp === null) {
+            abort(404, 'Employee not found.');
+        }
+
+        if ($request->user() !== null) {
+            $this->authorize('delete', $emp);
+        }
+
         $this->employeeService->deleteEmployee($employee);
 
         return redirect()->route('employees.index')->with('success', 'Employee record deactivated.');

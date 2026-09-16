@@ -28,6 +28,10 @@ final class ResolveTenant
             session(['tenant_id' => $tenant->id, 'tenant_slug' => $tenant->slug]);
             app()->instance('current_tenant', $tenant);
             app()->instance('current_tenant_id', $tenant->id);
+
+            if (function_exists('setPermissionsTeamId')) {
+                setPermissionsTeamId($tenant->id);
+            }
         } elseif ($mode !== 'optional') {
             abort(404, 'Tenant could not be resolved.');
         }

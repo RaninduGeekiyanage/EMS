@@ -66,8 +66,8 @@
 
 
 ## Phase 5: RBAC & Permissions
-- [ ] Spatie Teams Integration
-  - [ ] File: database/seeders/RolesAndPermissionsSeeder.php
-  - [ ] File: app/Policies/EmployeePolicy.php
-  - [ ] File: tests/Feature/M01/TenantIsolationTest.php
-  - [ ] File: tests/Feature/M01/EmployeeCrudTest.php
+- [x] Spatie Teams Integration
+  - [x] File: database/seeders/RolesAndPermissionsSeeder.php
+  - [x] File: app/Policies/EmployeePolicy.php
+  - [x] File: tests/Feature/M01/TenantIsolationTest.php
+  - [x] File: tests/Feature/M01/EmployeeCrudTest.php
