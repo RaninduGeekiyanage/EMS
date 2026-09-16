@@ -45,6 +45,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        \Illuminate\Support\Facades\Gate::before(function ($user, string $ability): ?bool {
+            return $user->isSuperAdmin() ? true : null;
+        });
     }
 }

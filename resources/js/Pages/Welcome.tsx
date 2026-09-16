@@ -28,11 +28,14 @@ export default function Welcome({ title = 'EMS — Employee Management System' }
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 px-3 py-1.5 rounded-full font-medium">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Laravel 11 + Inertia React Ready
-                        </div>
+                    <div className="flex items-center gap-3">
+                        <a
+                            href="/login"
+                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition"
+                        >
+                            <span>Sign In</span>
+                            <span aria-hidden="true">&rarr;</span>
+                        </a>
                     </div>
                 </div>
             </header>

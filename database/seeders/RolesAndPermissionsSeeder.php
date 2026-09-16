@@ -12,9 +12,13 @@ use Spatie\Permission\PermissionRegistrar;
 final class RolesAndPermissionsSeeder extends Seeder
 {
     /**
-     * Permissions defined in M01 Master Module.
+     * Permissions defined in EMS platform.
      */
     public const PERMISSIONS = [
+        // Platform & User Management
+        'tenant.manage',
+        'user.manage',
+
         // Company
         'company.view',
         'company.update',
@@ -61,6 +65,12 @@ final class RolesAndPermissionsSeeder extends Seeder
         'leave.apply',
         'leave.approve',
         'leave.manage-types',
+
+        // M03 Payroll
+        'payroll.view',
+        'payroll.run',
+        'payroll.approve',
+        'payroll.export',
     ];
 
     /**
@@ -79,7 +89,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             ]);
         }
 
-        // 2. Create Global Roles (team_id = null)
+        // 2. Super Admin (Global Platform Owner, team_id = null)
         $superAdmin = Role::firstOrCreate([
             'name' => 'Super Admin',
             'guard_name' => 'web',
@@ -87,19 +97,29 @@ final class RolesAndPermissionsSeeder extends Seeder
         ]);
         $superAdmin->syncPermissions(Permission::all());
 
+        // 3. Company Owner (Tenant Root - Full tenant authority)
+        $companyOwner = Role::firstOrCreate([
+            'name' => 'Company Owner',
+            'guard_name' => 'web',
+            'team_id' => null,
+        ]);
+        $companyOwner->syncPermissions(self::PERMISSIONS);
+
+        // 4. Company Admin (Operational Administrator)
+        $companyAdmin = Role::firstOrCreate([
+            'name' => 'Company Admin',
+            'guard_name' => 'web',
+            'team_id' => null,
+        ]);
+        $companyAdmin->syncPermissions(array_filter(self::PERMISSIONS, fn ($p) => $p !== 'tenant.manage'));
+
+        // 5. HR Manager (Workforce, Attendance, Payroll)
         $hrManager = Role::firstOrCreate([
             'name' => 'HR Manager',
             'guard_name' => 'web',
             'team_id' => null,
         ]);
-        $hrManager->syncPermissions(self::PERMISSIONS);
-
-        $hrExecutive = Role::firstOrCreate([
-            'name' => 'HR Executive',
-            'guard_name' => 'web',
-            'team_id' => null,
-        ]);
-        $hrExecutive->syncPermissions([
+        $hrManager->syncPermissions([
             'company.view',
             'branch.view',
             'department.view',
@@ -107,16 +127,43 @@ final class RolesAndPermissionsSeeder extends Seeder
             'employee.view',
             'employee.create',
             'employee.update',
+            'employee.delete',
+            'employee.view-sensitive',
             'shift.view',
             'shift.create',
             'shift.update',
             'work-calendar.view',
-            'attendance.view',
+            'work-calendar.manage',
             'attendance.import',
+            'attendance.view',
+            'attendance.correct',
+            'leave.apply',
+            'leave.approve',
+            'leave.manage-types',
+            'payroll.view',
+            'payroll.run',
+            'payroll.approve',
+            'payroll.export',
+        ]);
+
+        // 6. Supervisor / Line Manager
+        $supervisor = Role::firstOrCreate([
+            'name' => 'Supervisor',
+            'guard_name' => 'web',
+            'team_id' => null,
+        ]);
+        $supervisor->syncPermissions([
+            'company.view',
+            'department.view',
+            'employee.view',
+            'shift.view',
+            'work-calendar.view',
+            'attendance.view',
             'leave.apply',
             'leave.approve',
         ]);
 
+        // 7. Staff (Self-Service)
         $staff = Role::firstOrCreate([
             'name' => 'Staff',
             'guard_name' => 'web',
@@ -125,6 +172,8 @@ final class RolesAndPermissionsSeeder extends Seeder
         $staff->syncPermissions([
             'company.view',
             'employee.view',
+            'shift.view',
+            'work-calendar.view',
             'leave.apply',
         ]);
     }

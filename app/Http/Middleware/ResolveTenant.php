@@ -33,6 +33,11 @@ final class ResolveTenant
                 setPermissionsTeamId($tenant->id);
             }
         } elseif ($mode !== 'optional') {
+            $user = $request->user();
+            if ($user !== null && $user->isSuperAdmin()) {
+                return redirect('/admin/dashboard');
+            }
+
             abort(404, 'Tenant could not be resolved.');
         }
 
@@ -40,11 +45,29 @@ final class ResolveTenant
     }
 
     /**
-     * Attempt to resolve tenant from headers, session, or host.
+     * Attempt to resolve tenant from impersonation, user binding, headers, session, or host.
      */
     private function resolveTenant(Request $request): ?Tenant
     {
-        // 1. Check custom headers or query param
+        // 1. Check Super Admin Impersonation Session
+        if ($request->hasSession() && session()->has('impersonated_tenant_id')) {
+            $impersonatedId = session('impersonated_tenant_id');
+            $tenant = Tenant::find($impersonatedId);
+            if ($tenant !== null) {
+                return $tenant;
+            }
+        }
+
+        // 2. Check Authenticated User's Bound Tenant
+        $user = $request->user();
+        if ($user !== null && $user->tenant_id !== null) {
+            $tenant = $user->tenant;
+            if ($tenant !== null) {
+                return $tenant;
+            }
+        }
+
+        // 3. Check custom headers or query param
         $tenantQuery = $request->query('tenant') ?? $request->query('tenant_id');
         if (! empty($tenantQuery)) {
             $tenant = Tenant::where('slug', $tenantQuery)->orWhere('id', $tenantQuery)->first();
@@ -63,7 +86,7 @@ final class ResolveTenant
             return Tenant::where('slug', $tenantHeaderSlug)->first();
         }
 
-        // 2. Check session
+        // 4. Check session
         if ($request->hasSession()) {
             $sessionTenantId = session('tenant_id');
             if (! empty($sessionTenantId)) {
@@ -82,7 +105,7 @@ final class ResolveTenant
             }
         }
 
-        // 3. Check subdomain from host
+        // 5. Check subdomain from host
         $host = $request->getHost();
         $parts = explode('.', $host);
 

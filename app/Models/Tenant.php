@@ -30,6 +30,8 @@ final class Tenant extends Model
         'name',
         'slug',
         'is_active',
+        'is_ams_enabled',
+        'is_payroll_enabled',
     ];
 
     /**
@@ -41,7 +43,29 @@ final class Tenant extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_ams_enabled' => 'boolean',
+            'is_payroll_enabled' => 'boolean',
         ];
+    }
+
+    /**
+     * Get all users belonging to this tenant.
+     *
+     * @return HasMany<User, $this>
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(User::class, 'tenant_id');
+    }
+
+    /**
+     * Get the Company Owner user for this tenant.
+     */
+    public function owner(): ?User
+    {
+        return $this->users()->whereHas('roles', function ($query): void {
+            $query->where('name', 'Company Owner');
+        })->first();
     }
 
     /**
