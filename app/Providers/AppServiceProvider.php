@@ -5,9 +5,11 @@ namespace App\Providers;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Repositories\Contracts\CompanyRepositoryInterface;
 use App\Repositories\Contracts\DepartmentRepositoryInterface;
+use App\Repositories\Contracts\EmployeeRepositoryInterface;
 use App\Repositories\Eloquent\BranchRepository;
 use App\Repositories\Eloquent\CompanyRepository;
 use App\Repositories\Eloquent\DepartmentRepository;
+use App\Repositories\Eloquent\EmployeeRepository;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -30,6 +32,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             DepartmentRepositoryInterface::class,
             DepartmentRepository::class
+        );
+
+        $this->app->bind(
+            EmployeeRepositoryInterface::class,
+            EmployeeRepository::class
         );
     }
 

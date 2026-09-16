@@ -59,7 +59,6 @@ final class ResolveTenant
             return Tenant::where('slug', $tenantHeaderSlug)->first();
         }
 
-
         // 2. Check session
         if ($request->hasSession()) {
             $sessionTenantId = session('tenant_id');

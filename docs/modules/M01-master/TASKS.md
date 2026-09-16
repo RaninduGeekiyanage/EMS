@@ -42,27 +42,28 @@
 
 
 ## Phase 4: Employee Master & Payment Profiles
-- [ ] Employee Core Profiles & Records
-  - [ ] File: database/migrations/2026_01_01_000020_create_employees_table.php
-  - [ ] File: database/migrations/2026_01_01_000021_create_employee_payment_info_table.php
-  - [ ] File: database/migrations/2026_01_01_000022_create_employee_bank_info_table.php
-  - [ ] File: database/migrations/2026_01_01_000023_create_employee_epf_info_table.php
-  - [ ] File: app/Models/Employee.php — ULID, soft-deletes, encrypted NIC
-  - [ ] File: app/Models/EmployeePaymentInfo.php — Supports Monthly, Daily, Hourly
-  - [ ] File: app/Models/EmployeeBankInfo.php — Encrypted bank account details
-  - [ ] File: app/Models/EmployeeEpfInfo.php — Toggleable EPF membership
-  - [ ] File: app/Enums/PaymentMode.php — Backed enum: monthly, daily, hourly
-  - [ ] File: app/Enums/EmploymentType.php
-  - [ ] File: app/Repositories/Contracts/EmployeeRepositoryInterface.php
-  - [ ] File: app/Repositories/Eloquent/EmployeeRepository.php
-  - [ ] File: app/Services/EmployeeService.php
-  - [ ] File: app/Http/Controllers/EmployeeController.php
-  - [ ] File: app/Http/Requests/Employee/StoreEmployeeRequest.php
-  - [ ] File: app/Http/Requests/Employee/UpdateEmployeeRequest.php
-  - [ ] File: resources/js/Pages/Employees/Index.tsx
-  - [ ] File: resources/js/Pages/Employees/Create.tsx
-  - [ ] File: resources/js/Pages/Employees/Edit.tsx
-  - [ ] File: resources/js/Types/employee.ts
+- [x] Employee Core Profiles & Records
+  - [x] File: database/migrations/2026_01_01_000020_create_employees_table.php
+  - [x] File: database/migrations/2026_01_01_000021_create_employee_payment_info_table.php
+  - [x] File: database/migrations/2026_01_01_000022_create_employee_bank_info_table.php
+  - [x] File: database/migrations/2026_01_01_000023_create_employee_epf_info_table.php
+  - [x] File: app/Models/Employee.php — ULID, soft-deletes, encrypted NIC
+  - [x] File: app/Models/EmployeePaymentInfo.php — Supports Monthly, Daily, Hourly
+  - [x] File: app/Models/EmployeeBankInfo.php — Encrypted bank account details
+  - [x] File: app/Models/EmployeeEpfInfo.php — Toggleable EPF membership
+  - [x] File: app/Enums/PaymentMode.php — Backed enum: monthly, daily, hourly
+  - [x] File: app/Enums/EmploymentType.php
+  - [x] File: app/Repositories/Contracts/EmployeeRepositoryInterface.php
+  - [x] File: app/Repositories/Eloquent/EmployeeRepository.php
+  - [x] File: app/Services/EmployeeService.php
+  - [x] File: app/Http/Controllers/EmployeeController.php
+  - [x] File: app/Http/Requests/Employee/StoreEmployeeRequest.php
+  - [x] File: app/Http/Requests/Employee/UpdateEmployeeRequest.php
+  - [x] File: resources/js/Pages/Employees/Index.tsx
+  - [x] File: resources/js/Pages/Employees/Create.tsx
+  - [x] File: resources/js/Pages/Employees/Edit.tsx
+  - [x] File: resources/js/Types/employee.ts
+
 
 ## Phase 5: RBAC & Permissions
 - [ ] Spatie Teams Integration
