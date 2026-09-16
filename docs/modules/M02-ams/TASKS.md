@@ -37,12 +37,13 @@
   - [x] File: tests/Feature/M02/AttendanceProcessingTest.php
 
 ## Phase 4: Leave Management
-- [ ] Leave Entitlements & Requests
-  - [ ] File: database/migrations/2026_01_01_000050_create_leave_types_table.php
-  - [ ] File: database/migrations/2026_01_01_000051_create_leave_entitlements_table.php
-  - [ ] File: database/migrations/2026_01_01_000052_create_leave_requests_table.php
-  - [ ] File: app/Models/LeaveType.php
-  - [ ] File: app/Models/LeaveRequest.php
-  - [ ] File: app/Services/LeaveService.php
-  - [ ] File: app/Http/Controllers/LeaveRequestController.php
-  - [ ] File: resources/js/Pages/Leave/Requests.tsx
+- [x] Leave Entitlements & Requests
+  - [x] File: database/migrations/2026_01_01_000050_create_leave_types_table.php
+  - [x] File: database/migrations/2026_01_01_000051_create_leave_entitlements_table.php
+  - [x] File: database/migrations/2026_01_01_000052_create_leave_requests_table.php
+  - [x] File: app/Models/LeaveType.php
+  - [x] File: app/Models/LeaveRequest.php
+  - [x] File: app/Services/LeaveService.php
+  - [x] File: app/Http/Controllers/LeaveRequestController.php
+  - [x] File: resources/js/Pages/Leave/Requests.tsx
+  - [x] File: tests/Feature/M02/LeaveManagementTest.php

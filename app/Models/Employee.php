@@ -150,5 +150,25 @@ final class Employee extends Model
     {
         return $this->hasMany(AttendanceLog::class, 'employee_id');
     }
+
+    /**
+     * Get the leave entitlements for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<LeaveEntitlement, $this>
+     */
+    public function leaveEntitlements(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(LeaveEntitlement::class, 'employee_id');
+    }
+
+    /**
+     * Get the leave requests for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<LeaveRequest, $this>
+     */
+    public function leaveRequests(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(LeaveRequest::class, 'employee_id');
+    }
 }
 

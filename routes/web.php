@@ -8,6 +8,7 @@ use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\WorkCalendarController;
 use Illuminate\Support\Facades\Route;
@@ -70,5 +71,15 @@ Route::middleware(['tenant'])->group(function (): void {
     Route::post('/attendance/daily/process', [AttendanceDailyController::class, 'process'])->name('attendance.daily.process');
     Route::put('/attendance/daily/{attendanceDaily}', [AttendanceDailyController::class, 'update'])->name('attendance.daily.update');
     Route::post('/attendance/rules', [AttendanceDailyController::class, 'saveRule'])->name('attendance.rules.store');
+
+    // M02 Leave Management & Statutory Entitlements
+    Route::get('/leave/requests', [LeaveRequestController::class, 'index'])->name('leave.requests.index');
+    Route::post('/leave/requests', [LeaveRequestController::class, 'store'])->name('leave.requests.store');
+    Route::post('/leave/requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])->name('leave.requests.approve');
+    Route::post('/leave/requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])->name('leave.requests.reject');
+    Route::delete('/leave/requests/{leaveRequest}', [LeaveRequestController::class, 'cancel'])->name('leave.requests.cancel');
+    Route::post('/leave/types', [LeaveRequestController::class, 'storeType'])->name('leave.types.store');
+    Route::post('/leave/types/seed-statutory', [LeaveRequestController::class, 'seedStatutoryTypes'])->name('leave.types.seed-statutory');
+    Route::post('/leave/entitlements/allocate', [LeaveRequestController::class, 'allocateEntitlements'])->name('leave.entitlements.allocate');
 });
 

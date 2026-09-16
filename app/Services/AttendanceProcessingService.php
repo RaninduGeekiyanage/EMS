@@ -8,6 +8,7 @@ use App\Models\AttendanceDaily;
 use App\Models\AttendanceLog;
 use App\Models\AttendanceRule;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Models\PublicHoliday;
 use App\Models\Shift;
 use App\Models\User;
@@ -110,22 +111,23 @@ final class AttendanceProcessingService
                 $punches
             );
 
-            $record = AttendanceDaily::updateOrCreate(
-                [
-                    'tenant_id' => $tenantId,
-                    'employee_id' => $employee->id,
+            $recordData = array_merge($calculatedData, [
+                'tenant_id' => $tenantId,
+                'employee_id' => $employee->id,
+                'shift_id' => $shift?->id,
+                'is_manual' => false,
+                'manual_reason' => null,
+                'manual_edited_by' => null,
+            ]);
+
+            if ($existing) {
+                $existing->update($recordData);
+                $record = $existing;
+            } else {
+                $record = AttendanceDaily::create(array_merge($recordData, [
                     'attendance_date' => $dateString,
-                ],
-                array_merge($calculatedData, [
-                    'tenant_id' => $tenantId,
-                    'employee_id' => $employee->id,
-                    'attendance_date' => $dateString,
-                    'shift_id' => $shift?->id,
-                    'is_manual' => false,
-                    'manual_reason' => null,
-                    'manual_edited_by' => null,
-                ])
-            );
+                ]));
+            }
 
             $savedRecords->push($record);
             $processedCount++;
@@ -197,8 +199,42 @@ final class AttendanceProcessingService
         $isSunday = $date->isSunday();
         $isHoliday = $holiday !== null;
 
+        // Check for active approved leave on this date
+        $approvedLeave = LeaveRequest::where('tenant_id', $employee->tenant_id)
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $date->toDateString())
+            ->whereDate('end_date', '>=', $date->toDateString())
+            ->with('leaveType')
+            ->first();
+
         // Case A: No punch logs recorded
         if ($punches->isEmpty()) {
+            if ($approvedLeave !== null) {
+                $status = $approvedLeave->is_half_day ? 'half_day' : 'leave';
+
+                return [
+                    'check_in' => null,
+                    'check_out' => null,
+                    'worked_hours' => $approvedLeave->is_half_day ? 4.00 : 0.00,
+                    'regular_hours' => $approvedLeave->is_half_day ? 4.00 : 0.00,
+                    'late_minutes' => 0,
+                    'early_departure_minutes' => 0,
+                    'ot_hours' => 0.00,
+                    'double_ot_hours' => 0.00,
+                    'status' => $status,
+                    'calculation_breakdown' => [
+                        'rule' => $rule->rule_name,
+                        'leave_type' => $approvedLeave->leaveType->name,
+                        'leave_type_code' => $approvedLeave->leaveType->code,
+                        'leave_request_id' => $approvedLeave->id,
+                        'is_half_day' => $approvedLeave->is_half_day,
+                        'half_day_type' => $approvedLeave->half_day_type,
+                        'notes' => "Approved Leave: {$approvedLeave->leaveType->name}",
+                    ],
+                ];
+            }
+
             $status = $isHoliday ? 'holiday' : ($isSunday ? 'rest_day' : 'absent');
 
             return [

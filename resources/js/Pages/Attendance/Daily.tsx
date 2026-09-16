@@ -27,6 +27,7 @@ import {
     Moon,
     Landmark,
     Sun,
+    HeartHandshake,
 } from 'lucide-react';
 
 interface Employee {
@@ -382,6 +383,13 @@ export default function Daily({
                         >
                             <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
                             Biometric Ingestion
+                        </a>
+                        <a
+                            href="/leave/requests"
+                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
+                        >
+                            <HeartHandshake className="w-3.5 h-3.5 text-emerald-400" />
+                            Leave Portal
                         </a>
                         <button
                             type="button"

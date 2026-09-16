@@ -56,6 +56,11 @@ final class RolesAndPermissionsSeeder extends Seeder
         'attendance.import',
         'attendance.view',
         'attendance.correct',
+
+        // M02 Leave Management
+        'leave.apply',
+        'leave.approve',
+        'leave.manage-types',
     ];
 
     /**
@@ -108,6 +113,8 @@ final class RolesAndPermissionsSeeder extends Seeder
             'work-calendar.view',
             'attendance.view',
             'attendance.import',
+            'leave.apply',
+            'leave.approve',
         ]);
 
         $staff = Role::firstOrCreate([
@@ -118,6 +125,7 @@ final class RolesAndPermissionsSeeder extends Seeder
         $staff->syncPermissions([
             'company.view',
             'employee.view',
+            'leave.apply',
         ]);
     }
 }
