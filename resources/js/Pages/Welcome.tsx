@@ -55,27 +55,37 @@ export default function Welcome({ title = 'EMS — Employee Management System' }
 
                 {/* Feature Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-16 w-full text-left">
-                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-indigo-500/40 transition duration-300">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-4 border border-indigo-500/20">
+                    <a
+                        href="/company/profile?tenant=ceylon-tea"
+                        className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-indigo-500/60 hover:bg-slate-900/90 transition duration-300 group block"
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-4 border border-indigo-500/20 group-hover:scale-105 transition">
                             <Users className="w-5 h-5" />
                         </div>
-                        <h3 className="font-semibold text-slate-200 mb-1">M01: Master Module</h3>
+                        <h3 className="font-semibold text-slate-200 mb-1 group-hover:text-indigo-300 transition">
+                            M01: Master Module →
+                        </h3>
                         <p className="text-xs text-slate-400 leading-relaxed">
                             Multi-tenant organization tree, branches, departments, designations & employee profiles.
                         </p>
-                    </div>
+                    </a>
 
-                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-sky-500/40 transition duration-300">
-                        <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center mb-4 border border-sky-500/20">
+                    <a
+                        href="/shifts?tenant=ceylon-tea"
+                        className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-sky-500/60 hover:bg-slate-900/90 transition duration-300 group block"
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center mb-4 border border-sky-500/20 group-hover:scale-105 transition">
                             <Clock className="w-5 h-5" />
                         </div>
-                        <h3 className="font-semibold text-slate-200 mb-1">M02: AMS Attendance</h3>
+                        <h3 className="font-semibold text-slate-200 mb-1 group-hover:text-sky-300 transition">
+                            M02: AMS Attendance →
+                        </h3>
                         <p className="text-xs text-slate-400 leading-relaxed">
                             Biometric machine integration, shift rosters, overtime rules & leave management.
                         </p>
-                    </div>
+                    </a>
 
-                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-emerald-500/40 transition duration-300">
+                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 opacity-70">
                         <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-4 border border-emerald-500/20">
                             <Landmark className="w-5 h-5" />
                         </div>
@@ -85,7 +95,7 @@ export default function Welcome({ title = 'EMS — Employee Management System' }
                         </p>
                     </div>
 
-                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-purple-500/40 transition duration-300">
+                    <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 opacity-70">
                         <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center mb-4 border border-purple-500/20">
                             <ShieldCheck className="w-5 h-5" />
                         </div>

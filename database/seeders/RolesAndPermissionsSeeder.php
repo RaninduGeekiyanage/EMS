@@ -43,6 +43,14 @@ final class RolesAndPermissionsSeeder extends Seeder
         'employee.update',
         'employee.delete',
         'employee.view-sensitive',
+
+        // M02 Shifts & Work Calendars
+        'shift.view',
+        'shift.create',
+        'shift.update',
+        'shift.delete',
+        'work-calendar.view',
+        'work-calendar.manage',
     ];
 
     /**
@@ -89,6 +97,10 @@ final class RolesAndPermissionsSeeder extends Seeder
             'employee.view',
             'employee.create',
             'employee.update',
+            'shift.view',
+            'shift.create',
+            'shift.update',
+            'work-calendar.view',
         ]);
 
         $staff = Role::firstOrCreate([

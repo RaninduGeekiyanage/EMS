@@ -118,4 +118,27 @@ final class Employee extends Model
     {
         return $this->hasOne(EmployeeEpfInfo::class, 'employee_id');
     }
+
+    /**
+     * Get the shift assignments for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<ShiftAssignment, $this>
+     */
+    public function shiftAssignments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ShiftAssignment::class, 'employee_id');
+    }
+
+    /**
+     * Get the shifts assigned to this employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<Shift, $this>
+     */
+    public function shifts(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Shift::class, 'shift_assignments', 'employee_id', 'shift_id')
+            ->withPivot(['id', 'effective_from', 'effective_to'])
+            ->withTimestamps();
+    }
 }
+

@@ -42,5 +42,14 @@ class DatabaseSeeder extends Seeder
         if (! $user->hasRole('Super Admin')) {
             $user->assignRole('Super Admin');
         }
+
+        // Populate Shift Presets & Sri Lankan Holidays for Tenant
+        session(['tenant_id' => $tenant->id]);
+        app()->instance('current_tenant', $tenant);
+        app()->instance('current_tenant_id', $tenant->id);
+
+        $shiftService = app(\App\Services\ShiftService::class);
+        $shiftService->seedStandardTemplates();
+        $shiftService->seedSriLankanHolidays((int) now()->year);
     }
 }

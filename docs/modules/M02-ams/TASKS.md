@@ -1,16 +1,16 @@
-﻿# M02 — AMS Detailed Tasks
+# M02 — AMS Detailed Tasks
 
 ## Phase 1: Shifts & Work Calendars
-- [ ] Shift Models & Management
-  - [ ] File: database/migrations/2026_01_01_000030_create_shifts_table.php
-  - [ ] File: database/migrations/2026_01_01_000031_create_shift_assignments_table.php
-  - [ ] File: database/migrations/2026_01_01_000032_create_public_holidays_table.php
-  - [ ] File: app/Models/Shift.php
-  - [ ] File: app/Models/PublicHoliday.php
-  - [ ] File: app/Services/ShiftService.php
-  - [ ] File: app/Http/Controllers/ShiftController.php
-  - [ ] File: resources/js/Pages/Shifts/Index.tsx
-  - [ ] File: resources/js/Pages/WorkCalendar/Index.tsx
+- [x] Shift Models & Management
+  - [x] File: database/migrations/2026_01_01_000031_create_shifts_table.php
+  - [x] File: database/migrations/2026_01_01_000032_create_shift_assignments_table.php
+  - [x] File: database/migrations/2026_01_01_000033_create_public_holidays_table.php
+  - [x] File: app/Models/Shift.php
+  - [x] File: app/Models/PublicHoliday.php
+  - [x] File: app/Services/ShiftService.php
+  - [x] File: app/Http/Controllers/ShiftController.php
+  - [x] File: resources/js/Pages/Shifts/Index.tsx
+  - [x] File: resources/js/Pages/WorkCalendar/Index.tsx
 
 ## Phase 2: Biometric Ingestion & Adapters
 - [ ] Import Engine

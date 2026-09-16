@@ -6,6 +6,8 @@ use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\WorkCalendarController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -36,4 +38,21 @@ Route::middleware(['tenant'])->group(function (): void {
     Route::get('/employees/{employee}/edit', [EmployeeController::class, 'edit'])->name('employees.edit');
     Route::put('/employees/{employee}', [EmployeeController::class, 'update'])->name('employees.update');
     Route::delete('/employees/{employee}', [EmployeeController::class, 'destroy'])->name('employees.destroy');
+
+    // M02 Shifts Management
+    Route::get('/shifts', [ShiftController::class, 'index'])->name('shifts.index');
+    Route::post('/shifts', [ShiftController::class, 'store'])->name('shifts.store');
+    Route::put('/shifts/{shift}', [ShiftController::class, 'update'])->name('shifts.update');
+    Route::delete('/shifts/{shift}', [ShiftController::class, 'destroy'])->name('shifts.destroy');
+    Route::post('/shifts/seed-presets', [ShiftController::class, 'seedPresets'])->name('shifts.seed-presets');
+    Route::post('/shifts/assign', [ShiftController::class, 'assign'])->name('shifts.assign');
+    Route::delete('/shifts/assignments/{assignment}', [ShiftController::class, 'removeAssignment'])->name('shifts.assignments.destroy');
+
+    // M02 Work Calendar & Public Holidays
+    Route::get('/work-calendar', [WorkCalendarController::class, 'index'])->name('work-calendar.index');
+    Route::post('/work-calendar/holidays', [WorkCalendarController::class, 'storeHoliday'])->name('work-calendar.holidays.store');
+    Route::put('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'updateHoliday'])->name('work-calendar.holidays.update');
+    Route::delete('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'destroyHoliday'])->name('work-calendar.holidays.destroy');
+    Route::post('/work-calendar/seed-holidays', [WorkCalendarController::class, 'seedHolidays'])->name('work-calendar.holidays.seed');
 });
+
