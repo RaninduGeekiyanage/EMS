@@ -22,7 +22,7 @@ final class AuthenticatedSessionController extends Controller
     {
         if (Auth::check()) {
             $user = Auth::user();
-            if ($user !== null && $user->isSuperAdmin()) {
+            if ($user !== null && ($user->isSuperAdmin() || $user->tenant_id === null)) {
                 return redirect()->intended('/admin/dashboard');
             }
 
@@ -45,7 +45,7 @@ final class AuthenticatedSessionController extends Controller
 
         $user = $request->user();
 
-        if ($user !== null && $user->isSuperAdmin()) {
+        if ($user !== null && ($user->isSuperAdmin() || $user->tenant_id === null)) {
             $request->session()->forget(['tenant_id', 'tenant_slug', 'impersonated_tenant_id']);
 
             return redirect()->intended('/admin/dashboard');

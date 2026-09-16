@@ -47,12 +47,12 @@ final class DashboardService
 
         // M02 AMS Metrics (if enabled)
         if ($tenant === null || $tenant->is_ams_enabled) {
-            $dailyRecords = AttendanceDaily::where('work_date', $today)->get();
+            $dailyRecords = AttendanceDaily::where('attendance_date', $today)->get();
 
-            $presentCount = $dailyRecords->where('attendance_status', 'present')->count();
-            $lateCount = $dailyRecords->where('attendance_status', 'late')->count();
-            $absentCount = $dailyRecords->where('attendance_status', 'absent')->count();
-            $onLeaveCount = $dailyRecords->where('attendance_status', 'leave')->count();
+            $presentCount = $dailyRecords->where('status', 'present')->count();
+            $lateCount = $dailyRecords->where('late_minutes', '>', 0)->count();
+            $absentCount = $dailyRecords->where('status', 'absent')->count();
+            $onLeaveCount = $dailyRecords->where('status', 'leave')->count();
 
             $pendingLeaves = LeaveRequest::with(['employee:id,full_name,emp_no', 'leaveType:id,name'])
                 ->where('status', 'pending')
@@ -66,13 +66,19 @@ final class DashboardService
                     'leave_type' => $l->leaveType?->name ?? 'General',
                     'start_date' => $l->start_date?->format('Y-m-d'),
                     'end_date' => $l->end_date?->format('Y-m-d'),
-                    'total_days' => $l->total_days,
+                    'total_days' => $l->days_count,
                 ]);
 
             $upcomingHolidays = PublicHoliday::where('holiday_date', '>=', $today)
                 ->orderBy('holiday_date')
                 ->take(3)
-                ->get(['id', 'name', 'holiday_date', 'holiday_type']);
+                ->get(['id', 'name', 'holiday_date', 'type'])
+                ->map(fn (PublicHoliday $h) => [
+                    'id' => $h->id,
+                    'name' => $h->name,
+                    'holiday_date' => $h->holiday_date?->format('Y-m-d'),
+                    'holiday_type' => $h->type,
+                ]);
 
             $data['ams'] = [
                 'present_count' => $presentCount,
