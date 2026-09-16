@@ -18,6 +18,7 @@ import {
     Menu,
     X,
     User as UserIcon,
+    UserCheck,
     ArrowLeftRight,
     CheckCircle2,
     AlertCircle,
@@ -182,6 +183,10 @@ export default function AuthenticatedLayout({ title, children }: LayoutProps) {
                                 <Users className="w-5 h-5 flex-shrink-0" />
                                 {!collapsed && <span>Employees</span>}
                             </Link>
+                            <Link href="/users" className={navItemClass('/users')} title="User Accounts">
+                                <UserCheck className="w-5 h-5 flex-shrink-0" />
+                                {!collapsed && <span>User Accounts</span>}
+                            </Link>
                         </div>
 
                         {/* M02: AMS (Conditional on is_ams_enabled) */}
@@ -309,6 +314,10 @@ export default function AuthenticatedLayout({ title, children }: LayoutProps) {
                         <Link href="/employees" className={navItemClass('/employees')} onClick={() => setMobileOpen(false)}>
                             <Users className="w-5 h-5" />
                             <span>Employees</span>
+                        </Link>
+                        <Link href="/users" className={navItemClass('/users')} onClick={() => setMobileOpen(false)}>
+                            <UserCheck className="w-5 h-5" />
+                            <span>User Accounts</span>
                         </Link>
                         {auth?.tenant?.is_ams_enabled && (
                             <>

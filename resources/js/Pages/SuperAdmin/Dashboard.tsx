@@ -33,6 +33,12 @@ interface TenantItem {
         name: string;
         email: string;
     } | null;
+    users?: Array<{
+        id: number;
+        name: string;
+        email: string;
+        is_owner: boolean;
+    }>;
     created_at: string;
 }
 
@@ -57,6 +63,9 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
     const [search, setSearch] = useState(filters.search || '');
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [resetModalTenant, setResetModalTenant] = useState<TenantItem | null>(null);
+    const [viewUsersTenant, setViewUsersTenant] = useState<TenantItem | null>(null);
+    const [resetTargetUser, setResetTargetUser] = useState<{ id: number; name: string; email: string; companyName?: string } | null>(null);
+    const [showPassword, setShowPassword] = useState(false);
 
     // Create Company Form
     const createForm = useForm({
@@ -73,6 +82,15 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
     const resetForm = useForm({
         password: '',
     });
+
+    const generateRandomPassword = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+        let res = '';
+        for (let i = 0; i < 12; i++) {
+            res += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return res;
+    };
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -107,6 +125,17 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
         resetForm.post(`/admin/companies/${resetModalTenant.id}/reset-admin-password`, {
             onSuccess: () => {
                 setResetModalTenant(null);
+                resetForm.reset();
+            },
+        });
+    };
+
+    const handleUserResetSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!resetTargetUser) return;
+        resetForm.post(`/admin/users/${resetTargetUser.id}/reset-password`, {
+            onSuccess: () => {
+                setResetTargetUser(null);
                 resetForm.reset();
             },
         });
@@ -331,11 +360,34 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                                                 </div>
                                             </td>
 
-                                            <td className="px-5 py-4 text-right">
+                                             <td className="px-5 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
                                                     <button
-                                                        onClick={() => setResetModalTenant(t)}
+                                                        onClick={() => setViewUsersTenant(t)}
                                                         className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1.5 transition border border-slate-700"
+                                                        title="Manage Company Admins & Users"
+                                                    >
+                                                        <Users className="w-3.5 h-3.5 text-indigo-400" />
+                                                        <span>Admins ({t.users_count})</span>
+                                                    </button>
+
+                                                    <button
+                                                        onClick={() => {
+                                                            const target = t.owner || t.users?.[0];
+                                                            if (target) {
+                                                                setResetTargetUser({
+                                                                    id: target.id,
+                                                                    name: target.name,
+                                                                    email: target.email,
+                                                                    companyName: t.name,
+                                                                });
+                                                                setShowPassword(true);
+                                                                resetForm.setData('password', generateRandomPassword());
+                                                            } else {
+                                                                setResetModalTenant(t);
+                                                            }
+                                                        }}
+                                                        className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs flex items-center gap-1.5 transition border border-amber-500/20"
                                                         title="Reset Top Admin Password"
                                                     >
                                                         <KeyRound className="w-3.5 h-3.5 text-amber-400" />
@@ -496,7 +548,7 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                 </div>
             )}
 
-            {/* Reset Password Modal */}
+            {/* Reset Password Modal (Tenant Owner fallback) */}
             {resetModalTenant && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl">
@@ -522,12 +574,12 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                                 </p>
                                 <label className="block text-slate-300 font-semibold mb-1">New Password</label>
                                 <input
-                                    type="password"
+                                    type="text"
                                     required
                                     value={resetForm.data.password}
                                     onChange={(e) => resetForm.setData('password', e.target.value)}
                                     placeholder="Enter new password (min. 8 chars)"
-                                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100 text-xs"
+                                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100 font-mono text-xs"
                                 />
                                 {resetForm.errors.password && <p className="text-red-400 mt-1">{resetForm.errors.password}</p>}
                             </div>
@@ -546,6 +598,194 @@ export default function SuperAdminDashboard({ tenants, metrics, filters }: Props
                                     className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition"
                                 >
                                     {resetForm.processing ? 'Updating...' : 'Update Password'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* View Company Admins & Users Modal */}
+            {viewUsersTenant && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl p-6 space-y-6 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
+                                    <Users className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-white text-sm">Company Admins & User Accounts</h3>
+                                    <p className="text-[11px] text-indigo-400">{viewUsersTenant.name} ({viewUsersTenant.slug})</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setViewUsersTenant(null)}
+                                className="text-slate-500 hover:text-slate-300 p-1"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                            {!viewUsersTenant.users || viewUsersTenant.users.length === 0 ? (
+                                <p className="text-center py-6 text-slate-500 text-xs italic">
+                                    No user accounts provisioned for this company yet.
+                                </p>
+                            ) : (
+                                viewUsersTenant.users.map((u) => (
+                                    <div
+                                        key={u.id}
+                                        className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between gap-3 hover:border-slate-700 transition"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-xl bg-indigo-950/60 border border-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
+                                                {u.name.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="font-semibold text-white text-xs">{u.name}</p>
+                                                    {u.is_owner && (
+                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                                            Owner / Top Admin
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[11px] font-mono text-slate-400">{u.email}</p>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => {
+                                                setResetTargetUser({
+                                                    id: u.id,
+                                                    name: u.name,
+                                                    email: u.email,
+                                                    companyName: viewUsersTenant.name,
+                                                });
+                                                setShowPassword(true);
+                                                resetForm.setData('password', generateRandomPassword());
+                                            }}
+                                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1.5 border border-amber-500/20 transition active:scale-95"
+                                        >
+                                            <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Reset Pass</span>
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="pt-3 flex items-center justify-between border-t border-slate-800 text-xs">
+                            <button
+                                onClick={() => {
+                                    handleImpersonate(viewUsersTenant);
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1.5 font-medium"
+                            >
+                                <ArrowRight className="w-3.5 h-3.5" />
+                                <span>Open Full User Management in Tenant</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setViewUsersTenant(null)}
+                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Direct User / Company Admin Password Reset Modal */}
+            {resetTargetUser && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                                    <KeyRound className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-white text-sm">Reset Account Password</h3>
+                                    <p className="text-[11px] text-slate-400">{resetTargetUser.companyName ?? 'Company Workspace'}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setResetTargetUser(null)}
+                                className="text-slate-500 hover:text-slate-300 p-1"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
+                                {resetTargetUser.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="truncate">
+                                <p className="font-semibold text-white text-xs truncate">{resetTargetUser.name}</p>
+                                <p className="text-[11px] font-mono text-slate-400 truncate">{resetTargetUser.email}</p>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleUserResetSubmit} className="space-y-4 text-xs">
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <label className="block text-slate-300 font-semibold">New Password</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => resetForm.setData('password', generateRandomPassword())}
+                                        className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
+                                    >
+                                        <Sparkles className="w-3 h-3" />
+                                        Generate New
+                                    </button>
+                                </div>
+
+                                <div className="relative">
+                                    <input
+                                        type={showPassword ? 'text' : 'password'}
+                                        required
+                                        value={resetForm.data.password}
+                                        onChange={(e) => resetForm.setData('password', e.target.value)}
+                                        placeholder="Enter new password (min. 8 chars)"
+                                        className="w-full px-3 py-2 pr-10 rounded-xl bg-slate-950 border border-slate-800 focus:border-amber-500 text-slate-100 font-mono text-xs"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                                    >
+                                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                                {resetForm.errors.password && (
+                                    <p className="text-red-400 mt-1">{resetForm.errors.password}</p>
+                                )}
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                As Platform Super Admin, setting this new password takes effect immediately for this company admin/user.
+                            </p>
+
+                            <div className="pt-3 flex items-center justify-end gap-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setResetTargetUser(null)}
+                                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 hover:text-white text-xs font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={resetForm.processing}
+                                    className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20"
+                                >
+                                    <KeyRound className="w-3.5 h-3.5" />
+                                    {resetForm.processing ? 'Resetting...' : 'Reset Password'}
                                 </button>
                             </div>
                         </form>

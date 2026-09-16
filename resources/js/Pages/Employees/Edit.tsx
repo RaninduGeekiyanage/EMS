@@ -17,7 +17,7 @@ import {
     User,
     Lock,
 } from 'lucide-react';
-import { Employee, DepartmentSummary, DesignationSummary, BranchSummary } from '../../Types/employee';
+import { Employee, DepartmentSummary, DesignationSummary, BranchSummary, EmploymentStatus, EmploymentType, PaymentMode } from '../../Types/employee';
 
 interface Props {
     employee: Employee;
@@ -265,7 +265,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.employment_status}
-                                        onChange={(e) => form.setData('employment_status', e.target.value)}
+                                        onChange={(e) => form.setData('employment_status', e.target.value as EmploymentStatus)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                                     >
                                         <option value="active">Active</option>
@@ -306,7 +306,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.employment_type}
-                                        onChange={(e) => form.setData('employment_type', e.target.value)}
+                                        onChange={(e) => form.setData('employment_type', e.target.value as EmploymentType)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                                     >
                                         {employmentTypes.map((t) => (
@@ -401,7 +401,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.payment_mode}
-                                        onChange={(e) => form.setData('payment_mode', e.target.value)}
+                                        onChange={(e) => form.setData('payment_mode', e.target.value as PaymentMode)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                                     >
                                         {paymentModes.map((m) => (

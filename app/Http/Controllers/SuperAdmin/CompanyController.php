@@ -54,6 +54,12 @@ final class CompanyController extends Controller
                     'name' => $owner->name,
                     'email' => $owner->email,
                 ] : null,
+                'users' => $tenant->users->map(fn (User $u): array => [
+                    'id' => $u->id,
+                    'name' => $u->name,
+                    'email' => $u->email,
+                    'is_owner' => $owner !== null && $owner->id === $u->id,
+                ])->values()->all(),
                 'created_at' => $tenant->created_at?->format('Y-m-d H:i'),
             ];
         });
@@ -141,6 +147,18 @@ final class CompanyController extends Controller
         ]);
 
         return back()->with('success', "Password for {$owner->name} ({$owner->email}) has been reset successfully.");
+    }
+
+    /**
+     * Reset password for any company admin or user account across companies.
+     */
+    public function resetUserPassword(ResetAdminPasswordRequest $request, User $user): RedirectResponse
+    {
+        $user->update([
+            'password' => Hash::make($request->password),
+        ]);
+
+        return back()->with('success', "Password for {$user->name} ({$user->email}) has been reset successfully.");
     }
 
     /**

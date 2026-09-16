@@ -15,6 +15,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
+use App\Http\Controllers\UserAccountController;
 use App\Http\Controllers\WorkCalendarController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -41,6 +42,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function ():
     Route::get('/dashboard', [SuperAdminCompanyController::class, 'index'])->name('dashboard');
     Route::post('/companies', [SuperAdminCompanyController::class, 'store'])->name('companies.store');
     Route::post('/companies/{tenant}/reset-admin-password', [SuperAdminCompanyController::class, 'resetAdminPassword'])->name('companies.reset-password');
+    Route::post('/users/{user}/reset-password', [SuperAdminCompanyController::class, 'resetUserPassword'])->name('users.reset-password');
     Route::post('/companies/{tenant}/toggle-status', [SuperAdminCompanyController::class, 'toggleStatus'])->name('companies.toggle-status');
     Route::post('/companies/{tenant}/toggle-module/{module}', [SuperAdminCompanyController::class, 'toggleModule'])->name('companies.toggle-module');
     Route::post('/companies/{tenant}/impersonate', [SuperAdminCompanyController::class, 'impersonate'])->name('companies.impersonate');
@@ -58,6 +60,13 @@ Route::middleware(['tenant'])->group(function (): void {
     // M01 Company Profile
     Route::get('/company/profile', [CompanyController::class, 'profile'])->name('company.profile');
     Route::put('/company/{company}', [CompanyController::class, 'update'])->name('company.update');
+
+    // M01 User Accounts Management
+    Route::get('/users', [UserAccountController::class, 'index'])->name('users.index');
+    Route::post('/users', [UserAccountController::class, 'store'])->name('users.store');
+    Route::put('/users/{user}', [UserAccountController::class, 'update'])->name('users.update');
+    Route::delete('/users/{user}', [UserAccountController::class, 'destroy'])->name('users.destroy');
+    Route::post('/users/{user}/reset-password', [UserAccountController::class, 'resetPassword'])->name('users.reset-password');
 
     // M01 Branches
     Route::post('/branches', [BranchController::class, 'store'])->name('branches.store');
