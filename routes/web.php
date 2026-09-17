@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
@@ -17,6 +18,7 @@ use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\SuperAdmin\AccessControlController as SuperAdminAccessControlController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
 use App\Http\Controllers\UserAccountController;
 use App\Http\Controllers\WorkCalendarController;
@@ -50,6 +52,11 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function ():
     Route::post('/companies/{tenant}/toggle-module/{module}', [SuperAdminCompanyController::class, 'toggleModule'])->name('companies.toggle-module');
     Route::post('/companies/{tenant}/impersonate', [SuperAdminCompanyController::class, 'impersonate'])->name('companies.impersonate');
     Route::post('/impersonate/exit', [SuperAdminCompanyController::class, 'exitImpersonation'])->name('impersonate.exit');
+
+    // Access Control Management (Super Admin)
+    Route::get('/access-control', [SuperAdminAccessControlController::class, 'index'])->name('access-control.index');
+    Route::put('/access-control/{tenant}/users/{user}', [SuperAdminAccessControlController::class, 'update'])->name('access-control.update');
+    Route::post('/access-control/{tenant}/users/{user}/reset', [SuperAdminAccessControlController::class, 'resetToRole'])->name('access-control.reset');
 });
 
 // Authenticated Session & Dashboard Routes
@@ -60,6 +67,13 @@ Route::middleware(['auth'])->group(function (): void {
 
 // Tenant Scoped Routes
 Route::middleware(['tenant'])->group(function (): void {
+    // M00 Access Control & Permissions
+    Route::middleware(['auth'])->group(function (): void {
+        Route::get('/access-control', [AccessControlController::class, 'index'])->name('access-control.index');
+        Route::put('/access-control/users/{user}', [AccessControlController::class, 'update'])->name('access-control.update');
+        Route::post('/access-control/users/{user}/reset', [AccessControlController::class, 'resetToRole'])->name('access-control.reset');
+    });
+
     // M01 Company Profile
     Route::get('/company/profile', [CompanyController::class, 'profile'])->name('company.profile');
     Route::put('/company/{company}', [CompanyController::class, 'update'])->name('company.update');

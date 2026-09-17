@@ -12,61 +12,60 @@ use Spatie\Permission\PermissionRegistrar;
 final class RolesAndPermissionsSeeder extends Seeder
 {
     /**
-     * Permissions defined in EMS platform.
+     * Standardized Permissions defined in EMS platform (44 total across 8 domains).
      */
     public const PERMISSIONS = [
-        // Platform & User Management
-        'tenant.manage',
+        // 1. Identity & Access Management (IAM)
+        'access-control.view',
+        'access-control.manage',
+        'user.view',
         'user.manage',
 
-        // Company
+        // 2. Platform & Tenant Governance
+        'tenant.view',
+        'tenant.manage',
+        'audit.view',
+
+        // 3. Organization Structure (M01)
         'company.view',
         'company.update',
-
-        // Branches
         'branch.view',
         'branch.create',
         'branch.update',
         'branch.delete',
-
-        // Departments
         'department.view',
         'department.create',
         'department.update',
         'department.delete',
-
-        // Designations
         'designation.view',
         'designation.create',
         'designation.update',
         'designation.delete',
 
-        // Employees
+        // 4. Employee Workforce Master (M01)
         'employee.view',
         'employee.create',
         'employee.update',
         'employee.delete',
         'employee.view-sensitive',
 
-        // M02 Shifts & Work Calendars
+        // 5. Attendance & Roster Engine (M02 - AMS)
         'shift.view',
         'shift.create',
         'shift.update',
         'shift.delete',
         'work-calendar.view',
         'work-calendar.manage',
-
-        // M02 Biometric & Attendance Ingestion
         'attendance.import',
         'attendance.view',
         'attendance.correct',
 
-        // M02 Leave Management
+        // 6. Leave & Absence Management (M02 - AMS)
         'leave.apply',
         'leave.approve',
         'leave.manage-types',
 
-        // M03 Payroll
+        // 7. Payroll & Statutory Compliance (M03)
         'payroll.view',
         'payroll.run',
         'payroll.approve',
@@ -104,13 +103,14 @@ final class RolesAndPermissionsSeeder extends Seeder
         ]);
         $superAdmin->syncPermissions(Permission::all());
 
-        // 3. Company Owner (Tenant Root - Full tenant authority)
+        // 3. Company Owner (Tenant Root - Full tenant authority, team_id = null template)
         $companyOwner = Role::firstOrCreate([
             'name' => 'Company Owner',
             'guard_name' => 'web',
             'team_id' => null,
         ]);
-        $companyOwner->syncPermissions(self::PERMISSIONS);
+        // Owner has everything except platform-level tenant management
+        $companyOwner->syncPermissions(array_filter(self::PERMISSIONS, fn ($p) => ! in_array($p, ['tenant.manage'], true)));
 
         // 4. Company Admin (Operational Administrator)
         $companyAdmin = Role::firstOrCreate([
@@ -118,15 +118,22 @@ final class RolesAndPermissionsSeeder extends Seeder
             'guard_name' => 'web',
             'team_id' => null,
         ]);
-        $companyAdmin->syncPermissions(array_filter(self::PERMISSIONS, fn ($p) => $p !== 'tenant.manage'));
+        $companyAdmin->syncPermissions(array_filter(self::PERMISSIONS, fn ($p) => ! in_array($p, [
+            'tenant.manage',
+            'tenant.view',
+            'branch.delete',
+            'department.delete',
+            'designation.delete',
+        ], true)));
 
-        // 5. HR Manager (Workforce, Attendance, Payroll)
+        // 5. HR Manager (Workforce, Attendance, Leave, Payroll)
         $hrManager = Role::firstOrCreate([
             'name' => 'HR Manager',
             'guard_name' => 'web',
             'team_id' => null,
         ]);
         $hrManager->syncPermissions([
+            'user.view',
             'company.view',
             'branch.view',
             'department.view',
@@ -149,17 +156,42 @@ final class RolesAndPermissionsSeeder extends Seeder
             'leave.manage-types',
             'payroll.view',
             'payroll.run',
-            'payroll.approve',
-            'payroll.lock',
             'payroll.export',
             'payslip.view',
             'payslip.generate',
+            'payslip.download-own',
             'statutory.epf.export',
             'statutory.apit.export',
             'bank.export',
         ]);
 
-        // 6. Supervisor / Line Manager
+        // 6. HR Executive (Operations without payroll approve/lock or config deletes)
+        $hrExecutive = Role::firstOrCreate([
+            'name' => 'HR Executive',
+            'guard_name' => 'web',
+            'team_id' => null,
+        ]);
+        $hrExecutive->syncPermissions([
+            'user.view',
+            'company.view',
+            'branch.view',
+            'department.view',
+            'designation.view',
+            'employee.view',
+            'employee.create',
+            'employee.update',
+            'shift.view',
+            'work-calendar.view',
+            'attendance.import',
+            'attendance.view',
+            'leave.apply',
+            'leave.approve',
+            'payroll.view',
+            'payslip.view',
+            'payslip.download-own',
+        ]);
+
+        // 7. Supervisor / Line Manager
         $supervisor = Role::firstOrCreate([
             'name' => 'Supervisor',
             'guard_name' => 'web',
@@ -177,7 +209,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             'payslip.download-own',
         ]);
 
-        // 7. Staff (Self-Service)
+        // 8. Staff (Self-Service)
         $staff = Role::firstOrCreate([
             'name' => 'Staff',
             'guard_name' => 'web',
@@ -191,5 +223,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             'leave.apply',
             'payslip.download-own',
         ]);
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 }

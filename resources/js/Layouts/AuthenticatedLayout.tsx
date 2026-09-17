@@ -23,6 +23,7 @@ import {
     ArrowLeft,
     CheckCircle2,
     AlertCircle,
+    ShieldCheck,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -214,6 +215,10 @@ export default function AuthenticatedLayout({
                                 <UserCheck className="w-5 h-5 flex-shrink-0" />
                                 {!collapsed && <span>User Accounts</span>}
                             </Link>
+                            <Link href="/access-control" className={navItemClass('/access-control')} title="Access Control">
+                                <ShieldCheck className="w-5 h-5 flex-shrink-0" />
+                                {!collapsed && <span>Access Control</span>}
+                            </Link>
                         </div>
 
                         {/* M02: AMS (Conditional on is_ams_enabled) */}
@@ -261,6 +266,10 @@ export default function AuthenticatedLayout({
                                 <Link href="/admin/dashboard" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-amber-300 hover:bg-amber-950/40 border border-amber-500/20 transition">
                                     <ShieldAlert className="w-5 h-5 flex-shrink-0 text-amber-400" />
                                     {!collapsed && <span>Super Admin Panel</span>}
+                                </Link>
+                                <Link href="/admin/access-control" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-indigo-300 hover:bg-indigo-950/40 border border-indigo-500/20 transition">
+                                    <ShieldCheck className="w-5 h-5 flex-shrink-0 text-indigo-400" />
+                                    {!collapsed && <span>Access Control</span>}
                                 </Link>
                             </div>
                         )}
@@ -343,6 +352,10 @@ export default function AuthenticatedLayout({
                             <UserCheck className="w-5 h-5" />
                             <span>User Accounts</span>
                         </Link>
+                        <Link href="/access-control" className={navItemClass('/access-control')} onClick={() => setMobileOpen(false)}>
+                            <ShieldCheck className="w-5 h-5" />
+                            <span>Access Control</span>
+                        </Link>
                         {auth?.tenant?.is_ams_enabled && (
                             <>
                                 <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
@@ -374,10 +387,16 @@ export default function AuthenticatedLayout({
                             </Link>
                         )}
                         {auth?.user?.is_super_admin && (
-                            <Link href="/admin/dashboard" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-amber-400 bg-amber-950/20 border border-amber-500/20">
-                                <ShieldAlert className="w-5 h-5" />
-                                <span>Super Admin Panel</span>
-                            </Link>
+                            <>
+                                <Link href="/admin/dashboard" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-amber-400 bg-amber-950/20 border border-amber-500/20" onClick={() => setMobileOpen(false)}>
+                                    <ShieldAlert className="w-5 h-5" />
+                                    <span>Super Admin Panel</span>
+                                </Link>
+                                <Link href="/admin/access-control" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-indigo-400 bg-indigo-950/20 border border-indigo-500/20" onClick={() => setMobileOpen(false)}>
+                                    <ShieldCheck className="w-5 h-5" />
+                                    <span>Global Access Control</span>
+                                </Link>
+                            </>
                         )}
                     </nav>
 
