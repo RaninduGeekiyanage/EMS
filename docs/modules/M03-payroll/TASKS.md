@@ -1,16 +1,16 @@
-﻿# M03 — Payroll Detailed Tasks
+# M03 — Payroll Detailed Tasks
 
 ## Phase 1: Payroll Run Core Engine
-- [ ] Database Schema & Run Orchestration
-  - [ ] File: database/migrations/2026_01_01_000060_create_payroll_runs_table.php
-  - [ ] File: database/migrations/2026_01_01_000061_create_payroll_employees_table.php
-  - [ ] File: database/migrations/2026_01_01_000062_create_apit_tax_slabs_table.php
-  - [ ] File: app/Models/PayrollRun.php
-  - [ ] File: app/Models/PayrollEmployee.php
-  - [ ] File: app/Services/PayrollCalculationService.php
-  - [ ] File: app/Http/Controllers/PayrollRunController.php
-  - [ ] File: resources/js/Pages/Payroll/Index.tsx
-  - [ ] File: resources/js/Pages/Payroll/Run.tsx
+- [x] Database Schema & Run Orchestration
+  - [x] File: database/migrations/2026_01_01_000060_create_payroll_runs_table.php
+  - [x] File: database/migrations/2026_01_01_000061_create_payroll_employees_table.php
+  - [x] File: database/migrations/2026_01_01_000062_create_apit_tax_slabs_table.php
+  - [x] File: app/Models/PayrollRun.php
+  - [x] File: app/Models/PayrollEmployee.php
+  - [x] File: app/Services/PayrollCalculationService.php
+  - [x] File: app/Http/Controllers/PayrollRunController.php
+  - [x] File: resources/js/Pages/Payroll/Index.tsx
+  - [x] File: resources/js/Pages/Payroll/Run.tsx
 
 ## Phase 2: Statutory Modules (EPF, ETF & APIT)
 - [ ] Statutory Calculators

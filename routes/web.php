@@ -13,6 +13,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
 use App\Http\Controllers\UserAccountController;
@@ -129,4 +130,18 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/leave/types/seed-statutory', [LeaveRequestController::class, 'seedStatutoryTypes'])->name('leave.types.seed-statutory');
         Route::post('/leave/entitlements/allocate', [LeaveRequestController::class, 'allocateEntitlements'])->name('leave.entitlements.allocate');
     });
+
+    // M03 Payroll & Statutory Compliance (Protected by module:payroll)
+    Route::middleware(['module:payroll'])->group(function (): void {
+        Route::get('/payroll', [PayrollRunController::class, 'index'])->name('payroll.index');
+        Route::post('/payroll/preview', [PayrollRunController::class, 'preview'])->name('payroll.preview');
+        Route::post('/payroll/runs', [PayrollRunController::class, 'store'])->name('payroll.store');
+        Route::get('/payroll/{payrollRun}', [PayrollRunController::class, 'show'])->name('payroll.show');
+        Route::post('/payroll/{payrollRun}/approve', [PayrollRunController::class, 'approve'])->name('payroll.approve');
+        Route::post('/payroll/{payrollRun}/lock', [PayrollRunController::class, 'lock'])->name('payroll.lock');
+        Route::post('/payroll/{payrollRun}/recalculate', [PayrollRunController::class, 'recalculate'])->name('payroll.recalculate');
+        Route::delete('/payroll/{payrollRun}', [PayrollRunController::class, 'destroy'])->name('payroll.destroy');
+        Route::post('/payroll/settings', [PayrollRunController::class, 'updateSettings'])->name('payroll.settings.update');
+    });
 });
+

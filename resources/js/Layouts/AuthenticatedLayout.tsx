@@ -247,13 +247,10 @@ export default function AuthenticatedLayout({
                         {auth?.tenant?.is_payroll_enabled && (
                             <div className="space-y-1">
                                 {!collapsed && <p className="px-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Payroll (M03)</p>}
-                                <div className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 bg-slate-900/30 border border-slate-800/40">
-                                    <div className="flex items-center gap-3">
-                                        <DollarSign className="w-5 h-5 flex-shrink-0 text-slate-500" />
-                                        {!collapsed && <span>Payroll Runs</span>}
-                                    </div>
-                                    {!collapsed && <span className="text-[10px] bg-slate-800 text-indigo-300 px-1.5 py-0.5 rounded font-mono">Ready</span>}
-                                </div>
+                                <Link href="/payroll" className={navItemClass('/payroll')} title="Payroll Runs">
+                                    <DollarSign className="w-5 h-5 flex-shrink-0" />
+                                    {!collapsed && <span>Payroll Runs</span>}
+                                </Link>
                             </div>
                         )}
 
@@ -369,6 +366,12 @@ export default function AuthenticatedLayout({
                                     <span>Leave Requests</span>
                                 </Link>
                             </>
+                        )}
+                        {auth?.tenant?.is_payroll_enabled && (
+                            <Link href="/payroll" className={navItemClass('/payroll')} onClick={() => setMobileOpen(false)}>
+                                <DollarSign className="w-5 h-5" />
+                                <span>Payroll Runs</span>
+                            </Link>
                         )}
                         {auth?.user?.is_super_admin && (
                             <Link href="/admin/dashboard" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-amber-400 bg-amber-950/20 border border-amber-500/20">
