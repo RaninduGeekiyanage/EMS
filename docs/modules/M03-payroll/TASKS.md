@@ -13,11 +13,11 @@
   - [x] File: resources/js/Pages/Payroll/Run.tsx
 
 ## Phase 2: Statutory Modules (EPF, ETF & APIT)
-- [ ] Statutory Calculators
-  - [ ] File: app/Services/Statutory/EpfEtfCalculatorService.php
-  - [ ] File: app/Services/Statutory/ApitTaxCalculatorService.php
-  - [ ] File: tests/Unit/Payroll/EpfCalculationTest.php
-  - [ ] File: tests/Unit/Payroll/ApitCalculationTest.php
+- [x] Statutory Calculators
+  - [x] File: app/Services/Statutory/EpfEtfCalculatorService.php
+  - [x] File: app/Services/Statutory/ApitTaxCalculatorService.php
+  - [x] File: tests/Unit/Payroll/EpfCalculationTest.php
+  - [x] File: tests/Unit/Payroll/ApitCalculationTest.php
 
 ## Phase 3: Payslips & Bank Disbursal
 - [ ] PDF & Export Engines

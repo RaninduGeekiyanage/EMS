@@ -11,6 +11,8 @@ use App\Models\PayrollEmployee;
 use App\Models\PayrollRun;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Statutory\ApitTaxCalculatorService;
+use App\Services\Statutory\EpfEtfCalculatorService;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,17 @@ use InvalidArgumentException;
 
 final class PayrollCalculationService
 {
+    private EpfEtfCalculatorService $epfEtfCalculator;
+    private ApitTaxCalculatorService $apitTaxCalculator;
+
+    public function __construct(
+        ?EpfEtfCalculatorService $epfEtfCalculator = null,
+        ?ApitTaxCalculatorService $apitTaxCalculator = null
+    ) {
+        $this->epfEtfCalculator = $epfEtfCalculator ?? new EpfEtfCalculatorService();
+        $this->apitTaxCalculator = $apitTaxCalculator ?? new ApitTaxCalculatorService();
+    }
+
     /**
      * Preview or execute a full monthly payroll run for a tenant.
      *
@@ -307,20 +320,23 @@ final class PayrollCalculationService
 
         // 4. Statutory EPF & ETF
         $isEmployeeEpfMember = (bool) ($epfInfo?->is_epf_member ?? true);
-        $isEpfEligible = $isCompanyEpfEnabled && $isEmployeeEpfMember;
+        $statutory = $this->epfEtfCalculator->calculate(
+            epfEligibleEarnings: $epfEligibleEarnings,
+            grossPay: $grossPay,
+            isCompanyEpfEnabled: $isCompanyEpfEnabled,
+            isEmployeeEpfMember: $isEmployeeEpfMember,
+            employeeRateOverride: $epfEmployeeRate,
+            employerEpfRateOverride: $epfEmployerRate,
+            etfRateOverride: $etfEmployerRate
+        );
 
-        $epfEmployee = 0.00;
-        $epfEmployer = 0.00;
-        $etfEmployer = 0.00;
-
-        if ($isEpfEligible && $epfEligibleEarnings > 0.00) {
-            $epfEmployee = round($epfEligibleEarnings * ($epfEmployeeRate / 100.0), 2);
-            $epfEmployer = round($epfEligibleEarnings * ($epfEmployerRate / 100.0), 2);
-            $etfEmployer = round($grossPay * ($etfEmployerRate / 100.0), 2);
-        }
+        $isEpfEligible = $statutory['is_epf_eligible'];
+        $epfEmployee = $statutory['epf_employee'];
+        $epfEmployer = $statutory['epf_employer'];
+        $etfEmployer = $statutory['etf_employer'];
 
         // 5. APIT Tax
-        $taxCalculation = ApitTaxSlab::calculateMonthlyTax($grossPay, $employee->tenant_id);
+        $taxCalculation = $this->apitTaxCalculator->calculateMonthlyTax($grossPay, $employee->tenant_id);
         $apitTax = (float) $taxCalculation['total_tax'];
 
         // 6. Deductions and Net Pay
@@ -356,20 +372,23 @@ final class PayrollCalculationService
                 'gross_pay' => $grossPay,
             ],
             'statutory' => [
-                'is_company_epf_enabled' => $isCompanyEpfEnabled,
-                'is_employee_epf_member' => $isEmployeeEpfMember,
-                'is_epf_eligible' => $isEpfEligible,
-                'epf_eligible_earnings' => $epfEligibleEarnings,
-                'epf_employee_rate' => $epfEmployeeRate,
-                'epf_employee' => $epfEmployee,
-                'epf_employer_rate' => $epfEmployerRate,
-                'epf_employer' => $epfEmployer,
-                'etf_employer_rate' => $etfEmployerRate,
-                'etf_employer' => $etfEmployer,
+                'is_company_epf_enabled' => $statutory['is_company_epf_enabled'],
+                'is_employee_epf_member' => $statutory['is_employee_epf_member'],
+                'is_epf_eligible' => $statutory['is_epf_eligible'],
+                'epf_eligible_earnings' => $statutory['epf_eligible_earnings'],
+                'epf_employee_rate' => $statutory['epf_employee_rate'],
+                'epf_employee' => $statutory['epf_employee'],
+                'epf_employer_rate' => $statutory['epf_employer_rate'],
+                'epf_employer' => $statutory['epf_employer'],
+                'total_epf' => $statutory['total_epf'],
+                'etf_employer_rate' => $statutory['etf_employer_rate'],
+                'etf_employer' => $statutory['etf_employer'],
+                'total_statutory' => $statutory['total_statutory'],
             ],
             'tax' => [
                 'apit_tax' => $apitTax,
                 'annual_projected_income' => $taxCalculation['annual_income'],
+                'effective_tax_rate' => $taxCalculation['effective_tax_rate'],
                 'slabs' => $taxCalculation['slab_details'],
             ],
             'net_payout' => $netPay,
