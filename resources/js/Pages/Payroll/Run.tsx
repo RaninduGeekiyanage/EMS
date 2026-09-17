@@ -20,8 +20,11 @@ import {
     TrendingUp,
     AlertCircle,
     UserCheck,
-    Clock,
     Hash,
+    Download,
+    ChevronDown,
+    ExternalLink,
+    Landmark,
 } from 'lucide-react';
 
 interface EmployeeItem {
@@ -88,11 +91,21 @@ interface Props {
     };
 }
 
+const SUPPORTED_BANKS = [
+    { code: 'boc', name: 'Bank of Ceylon (BoC)', desc: 'CEFTS / SLIPS fixed-width (.txt)' },
+    { code: 'combank', name: 'Commercial Bank of Ceylon', desc: 'Direct Credit bulk (.csv)' },
+    { code: 'sampath', name: 'Sampath Bank', desc: 'Direct Credit bulk (.csv)' },
+    { code: 'hnb', name: 'Hatton National Bank (HNB)', desc: 'PayGate format (.csv)' },
+    { code: 'peoples', name: "People's Bank", desc: 'Corporate Banking (.csv)' },
+    { code: 'nsb', name: 'National Savings Bank (NSB)', desc: 'Bulk salary format (.csv)' },
+];
+
 export default function Run({ run, employees, departments, filters }: Props) {
     const [searchTerm, setSearchTerm] = useState(filters.search || '');
     const [selectedDept, setSelectedDept] = useState(filters.department_id || '');
     const [activeTab, setActiveTab] = useState<'all' | 'monthly' | 'daily' | 'hourly' | 'contract'>('all');
     const [inspectingEmployee, setInspectingEmployee] = useState<EmployeeItem | null>(null);
+    const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
 
     const formatLKR = (val: number) => {
         return new Intl.NumberFormat('en-LK', {
@@ -239,6 +252,51 @@ export default function Run({ run, employees, departments, filters }: Props) {
                                 <Lock className="w-3.5 h-3.5" /> Immutable Locked Record
                             </span>
                         )}
+
+                        {/* Bulk Payslips PDF Download */}
+                        <a
+                            href={`/payroll/${run.id}/payslips/bulk`}
+                            className="px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/30 text-xs font-semibold flex items-center gap-2 transition"
+                            download
+                            title="Download all employee payslips in a single PDF"
+                        >
+                            <Download className="w-4 h-4" />
+                            <span className="hidden sm:inline">Bulk Payslips (PDF)</span>
+                        </a>
+
+                        {/* Bank Disbursal Export Dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setBankDropdownOpen(!bankDropdownOpen)}
+                                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-semibold flex items-center gap-2 transition"
+                            >
+                                <Landmark className="w-4 h-4 text-emerald-400" />
+                                <span className="hidden sm:inline">Export Bank File</span>
+                                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                            </button>
+
+                            {bankDropdownOpen && (
+                                <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
+                                    <div className="px-3 py-2 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                                        Select Direct Credit Bank
+                                    </div>
+                                    <div className="py-1 space-y-0.5 max-h-64 overflow-y-auto">
+                                        {SUPPORTED_BANKS.map((b) => (
+                                            <a
+                                                key={b.code}
+                                                href={`/payroll/${run.id}/bank-export?bank_code=${b.code}`}
+                                                onClick={() => setBankDropdownOpen(false)}
+                                                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex flex-col transition"
+                                                download
+                                            >
+                                                <span className="font-semibold text-white">{b.name}</span>
+                                                <span className="text-[10px] text-slate-500">{b.desc}</span>
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -469,13 +527,32 @@ export default function Run({ run, employees, departments, filters }: Props) {
                                             </td>
 
                                             <td className="px-4 py-3.5 text-center">
-                                                <button
-                                                    onClick={() => setInspectingEmployee(emp)}
-                                                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-400 transition"
-                                                    title="Inspect Breakdown & Formulas"
-                                                >
-                                                    <Info className="w-3.5 h-3.5" />
-                                                </button>
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <a
+                                                        href={`/payroll/employees/${emp.id}/payslip/stream`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 hover:text-white text-slate-400 transition"
+                                                        title="Preview Payslip PDF"
+                                                    >
+                                                        <ExternalLink className="w-3.5 h-3.5" />
+                                                    </a>
+                                                    <a
+                                                        href={`/payroll/employees/${emp.id}/payslip/download`}
+                                                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-400 transition"
+                                                        title="Download Payslip PDF"
+                                                        download
+                                                    >
+                                                        <Download className="w-3.5 h-3.5" />
+                                                    </a>
+                                                    <button
+                                                        onClick={() => setInspectingEmployee(emp)}
+                                                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-400 transition"
+                                                        title="Inspect Breakdown & Formulas"
+                                                    >
+                                                        <Info className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))
@@ -502,12 +579,22 @@ export default function Run({ run, employees, departments, filters }: Props) {
                                     </p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => setInspectingEmployee(null)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <a
+                                    href={`/payroll/employees/${inspectingEmployee.id}/payslip/download`}
+                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
+                                    download
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Download PDF</span>
+                                </a>
+                                <button
+                                    onClick={() => setInspectingEmployee(null)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
 
                         <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto text-xs">

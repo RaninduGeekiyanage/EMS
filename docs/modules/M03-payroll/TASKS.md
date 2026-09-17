@@ -20,16 +20,16 @@
   - [x] File: tests/Unit/Payroll/ApitCalculationTest.php
 
 ## Phase 3: Payslips & Bank Disbursal
-- [ ] PDF & Export Engines
-  - [ ] File: resources/views/pdf/payslip.blade.php
-  - [ ] File: app/Services/PayslipGeneratorService.php
-  - [ ] File: app/Services/BankExportService.php
-  - [ ] File: app/Services/BankGenerators/BocGenerator.php
-  - [ ] File: app/Services/BankGenerators/CommercialBankGenerator.php
-  - [ ] File: app/Services/BankGenerators/SampathBankGenerator.php
-  - [ ] File: app/Services/BankGenerators/HnbGenerator.php
-  - [ ] File: app/Services/BankGenerators/PeoplesBankGenerator.php
-  - [ ] File: app/Services/BankGenerators/NsbGenerator.php
-  - [ ] File: app/Http/Controllers/PayslipController.php
-  - [ ] File: app/Http/Controllers/BankExportController.php
-  - [ ] File: tests/Feature/M03/FullPayrollRunTest.php
+- [x] PDF & Export Engines
+  - [x] File: resources/views/pdf/payslip.blade.php
+  - [x] File: app/Services/PayslipGeneratorService.php
+  - [x] File: app/Services/BankExportService.php
+  - [x] File: app/Services/BankGenerators/BocGenerator.php
+  - [x] File: app/Services/BankGenerators/CommercialBankGenerator.php
+  - [x] File: app/Services/BankGenerators/SampathBankGenerator.php
+  - [x] File: app/Services/BankGenerators/HnbGenerator.php
+  - [x] File: app/Services/BankGenerators/PeoplesBankGenerator.php
+  - [x] File: app/Services/BankGenerators/NsbGenerator.php
+  - [x] File: app/Http/Controllers/PayslipController.php
+  - [x] File: app/Http/Controllers/BankExportController.php
+  - [x] File: tests/Feature/M03/FullPayrollRunTest.php

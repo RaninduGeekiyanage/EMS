@@ -7,6 +7,7 @@ use App\Http\Controllers\AttendanceImportController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
+use App\Http\Controllers\BankExportController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\DashboardController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayrollRunController;
+use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
 use App\Http\Controllers\UserAccountController;
@@ -142,6 +144,13 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/payroll/{payrollRun}/recalculate', [PayrollRunController::class, 'recalculate'])->name('payroll.recalculate');
         Route::delete('/payroll/{payrollRun}', [PayrollRunController::class, 'destroy'])->name('payroll.destroy');
         Route::post('/payroll/settings', [PayrollRunController::class, 'updateSettings'])->name('payroll.settings.update');
+
+        // Phase 3: Payslips & Bank Disbursals
+        Route::get('/payroll/employees/{payrollEmployee}/payslip/download', [PayslipController::class, 'download'])->name('payroll.payslip.download');
+        Route::get('/payroll/employees/{payrollEmployee}/payslip/stream', [PayslipController::class, 'stream'])->name('payroll.payslip.stream');
+        Route::get('/payroll/{payrollRun}/payslips/bulk', [PayslipController::class, 'bulk'])->name('payroll.payslips.bulk');
+        Route::get('/payroll/{payrollRun}/bank-export', [BankExportController::class, 'export'])->name('payroll.bank-export');
+        Route::get('/payroll/{payrollRun}/bank-export/banks', [BankExportController::class, 'banks'])->name('payroll.bank-export.banks');
     });
 });
 

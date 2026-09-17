@@ -70,7 +70,14 @@ final class RolesAndPermissionsSeeder extends Seeder
         'payroll.view',
         'payroll.run',
         'payroll.approve',
+        'payroll.lock',
         'payroll.export',
+        'payslip.view',
+        'payslip.generate',
+        'payslip.download-own',
+        'statutory.epf.export',
+        'statutory.apit.export',
+        'bank.export',
     ];
 
     /**
@@ -143,7 +150,13 @@ final class RolesAndPermissionsSeeder extends Seeder
             'payroll.view',
             'payroll.run',
             'payroll.approve',
+            'payroll.lock',
             'payroll.export',
+            'payslip.view',
+            'payslip.generate',
+            'statutory.epf.export',
+            'statutory.apit.export',
+            'bank.export',
         ]);
 
         // 6. Supervisor / Line Manager
@@ -161,6 +174,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             'attendance.view',
             'leave.apply',
             'leave.approve',
+            'payslip.download-own',
         ]);
 
         // 7. Staff (Self-Service)
@@ -175,6 +189,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             'shift.view',
             'work-calendar.view',
             'leave.apply',
+            'payslip.download-own',
         ]);
     }
 }
