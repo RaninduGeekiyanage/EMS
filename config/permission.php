@@ -140,7 +140,7 @@ return [
     /*
      * The class to use to resolve the permissions team id
      */
-    'team_resolver' => DefaultTeamResolver::class,
+    'team_resolver' => \App\Services\TenantTeamResolver::class,
 
     /*
      * Passport Client Credentials Grant

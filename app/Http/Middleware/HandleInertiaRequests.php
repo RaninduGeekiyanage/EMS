@@ -39,9 +39,30 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
+
+        // Ensure tenant and Spatie team context are resolved before evaluating user roles/permissions
         $tenant = app()->bound('current_tenant') ? app('current_tenant') : null;
-        if ($tenant === null && session()->has('tenant_id')) {
-            $tenant = Tenant::find(session('tenant_id'));
+        if ($tenant === null) {
+            if ($request->hasSession() && session()->has('impersonated_tenant_id')) {
+                $tenant = Tenant::find(session('impersonated_tenant_id'));
+            } elseif ($request->hasSession() && session()->has('tenant_id')) {
+                $tenant = Tenant::find(session('tenant_id'));
+            } elseif ($user !== null && $user->tenant_id !== null) {
+                $tenant = $user->tenant;
+            }
+
+            if ($tenant !== null) {
+                app()->instance('current_tenant', $tenant);
+                app()->instance('current_tenant_id', $tenant->id);
+            }
+        }
+
+        if ($tenant !== null && function_exists('setPermissionsTeamId')) {
+            setPermissionsTeamId($tenant->id);
+            if ($user !== null) {
+                $user->unsetRelation('roles');
+                $user->unsetRelation('permissions');
+            }
         }
 
         return [

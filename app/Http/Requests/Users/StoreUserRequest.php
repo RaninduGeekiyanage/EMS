@@ -41,4 +41,26 @@ final class StoreUserRequest extends FormRequest
             ])],
         ];
     }
+
+    /**
+     * Configure the validator instance with custom guardrail checks.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator): void {
+            /** @var \App\Models\User|null $currentUser */
+            $currentUser = $this->user();
+
+            if ($currentUser === null) {
+                return;
+            }
+
+            $requestedRole = (string) $this->input('role');
+
+            // Non-super-admins cannot assign Company Owner unless they are already the Owner
+            if ($requestedRole === 'Company Owner' && ! $currentUser->isSuperAdmin() && ! $currentUser->isCompanyOwner()) {
+                $validator->errors()->add('role', 'Only existing Company Owners or Super Admins can assign the Company Owner role.');
+            }
+        });
+    }
 }

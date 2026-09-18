@@ -84,6 +84,12 @@ class User extends Authenticatable
             }
         }
 
+        if ($this->tenant_id !== null && function_exists('getPermissionsTeamId') && getPermissionsTeamId() === null) {
+            setPermissionsTeamId($this->tenant_id);
+            $this->unsetRelation('roles');
+            $this->unsetRelation('permissions');
+        }
+
         return $this->spatieHasRole($roles, $guard);
     }
 

@@ -32,6 +32,11 @@ final class ResolveTenant
             if (function_exists('setPermissionsTeamId')) {
                 setPermissionsTeamId($tenant->id);
             }
+
+            if ($user = $request->user()) {
+                $user->unsetRelation('roles');
+                $user->unsetRelation('permissions');
+            }
         } elseif ($mode !== 'optional') {
             $user = $request->user();
             if ($user !== null && $user->isSuperAdmin()) {
