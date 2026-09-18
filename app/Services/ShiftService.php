@@ -373,19 +373,21 @@ final class ShiftService
             ['date' => "{$year}-12-25", 'name' => 'Christmas Day', 'type' => 'statutory'],
         ];
 
-        $created = [];
-        foreach ($defaults as $item) {
-            $holiday = PublicHoliday::firstOrCreate(
-                ['holiday_date' => $item['date']],
-                [
-                    'name' => $item['name'],
-                    'type' => $item['type'],
-                    'description' => "Official Sri Lankan holiday ({$item['type']}).",
-                ]
-            );
-            $created[] = $holiday;
-        }
+        return DB::transaction(static function () use ($defaults): array {
+            $created = [];
+            foreach ($defaults as $item) {
+                $holiday = PublicHoliday::firstOrCreate(
+                    ['holiday_date' => $item['date']],
+                    [
+                        'name' => $item['name'],
+                        'type' => $item['type'],
+                        'description' => "Official Sri Lankan holiday ({$item['type']}).",
+                    ]
+                );
+                $created[] = $holiday;
+            }
 
-        return $created;
+            return $created;
+        });
     }
 }

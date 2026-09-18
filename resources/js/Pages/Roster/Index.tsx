@@ -10,22 +10,20 @@ import {
     Search,
     RefreshCw,
     ArrowLeftRight,
-    Send,
     Trash2,
     CheckCircle2,
     AlertCircle,
     X,
     Clock,
-    Sun,
-    Moon,
-    Coffee,
-    Palmtree,
-    Building2,
     Users,
     CalendarRange,
     Copy,
-    Settings2,
-    CalendarCheck,
+    Download,
+    Printer,
+    Lock,
+    AlertTriangle,
+    Loader2,
+    ShieldCheck,
 } from 'lucide-react';
 
 interface Shift {
@@ -77,6 +75,8 @@ interface MatrixCell {
     status: 'draft' | 'published' | 'locked' | null;
     is_overridden: boolean;
     notes: string | null;
+    fatigue_warning?: boolean;
+    rest_hours?: number | null;
     leave: {
         id: string;
         leave_type: string;
@@ -110,6 +110,13 @@ interface Props {
     patterns: RosterPattern[];
     departments: Department[];
     selected_department: string | null;
+    coverage_summary?: Record<string, {
+        shifts: Record<string, number>;
+        total_working: number;
+        total_rest: number;
+        total_leave: number;
+    }>;
+    is_payroll_locked?: boolean;
     summary: {
         total_employees: number;
         total_scheduled_shifts: number;
@@ -130,6 +137,8 @@ export default function Index({
     patterns,
     departments,
     selected_department,
+    coverage_summary,
+    is_payroll_locked = false,
     summary,
 }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
@@ -224,6 +233,17 @@ export default function Index({
         }
     };
 
+    // Export to noticeboard CSV
+    const handleExportCsv = () => {
+        const url = `/roster/export?year=${year}&month=${month}${departmentFilter !== 'all' ? `&department_id=${departmentFilter}` : ''}`;
+        window.location.href = url;
+    };
+
+    // Print Noticeboard
+    const handlePrintNoticeboard = () => {
+        window.print();
+    };
+
     // Form for Single Cell Edit
     interface CellFormData {
         employee_id: string;
@@ -244,6 +264,11 @@ export default function Index({
     });
 
     const openCellModal = (empId: string, empName: string, date: string, cell: MatrixCell) => {
+        if (is_payroll_locked) {
+            alert('Cannot edit roster entries for a finalized and locked payroll period.');
+            return;
+        }
+
         setSelectedCell({ employeeId: empId, employeeName: empName, date, cell });
         cellForm.setData((prev) => ({
             ...prev,
@@ -300,6 +325,7 @@ export default function Index({
         department_id: departmentFilter !== 'all' ? departmentFilter : '',
         conflict_mode: 'overwrite' as 'overwrite' | 'preserve',
         status: 'published' as 'draft' | 'published',
+        preserve_leaves: true,
 
         // Daily mode
         daily_config: {
@@ -367,13 +393,53 @@ export default function Index({
         }
     };
 
+    const isGlobalProcessing = generateForm.processing || cellForm.processing || swapForm.processing;
+
     return (
         <AuthenticatedLayout>
             <Head title={`Duty Roster - ${month_name}`} />
 
+            {/* Print Stylesheet for Physical Noticeboards */}
+            <style>{`
+                @media print {
+                    body {
+                        background-color: white !important;
+                        color: black !important;
+                    }
+                    nav, header, .no-print {
+                        display: none !important;
+                    }
+                    .print-only {
+                        display: block !important;
+                    }
+                    table {
+                        width: 100% !important;
+                        border-collapse: collapse !important;
+                    }
+                    th, td {
+                        border: 1px solid #94a3b8 !important;
+                        color: black !important;
+                        background: white !important;
+                    }
+                }
+            `}</style>
+
+            {/* Global Spinner Processing Overlay (Prevents UI Freezing) */}
+            {isGlobalProcessing && (
+                <div className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 max-w-sm text-center">
+                        <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
+                        <h3 className="text-base font-bold text-white">Updating Duty Roster</h3>
+                        <p className="text-xs text-slate-400">
+                            Executing atomic database transaction with low-memory batching... please wait.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             <div className="space-y-6">
                 {/* 1. Header Banner */}
-                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 border border-indigo-900/40 shadow-xl relative overflow-hidden">
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 border border-indigo-900/40 shadow-xl relative overflow-hidden no-print">
                     <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
                         <div>
                             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-2">
@@ -384,56 +450,78 @@ export default function Index({
                                 Duty Roster Planner
                             </h1>
                             <p className="text-slate-400 text-sm mt-1">
-                                Plan, rotate, and publish month-by-month employee shift schedules, dynamic rest days, and long-term rosters.
+                                Plan, rotate, and publish month-by-month employee shift schedules, dynamic rest days, and noticeboard sheets.
                             </p>
                         </div>
 
                         {/* Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2">
                             <button
-                                onClick={() => setIsGenerateModalOpen(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 hover:shadow-indigo-500/40 transition"
+                                onClick={handleExportCsv}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
+                                title="Export Noticeboard CSV Matrix"
                             >
-                                <Sparkles className="w-4 h-4" />
-                                Generate Roster
+                                <Download className="w-4 h-4" />
+                                Export CSV
                             </button>
 
                             <button
-                                onClick={() => setIsSwapModalOpen(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-sm transition"
+                                onClick={handlePrintNoticeboard}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
+                                title="Print Physical Noticeboard Matrix"
                             >
-                                <ArrowLeftRight className="w-4 h-4" />
-                                Shift Swap
+                                <Printer className="w-4 h-4" />
+                                Print
                             </button>
 
-                            {summary.published_entries > 0 ? (
-                                <button
-                                    onClick={() => handlePublishToggle(false)}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-sm transition"
-                                    title="Revert to Draft for modifications"
-                                >
-                                    <AlertCircle className="w-4 h-4" />
-                                    Revert to Draft
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={() => handlePublishToggle(true)}
-                                    disabled={summary.draft_entries === 0 && summary.total_scheduled_shifts === 0}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 transition"
-                                >
-                                    <CheckCircle2 className="w-4 h-4" />
-                                    Publish Roster
-                                </button>
+                            {!is_payroll_locked && (
+                                <>
+                                    <button
+                                        onClick={() => setIsGenerateModalOpen(true)}
+                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition"
+                                    >
+                                        <Sparkles className="w-4 h-4" />
+                                        Generate Roster
+                                    </button>
+
+                                    <button
+                                        onClick={() => setIsSwapModalOpen(true)}
+                                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition"
+                                    >
+                                        <ArrowLeftRight className="w-4 h-4" />
+                                        Shift Swap
+                                    </button>
+
+                                    {summary.published_entries > 0 ? (
+                                        <button
+                                            onClick={() => handlePublishToggle(false)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-xs transition"
+                                            title="Revert to Draft for modifications"
+                                        >
+                                            <AlertCircle className="w-4 h-4" />
+                                            Revert to Draft
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => handlePublishToggle(true)}
+                                            disabled={summary.draft_entries === 0 && summary.total_scheduled_shifts === 0}
+                                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs shadow-lg shadow-emerald-600/30 transition"
+                                        >
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            Publish Roster
+                                        </button>
+                                    )}
+
+                                    <button
+                                        onClick={handleClearRoster}
+                                        disabled={summary.total_scheduled_shifts === 0 && summary.total_rest_days === 0}
+                                        className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-900 transition disabled:opacity-30"
+                                        title="Clear Roster Entries"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </>
                             )}
-
-                            <button
-                                onClick={handleClearRoster}
-                                disabled={summary.total_scheduled_shifts === 0 && summary.total_rest_days === 0}
-                                className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-900 transition disabled:opacity-30"
-                                title="Clear Roster Entries"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
                         </div>
                     </div>
 
@@ -454,7 +542,11 @@ export default function Index({
                         <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
                             <span className="text-xs text-slate-400 font-medium">Roster Status</span>
                             <div className="mt-1">
-                                {summary.published_entries > 0 && summary.draft_entries === 0 ? (
+                                {is_payroll_locked ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                        <Lock className="w-3 h-3" /> Locked by Payroll
+                                    </span>
+                                ) : summary.published_entries > 0 && summary.draft_entries === 0 ? (
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                         <CheckCircle2 className="w-3 h-3" /> Published
                                     </span>
@@ -473,7 +565,7 @@ export default function Index({
                 </div>
 
                 {/* 2. Month Navigator & Filter Bar */}
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row items-center justify-between gap-4 no-print">
                     {/* Month Picker Controls */}
                     <div className="flex items-center gap-3 w-full md:w-auto">
                         <button
@@ -503,7 +595,7 @@ export default function Index({
                                 onClick={() => handleQuickJump('current')}
                                 className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
                             >
-                                Today / Current
+                                Current
                             </button>
                             <button
                                 onClick={() => handleQuickJump('next')}
@@ -551,33 +643,40 @@ export default function Index({
                     </div>
                 </div>
 
-                {/* 3. Shifts Legend Strip */}
-                <div className="bg-slate-900/70 px-4 py-3 rounded-xl border border-slate-800 flex flex-wrap items-center gap-4 text-xs">
-                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Shift Legend:</span>
-                    {shifts.map((s) => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                            <span
-                                className="w-2.5 h-2.5 rounded-full"
-                                style={{ backgroundColor: s.color || '#3B82F6' }}
-                            />
-                            <span className="text-slate-200 font-medium">{s.code}</span>
-                            <span className="text-slate-500 text-[10px]">({s.start_time.substring(0, 5)}-{s.end_time.substring(0, 5)})</span>
+                {/* 3. Shifts Legend & Fatigue Warning Alert Strip */}
+                <div className="bg-slate-900/70 px-4 py-3 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs no-print">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Legend:</span>
+                        {shifts.map((s) => (
+                            <div key={s.id} className="flex items-center gap-1.5">
+                                <span
+                                    className="w-2.5 h-2.5 rounded-full"
+                                    style={{ backgroundColor: s.color || '#3B82F6' }}
+                                />
+                                <span className="text-slate-200 font-medium">{s.code}</span>
+                                <span className="text-slate-500 text-[10px]">({s.start_time.substring(0, 5)}-{s.end_time.substring(0, 5)})</span>
+                            </div>
+                        ))}
+                        <div className="flex items-center gap-1.5 border-l border-slate-800 pl-2.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                            <span className="text-amber-300 font-medium">OFF</span>
+                            <span className="text-slate-500 text-[10px]">(Rest)</span>
                         </div>
-                    ))}
-                    <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                        <span className="text-amber-300 font-medium">OFF</span>
-                        <span className="text-slate-500 text-[10px]">(Rest Day)</span>
+                        <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                            <span className="text-rose-300 font-medium">PH</span>
+                            <span className="text-slate-500 text-[10px]">(Holiday)</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-teal-500" />
+                            <span className="text-teal-300 font-medium">LV</span>
+                            <span className="text-slate-500 text-[10px]">(Leave)</span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                        <span className="text-rose-300 font-medium">PH</span>
-                        <span className="text-slate-500 text-[10px]">(Public Holiday)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                        <span className="text-teal-300 font-medium">LV</span>
-                        <span className="text-slate-500 text-[10px]">(Approved Leave)</span>
+
+                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg text-amber-300 text-[11px]">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                        <span>Fatigue Alert: Badges flag &lt;11h rest between consecutive shifts (Shop &amp; Office Law).</span>
                     </div>
                 </div>
 
@@ -594,7 +693,7 @@ export default function Index({
                                     </th>
 
                                     {/* Sticky Monthly stats header */}
-                                    <th className="p-2.5 text-center bg-slate-950 border-r border-slate-800 min-w-[70px] font-semibold text-slate-400 text-[11px]">
+                                    <th className="p-2.5 text-center bg-slate-950 border-r border-slate-800 min-w-[75px] font-semibold text-slate-400 text-[11px]">
                                         Work / Off
                                     </th>
 
@@ -669,6 +768,7 @@ export default function Index({
                                                 const isLeave = cell?.leave !== null;
                                                 const isRest = cell?.schedule_type === 'rest_day' || cell?.schedule_type === 'off';
                                                 const hasShift = cell?.schedule_type === 'shift' && cell?.shift !== null;
+                                                const hasFatigue = Boolean(cell?.fatigue_warning);
 
                                                 return (
                                                     <td
@@ -717,18 +817,26 @@ export default function Index({
                                                             </div>
                                                         ) : hasShift ? (
                                                             <div
-                                                                className="h-8 rounded-lg flex flex-col items-center justify-center text-white font-bold text-[10px] shadow-sm transition"
+                                                                className="h-8 rounded-lg flex flex-col items-center justify-center text-white font-bold text-[10px] shadow-sm transition relative"
                                                                 style={{
                                                                     backgroundColor: `${cell.shift?.color || '#3B82F6'}25`,
-                                                                    borderColor: `${cell.shift?.color || '#3B82F6'}60`,
-                                                                    borderWidth: '1px',
+                                                                    borderColor: hasFatigue ? '#F59E0B' : `${cell.shift?.color || '#3B82F6'}60`,
+                                                                    borderWidth: hasFatigue ? '1.5px' : '1px',
                                                                     color: cell.shift?.color || '#93C5FD',
                                                                 }}
-                                                                title={`${cell.shift?.name} (${cell.shift?.start_time}-${cell.shift?.end_time})`}
+                                                                title={`${cell.shift?.name} (${cell.shift?.start_time}-${cell.shift?.end_time})${
+                                                                    hasFatigue ? `\n⚠️ Alert: Rest turnaround is ${cell.rest_hours}h (<11h).` : ''
+                                                                }`}
                                                             >
                                                                 <span>{cell.shift?.code}</span>
+                                                                {hasFatigue && (
+                                                                    <span
+                                                                        className="w-2 h-2 rounded-full bg-amber-400 absolute -top-1 -right-1 border border-slate-900"
+                                                                        title={`Rest interval ${cell.rest_hours}h (<11h)`}
+                                                                    />
+                                                                )}
                                                                 {cell.is_overridden && (
-                                                                    <span className="w-1 h-1 rounded-full bg-amber-400 absolute bottom-1 right-1" />
+                                                                    <span className="w-1 h-1 rounded-full bg-indigo-400 absolute bottom-0.5 right-0.5" />
                                                                 )}
                                                             </div>
                                                         ) : (
@@ -743,12 +851,59 @@ export default function Index({
                                     ))
                                 )}
                             </tbody>
+
+                            {/* 5. Sticky Daily Coverage Headcount Summary Footer */}
+                            {coverage_summary && (
+                                <tfoot className="bg-slate-950 text-slate-300 border-t-2 border-slate-700 sticky bottom-0 z-20 shadow-[0_-4px_6px_rgba(0,0,0,0.3)]">
+                                    <tr>
+                                        <td className="p-2.5 font-bold text-xs sticky left-0 bg-slate-950 border-r border-slate-800 text-indigo-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
+                                            Daily Working Headcount
+                                        </td>
+                                        <td className="p-2 text-center border-r border-slate-800 bg-slate-950 text-[10px] text-slate-400 font-semibold">
+                                            Staff On Duty
+                                        </td>
+                                        {days.map((day) => {
+                                            const stat = coverage_summary[day.date];
+                                            const count = stat?.total_working ?? 0;
+                                            return (
+                                                <td
+                                                    key={day.date}
+                                                    className={`p-1.5 text-center border-r border-slate-800/60 font-bold text-xs ${
+                                                        count === 0 && !day.is_sunday
+                                                            ? 'text-rose-400 bg-rose-950/20'
+                                                            : 'text-indigo-300'
+                                                    }`}
+                                                    title={`Working: ${count} staff\nRest: ${stat?.total_rest ?? 0}\nLeave: ${stat?.total_leave ?? 0}`}
+                                                >
+                                                    {count}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                    <tr>
+                                        <td className="p-2 text-xs sticky left-0 bg-slate-950 border-r border-slate-800 text-amber-400 font-semibold shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
+                                            Scheduled Rest Days (OFF)
+                                        </td>
+                                        <td className="p-1 text-center border-r border-slate-800 bg-slate-950 text-[10px] text-slate-500">
+                                            Rest Days
+                                        </td>
+                                        {days.map((day) => (
+                                            <td
+                                                key={day.date}
+                                                className="p-1 text-center border-r border-slate-800/60 text-amber-400 text-[11px] font-medium"
+                                            >
+                                                {coverage_summary[day.date]?.total_rest ?? 0}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                </tfoot>
+                            )}
                         </table>
                     </div>
                 </div>
             </div>
 
-            {/* 5. Cell Edit Modal */}
+            {/* 6. Cell Edit Modal */}
             {selectedCell && (
                 <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
@@ -775,7 +930,7 @@ export default function Index({
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => cellForm.setData('schedule_type', 'shift')}
+                                        onClick={() => cellForm.setData((p) => ({ ...p, schedule_type: 'shift' }))}
                                         className={`py-2 px-3 rounded-xl border text-xs font-semibold transition ${
                                             cellForm.data.schedule_type === 'shift'
                                                 ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
@@ -786,7 +941,7 @@ export default function Index({
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => cellForm.setData('schedule_type', 'rest_day')}
+                                        onClick={() => cellForm.setData((p) => ({ ...p, schedule_type: 'rest_day' }))}
                                         className={`py-2 px-3 rounded-xl border text-xs font-semibold transition ${
                                             cellForm.data.schedule_type === 'rest_day'
                                                 ? 'bg-amber-600 border-amber-500 text-white shadow-md'
@@ -805,7 +960,7 @@ export default function Index({
                                     </label>
                                     <select
                                         value={cellForm.data.shift_id}
-                                        onChange={(e) => cellForm.setData('shift_id', e.target.value)}
+                                        onChange={(e) => cellForm.setData((p) => ({ ...p, shift_id: e.target.value }))}
                                         className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
                                         required
                                     >
@@ -824,9 +979,9 @@ export default function Index({
                                 </label>
                                 <input
                                     type="text"
-                                    placeholder="e.g., Managerial substitution or overtime swap"
+                                    placeholder="e.g., Managerial substitution or emergency cover"
                                     value={cellForm.data.notes}
-                                    onChange={(e) => cellForm.setData('notes', e.target.value)}
+                                    onChange={(e) => cellForm.setData((p) => ({ ...p, notes: e.target.value }))}
                                     className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
                                 />
                             </div>
@@ -852,7 +1007,7 @@ export default function Index({
                 </div>
             )}
 
-            {/* 6. Shift Swap Modal */}
+            {/* 7. Shift Swap Modal */}
             {isSwapModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
@@ -949,7 +1104,7 @@ export default function Index({
                 </div>
             )}
 
-            {/* 7. Bulk Pattern-Based Roster Generator Modal */}
+            {/* 8. Bulk Pattern-Based Roster Generator Modal */}
             {isGenerateModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-6 my-8">
@@ -961,7 +1116,7 @@ export default function Index({
                                 <div>
                                     <h3 className="text-base font-bold text-white">Generate Duty Roster</h3>
                                     <p className="text-xs text-slate-400 mt-0.5">
-                                        Build schedules across date ranges using industry-standard patterns.
+                                        Build schedules across date ranges using high-performance chunked database batching.
                                     </p>
                                 </div>
                             </div>
@@ -1079,6 +1234,22 @@ export default function Index({
                                         required
                                     />
                                 </div>
+                            </div>
+
+                            {/* Leave Protection Option */}
+                            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                                <div>
+                                    <div className="text-xs font-bold text-teal-400">Preserve Approved Leaves</div>
+                                    <p className="text-[11px] text-slate-400">
+                                        Do not schedule work shifts over days with pre-approved employee leaves.
+                                    </p>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={generateForm.data.preserve_leaves}
+                                    onChange={(e) => generateForm.setData('preserve_leaves', e.target.checked)}
+                                    className="rounded bg-slate-800 border-slate-700 text-teal-500 focus:ring-teal-400 w-4 h-4 cursor-pointer"
+                                />
                             </div>
 
                             {/* Pattern Details Config */}

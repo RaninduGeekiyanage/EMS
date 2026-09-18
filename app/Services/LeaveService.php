@@ -84,23 +84,25 @@ final class LeaveService
      */
     public function seedStatutoryTypes(string $tenantId): Collection
     {
-        $createdTypes = new Collection;
+        return DB::transaction(function () use ($tenantId): Collection {
+            $createdTypes = new Collection;
 
-        foreach (self::STATUTORY_PRESETS as $preset) {
-            $type = LeaveType::updateOrCreate(
-                [
-                    'tenant_id' => $tenantId,
-                    'code' => $preset['code'],
-                ],
-                array_merge($preset, [
-                    'tenant_id' => $tenantId,
-                    'is_active' => true,
-                ])
-            );
-            $createdTypes->push($type);
-        }
+            foreach (self::STATUTORY_PRESETS as $preset) {
+                $type = LeaveType::updateOrCreate(
+                    [
+                        'tenant_id' => $tenantId,
+                        'code' => $preset['code'],
+                    ],
+                    array_merge($preset, [
+                        'tenant_id' => $tenantId,
+                        'is_active' => true,
+                    ])
+                );
+                $createdTypes->push($type);
+            }
 
-        return $createdTypes;
+            return $createdTypes;
+        });
     }
 
     /**
@@ -163,72 +165,74 @@ final class LeaveService
      */
     public function allocateEntitlements(string $tenantId, int $year, ?string $employeeId = null): array
     {
-        $leaveTypes = LeaveType::where('tenant_id', $tenantId)
-            ->where('is_active', true)
-            ->get();
+        return DB::transaction(function () use ($tenantId, $year, $employeeId): array {
+            $leaveTypes = LeaveType::where('tenant_id', $tenantId)
+                ->where('is_active', true)
+                ->get();
 
-        if ($leaveTypes->isEmpty()) {
-            $this->seedStatutoryTypes($tenantId);
-            $leaveTypes = LeaveType::where('tenant_id', $tenantId)->where('is_active', true)->get();
-        }
-
-        $employeesQuery = Employee::where('tenant_id', $tenantId)
-            ->where('employment_status', 'active');
-
-        if ($employeeId !== null) {
-            $employeesQuery->where('id', $employeeId);
-        }
-
-        $employees = $employeesQuery->get();
-        $count = 0;
-
-        foreach ($employees as $employee) {
-            foreach ($leaveTypes as $type) {
-                // If gender is male and type is Maternity, skip
-                if ($type->code === 'MATERNITY' && isset($employee->gender) && strtolower((string) $employee->gender) === 'male') {
-                    continue;
-                }
-
-                $allocatedDays = $this->calculateProratedEntitlement($employee, $type, $year);
-
-                // Check previous year carry forward if allowed
-                $carriedForwardDays = 0.0;
-                if ($type->carry_forward_allowed) {
-                    $prevEntitlement = LeaveEntitlement::where('tenant_id', $tenantId)
-                        ->where('employee_id', $employee->id)
-                        ->where('leave_type_id', $type->id)
-                        ->where('year', $year - 1)
-                        ->first();
-
-                    if ($prevEntitlement) {
-                        $unused = max(0.0, ($prevEntitlement->allocated_days + $prevEntitlement->carried_forward_days) - $prevEntitlement->used_days);
-                        $carriedForwardDays = min((float) $type->max_carry_forward_days, $unused);
-                    }
-                }
-
-                LeaveEntitlement::updateOrCreate(
-                    [
-                        'tenant_id' => $tenantId,
-                        'employee_id' => $employee->id,
-                        'leave_type_id' => $type->id,
-                        'year' => $year,
-                    ],
-                    [
-                        'tenant_id' => $tenantId,
-                        'allocated_days' => $allocatedDays,
-                        'carried_forward_days' => $carriedForwardDays,
-                        'notes' => "Automated entitlement allocation for {$year}",
-                    ]
-                );
-
-                $count++;
+            if ($leaveTypes->isEmpty()) {
+                $this->seedStatutoryTypes($tenantId);
+                $leaveTypes = LeaveType::where('tenant_id', $tenantId)->where('is_active', true)->get();
             }
-        }
 
-        return [
-            'total_allocated' => $count,
-            'year' => $year,
-        ];
+            $employeesQuery = Employee::where('tenant_id', $tenantId)
+                ->where('employment_status', 'active');
+
+            if ($employeeId !== null) {
+                $employeesQuery->where('id', $employeeId);
+            }
+
+            $employees = $employeesQuery->get();
+            $count = 0;
+
+            foreach ($employees as $employee) {
+                foreach ($leaveTypes as $type) {
+                    // If gender is male and type is Maternity, skip
+                    if ($type->code === 'MATERNITY' && isset($employee->gender) && strtolower((string) $employee->gender) === 'male') {
+                        continue;
+                    }
+
+                    $allocatedDays = $this->calculateProratedEntitlement($employee, $type, $year);
+
+                    // Check previous year carry forward if allowed
+                    $carriedForwardDays = 0.0;
+                    if ($type->carry_forward_allowed) {
+                        $prevEntitlement = LeaveEntitlement::where('tenant_id', $tenantId)
+                            ->where('employee_id', $employee->id)
+                            ->where('leave_type_id', $type->id)
+                            ->where('year', $year - 1)
+                            ->first();
+
+                        if ($prevEntitlement) {
+                            $unused = max(0.0, ($prevEntitlement->allocated_days + $prevEntitlement->carried_forward_days) - $prevEntitlement->used_days);
+                            $carriedForwardDays = min((float) $type->max_carry_forward_days, $unused);
+                        }
+                    }
+
+                    LeaveEntitlement::updateOrCreate(
+                        [
+                            'tenant_id' => $tenantId,
+                            'employee_id' => $employee->id,
+                            'leave_type_id' => $type->id,
+                            'year' => $year,
+                        ],
+                        [
+                            'tenant_id' => $tenantId,
+                            'allocated_days' => $allocatedDays,
+                            'carried_forward_days' => $carriedForwardDays,
+                            'notes' => "Automated entitlement allocation for {$year}",
+                        ]
+                    );
+
+                    $count++;
+                }
+            }
+
+            return [
+                'total_allocated' => $count,
+                'year' => $year,
+            ];
+        });
     }
 
     /**

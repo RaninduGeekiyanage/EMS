@@ -29,6 +29,7 @@ import {
     Landmark,
     Sun,
     HeartHandshake,
+    Loader2,
 } from 'lucide-react';
 
 interface Employee {
@@ -1145,6 +1146,15 @@ export default function Daily({
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Global Transaction Processing Overlay */}
+            {isProcessing && (
+                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
+                    <Loader2 className="w-12 h-12 animate-spin text-indigo-400 mb-3" />
+                    <p className="text-lg font-semibold">Calculating Attendance Ledger...</p>
+                    <p className="text-xs text-slate-400 mt-1">Processing punches, shift rules, and roster assignments inside database transaction...</p>
                 </div>
             )}
             </div>

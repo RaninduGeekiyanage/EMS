@@ -28,6 +28,7 @@ import {
     ShieldAlert,
     Check,
     X,
+    Loader2,
 } from 'lucide-react';
 
 interface MatchedEmployee {
@@ -1020,6 +1021,15 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Global Ingestion Processing Overlay */}
+            {uploadForm.processing && (
+                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
+                    <Loader2 className="w-12 h-12 animate-spin text-emerald-400 mb-3" />
+                    <p className="text-lg font-semibold">Committing Biometric Punches...</p>
+                    <p className="text-xs text-slate-400 mt-1">Safely inserting punch logs in chunked database transactions...</p>
                 </div>
             )}
             </div>

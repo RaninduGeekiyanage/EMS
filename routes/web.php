@@ -18,6 +18,7 @@ use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\RosterController;
+use App\Http\Controllers\RosterExportController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\AccessControlController as SuperAdminAccessControlController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
@@ -118,6 +119,7 @@ Route::middleware(['tenant'])->group(function (): void {
 
         // Duty Roster Management
         Route::get('/roster', [RosterController::class, 'index'])->middleware('can:roster.view')->name('roster.index');
+        Route::get('/roster/export', [RosterExportController::class, 'export'])->middleware('can:roster.view')->name('roster.export');
         Route::post('/roster/generate', [RosterController::class, 'generate'])->middleware('can:roster.create')->name('roster.generate');
         Route::post('/roster/entry', [RosterController::class, 'updateEntry'])->middleware('can:roster.update')->name('roster.entry.update');
         Route::post('/roster/swap', [RosterController::class, 'swap'])->middleware('can:roster.update')->name('roster.swap');

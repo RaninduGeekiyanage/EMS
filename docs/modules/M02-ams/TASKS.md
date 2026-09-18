@@ -47,3 +47,17 @@
   - [x] File: app/Http/Controllers/LeaveRequestController.php
   - [x] File: resources/js/Pages/Leave/Requests.tsx
   - [x] File: tests/Feature/M02/LeaveManagementTest.php
+
+## Phase 5: Enterprise Duty Roster & System Hardening
+- [x] Duty Roster Engine & Hardening
+  - [x] Database Migrations: `create_roster_entries_table.php`, `create_roster_patterns_table.php`
+  - [x] Models: `app/Models/RosterEntry.php`, `app/Models/RosterPattern.php`
+  - [x] RBAC Permissions: `roster.view`, `roster.create`, `roster.update`, `roster.publish`, `roster.delete`
+  - [x] Service Layer: `app/Services/RosterService.php` (Chunked upsert 250 records, `DB::transaction`, fatigue turnaround detection < 11h, leave preservation, daily coverage headcount)
+  - [x] Controllers: `app/Http/Controllers/RosterController.php`, `app/Http/Controllers/RosterExportController.php`
+  - [x] Financial Lock Integration: Freeze roster entries upon M03 PayrollRun `lock()`
+  - [x] Frontend Planner: `resources/js/Pages/Roster/Index.tsx` (Matrix, quick popover edit, shift swap modal, pattern generator, CSV export, print stylesheet, full-screen glassmorphism transaction overlay)
+  - [x] Cross-Module Transaction Safety: Audited and hardened `DB::transaction` across Attendance Processing, Leave Entitlements, Public Holiday Seeding, and Roster Operations
+  - [x] Global Processing Overlays: Added blurred loading backdrop overlays across `Daily.tsx`, `Import.tsx`, `Index.tsx` (Payroll), and `Requests.tsx` (Leave)
+  - [x] Test Coverage: `tests/Unit/RosterServiceTest.php`, `tests/Feature/M02/RosterManagementTest.php`, `tests/Feature/M02/AttendanceRosterIntegrationTest.php`, `tests/Feature/M02/RosterEnterpriseHardeningTest.php` (161 tests passing across app)
+

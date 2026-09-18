@@ -72,88 +72,97 @@ final class AttendanceProcessingService
 
         $employees = $employeesQuery->with('department:id,name')->get();
 
-        $processedCount = 0;
-        $presentCount = 0;
-        $absentCount = 0;
-        $lateCount = 0;
-        $missingPunchCount = 0;
-        $halfDayCount = 0;
-        $savedRecords = new Collection;
+        return DB::transaction(function () use (
+            $tenantId,
+            $date,
+            $dateString,
+            $holiday,
+            $employees,
+            $overwriteManual
+        ): array {
+            $processedCount = 0;
+            $presentCount = 0;
+            $absentCount = 0;
+            $lateCount = 0;
+            $missingPunchCount = 0;
+            $halfDayCount = 0;
+            $savedRecords = new Collection;
 
-        foreach ($employees as $employee) {
-            // Check if existing record is manual override
-            $existing = AttendanceDaily::where('tenant_id', $tenantId)
-                ->where('employee_id', $employee->id)
-                ->whereDate('attendance_date', $dateString)
-                ->first();
+            foreach ($employees as $employee) {
+                // Check if existing record is manual override
+                $existing = AttendanceDaily::where('tenant_id', $tenantId)
+                    ->where('employee_id', $employee->id)
+                    ->whereDate('attendance_date', $dateString)
+                    ->first();
 
-            if ($existing && $existing->is_manual && ! $overwriteManual) {
-                $savedRecords->push($existing);
-                continue;
+                if ($existing && $existing->is_manual && ! $overwriteManual) {
+                    $savedRecords->push($existing);
+                    continue;
+                }
+
+                // Resolve effective shift for employee on this date
+                $shift = $this->shiftService->getEffectiveShiftForEmployee($employee, $date);
+
+                // Resolve applicable management rule (shift-level or tenant default)
+                $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
+
+                // Query punches within window
+                $punches = $this->getPunchesForDate($tenantId, $employee->id, $date, $shift);
+
+                // Calculate attendance record
+                $calculatedData = $this->calculateDailyAttendance(
+                    $employee,
+                    $date,
+                    $shift,
+                    $rule,
+                    $holiday,
+                    $punches
+                );
+
+                $recordData = array_merge($calculatedData, [
+                    'tenant_id' => $tenantId,
+                    'employee_id' => $employee->id,
+                    'shift_id' => $shift?->id,
+                    'is_manual' => false,
+                    'manual_reason' => null,
+                    'manual_edited_by' => null,
+                ]);
+
+                if ($existing) {
+                    $existing->update($recordData);
+                    $record = $existing;
+                } else {
+                    $record = AttendanceDaily::create(array_merge($recordData, [
+                        'attendance_date' => $dateString,
+                    ]));
+                }
+
+                $savedRecords->push($record);
+                $processedCount++;
+
+                match ($record->status) {
+                    'present' => $presentCount++,
+                    'absent' => $absentCount++,
+                    'missing_punch' => $missingPunchCount++,
+                    'half_day' => $halfDayCount++,
+                    default => null,
+                };
+
+                if ($record->late_minutes > 0) {
+                    $lateCount++;
+                }
             }
 
-            // Resolve effective shift for employee on this date
-            $shift = $this->shiftService->getEffectiveShiftForEmployee($employee, $date);
-
-            // Resolve applicable management rule (shift-level or tenant default)
-            $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
-
-            // Query punches within window
-            $punches = $this->getPunchesForDate($tenantId, $employee->id, $date, $shift);
-
-            // Calculate attendance record
-            $calculatedData = $this->calculateDailyAttendance(
-                $employee,
-                $date,
-                $shift,
-                $rule,
-                $holiday,
-                $punches
-            );
-
-            $recordData = array_merge($calculatedData, [
-                'tenant_id' => $tenantId,
-                'employee_id' => $employee->id,
-                'shift_id' => $shift?->id,
-                'is_manual' => false,
-                'manual_reason' => null,
-                'manual_edited_by' => null,
-            ]);
-
-            if ($existing) {
-                $existing->update($recordData);
-                $record = $existing;
-            } else {
-                $record = AttendanceDaily::create(array_merge($recordData, [
-                    'attendance_date' => $dateString,
-                ]));
-            }
-
-            $savedRecords->push($record);
-            $processedCount++;
-
-            match ($record->status) {
-                'present' => $presentCount++,
-                'absent' => $absentCount++,
-                'missing_punch' => $missingPunchCount++,
-                'half_day' => $halfDayCount++,
-                default => null,
-            };
-
-            if ($record->late_minutes > 0) {
-                $lateCount++;
-            }
-        }
-
-        return [
-            'processed' => $processedCount,
-            'present' => $presentCount,
-            'absent' => $absentCount,
-            'late' => $lateCount,
-            'missing_punch' => $missingPunchCount,
-            'half_day' => $halfDayCount,
-            'records' => $savedRecords,
-        ];
+            return [
+                'processed' => $processedCount,
+                'present' => $presentCount,
+                'absent' => $absentCount,
+                'late' => $lateCount,
+                'missing_punch' => $missingPunchCount,
+                'half_day' => $halfDayCount,
+                'records' => $savedRecords,
+            ];
+        });
     }
 
     /**

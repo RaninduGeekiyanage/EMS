@@ -6,12 +6,14 @@ namespace App\Http\Controllers;
 
 use App\Models\Department;
 use App\Models\PayrollRun;
+use App\Models\RosterEntry;
 use App\Models\Tenant;
 use App\Services\PayrollCalculationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -288,7 +290,7 @@ final class PayrollRunController extends Controller
     }
 
     /**
-     * Lock a payroll run against further edits.
+     * Lock a payroll run against further edits and freeze historical duty roster entries.
      */
     public function lock(PayrollRun $payrollRun, Request $request): RedirectResponse
     {
@@ -298,9 +300,19 @@ final class PayrollRunController extends Controller
             abort(404, 'Payroll run not found.');
         }
 
-        $payrollRun->update([
-            'status' => 'locked',
-        ]);
+        DB::transaction(function () use ($payrollRun): void {
+            $payrollRun->update([
+                'status' => 'locked',
+            ]);
+
+            // Freeze matching Duty Roster entries for this finalized month
+            $startDate = Carbon::createFromDate($payrollRun->period_year, $payrollRun->period_month, 1)->startOfMonth();
+            $endDate = $startDate->copy()->endOfMonth();
+
+            RosterEntry::where('tenant_id', $payrollRun->tenant_id)
+                ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+                ->update(['status' => 'locked']);
+        });
 
         return back()->with('success', "Payroll run for {$payrollRun->period_label} is now locked.");
     }

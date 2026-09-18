@@ -27,6 +27,7 @@ final class GenerateRosterRequest extends FormRequest
             'department_id' => ['nullable', 'string'],
             'conflict_mode' => ['nullable', 'string', 'in:overwrite,preserve'],
             'status' => ['nullable', 'string', 'in:draft,published'],
+            'preserve_leaves' => ['nullable', 'boolean'],
 
             // Daily Mode Config
             'daily_config' => ['nullable', 'array'],

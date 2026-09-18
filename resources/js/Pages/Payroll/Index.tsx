@@ -21,6 +21,7 @@ import {
     Sliders,
     Building2,
     Briefcase,
+    Loader2,
 } from 'lucide-react';
 
 interface PayrollRunItem {
@@ -745,6 +746,15 @@ export default function Index({
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Global Payroll Processing Overlay */}
+            {runForm.processing && (
+                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
+                    <Loader2 className="w-12 h-12 animate-spin text-indigo-400 mb-3" />
+                    <p className="text-lg font-semibold">Calculating Payroll Run...</p>
+                    <p className="text-xs text-slate-400 mt-1">Processing wages, OT, EPF/ETF contributions, and APIT tax within database transaction...</p>
                 </div>
             )}
         </AuthenticatedLayout>

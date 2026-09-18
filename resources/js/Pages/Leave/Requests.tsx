@@ -29,6 +29,7 @@ import {
     Award,
     HeartHandshake,
     AlertTriangle,
+    Loader2,
 } from 'lucide-react';
 
 interface Employee {
@@ -1042,6 +1043,15 @@ export default function LeaveRequestsIndex({
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Global Leave Allocation Processing Overlay */}
+            {allocateForm.processing && (
+                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
+                    <Loader2 className="w-12 h-12 animate-spin text-indigo-400 mb-3" />
+                    <p className="text-lg font-semibold">Allocating Leave Quotas...</p>
+                    <p className="text-xs text-slate-400 mt-1">Applying statutory annual, casual & medical quotas within database transaction...</p>
                 </div>
             )}
             </div>
