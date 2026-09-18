@@ -1,9 +1,14 @@
-﻿# M02 Requirements Specification
+# M02 Requirements Specification
 
-## 1. Shift & Calendar Management
-- Configurable shift definitions: start time, end time, grace period minutes, break duration.
-- Shift allocation to employees or departments with roster scheduling.
-- Calendar setup for statutory, mercantile, and Poya public holidays in Sri Lanka.
+## 1. Shift, Roster & Calendar Management
+- **Configurable Shift Definitions**: Start time, end time, grace period minutes, break duration, night shift flag, color code, and overtime threshold.
+- **Enterprise Duty Roster Planner**:
+  - Interactive monthly matrix grid with employee rows, day-by-day shift badges, and real-time monthly stats.
+  - Multi-mode pattern generation engine: 7-day weekly matrix, rolling N-day cyclical rotation, daily single shift, and month-to-month cloning across multi-month/multi-year horizons.
+  - Dynamic rest day allocation (`OFF`), eliminating false absentee flags during attendance processing.
+  - Single cell inline edit popover and atomic shift swapping between employees.
+  - Draft and published status lifecycle with managerial publish gatekeeping.
+- **Calendar Setup**: Statutory, mercantile, and Poya public holidays in Sri Lanka.
 
 ## 2. File Import (Phase 1) & Biometric Integration
 - Ingest raw attendance punch files without requiring dedicated machine drivers.

@@ -241,8 +241,38 @@ final class PermissionCatalog
         'shift.delete' => [
             'domain' => 'ams',
             'name' => 'Delete Shifts',
-            'description' => 'Remove shift configurations from the attendance roster',
+            'description' => 'Remove shift configurations from the system',
             'is_critical' => false,
+        ],
+        'roster.view' => [
+            'domain' => 'ams',
+            'name' => 'View Duty Roster',
+            'description' => 'View monthly duty rosters, scheduled shifts, and employee rest days',
+            'is_critical' => false,
+        ],
+        'roster.create' => [
+            'domain' => 'ams',
+            'name' => 'Generate & Build Rosters',
+            'description' => 'Generate duty rosters using daily, weekly, and rolling cyclical patterns',
+            'is_critical' => false,
+        ],
+        'roster.update' => [
+            'domain' => 'ams',
+            'name' => 'Edit Roster & Swap Shifts',
+            'description' => 'Modify cell-level roster entries and swap shifts between employees',
+            'is_critical' => false,
+        ],
+        'roster.publish' => [
+            'domain' => 'ams',
+            'name' => 'Publish & Lock Rosters',
+            'description' => 'Publish draft rosters to activate attendance matching, or lock finalized rosters',
+            'is_critical' => true,
+        ],
+        'roster.delete' => [
+            'domain' => 'ams',
+            'name' => 'Clear Rosters',
+            'description' => 'Purge and clear draft roster entries for a department or month',
+            'is_critical' => true,
         ],
         'work-calendar.view' => [
             'domain' => 'ams',

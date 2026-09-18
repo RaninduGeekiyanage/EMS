@@ -81,4 +81,15 @@ final class Shift extends Model
             ->withPivot(['id', 'effective_from', 'effective_to'])
             ->withTimestamps();
     }
+
+    /**
+     * Get the roster entries scheduled for this shift.
+     *
+     * @return HasMany<RosterEntry, $this>
+     */
+    public function rosterEntries(): HasMany
+    {
+        return $this->hasMany(RosterEntry::class, 'shift_id');
+    }
 }
+

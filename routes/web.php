@@ -17,6 +17,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
+use App\Http\Controllers\RosterController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\AccessControlController as SuperAdminAccessControlController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
@@ -114,6 +115,14 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/shifts/seed-presets', [ShiftController::class, 'seedPresets'])->name('shifts.seed-presets');
         Route::post('/shifts/assign', [ShiftController::class, 'assign'])->name('shifts.assign');
         Route::delete('/shifts/assignments/{assignment}', [ShiftController::class, 'removeAssignment'])->name('shifts.assignments.destroy');
+
+        // Duty Roster Management
+        Route::get('/roster', [RosterController::class, 'index'])->middleware('can:roster.view')->name('roster.index');
+        Route::post('/roster/generate', [RosterController::class, 'generate'])->middleware('can:roster.create')->name('roster.generate');
+        Route::post('/roster/entry', [RosterController::class, 'updateEntry'])->middleware('can:roster.update')->name('roster.entry.update');
+        Route::post('/roster/swap', [RosterController::class, 'swap'])->middleware('can:roster.update')->name('roster.swap');
+        Route::post('/roster/publish', [RosterController::class, 'publish'])->middleware('can:roster.publish')->name('roster.publish');
+        Route::delete('/roster/clear', [RosterController::class, 'clear'])->middleware('can:roster.delete')->name('roster.clear');
 
         // Work Calendar & Public Holidays
         Route::get('/work-calendar', [WorkCalendarController::class, 'index'])->name('work-calendar.index');

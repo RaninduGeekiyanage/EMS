@@ -1,7 +1,9 @@
-﻿# M02 Data Models & Schema
+# M02 Data Models & Schema
 
 - `shifts`: `id` (ULID), `tenant_id`, `name`, `start_time`, `end_time`, `break_minutes`, `grace_minutes`, `ot_threshold_minutes`, `is_night_shift`, timestamps.
 - `shift_assignments`: `id`, `tenant_id`, `employee_id`, `shift_id`, `effective_from`, `effective_to`, timestamps.
+- `roster_entries`: `id` (ULID), `tenant_id`, `employee_id`, `roster_date`, `shift_id`, `schedule_type` (shift/rest_day/off), `status` (draft/published/locked), `is_overridden`, `notes`, `created_by`, timestamps.
+- `roster_patterns`: `id` (ULID), `tenant_id`, `name`, `code`, `pattern_type` (daily/weekly/cyclical), `cycle_length_days`, `pattern_data` (JSON), `is_active`, timestamps.
 - `public_holidays`: `id`, `tenant_id`, `holiday_date`, `name`, `type` (statutory/mercantile/poya), timestamps.
 - `attendance_imports`: `id` (ULID), `tenant_id`, `filename`, `adapter_type`, `total_rows`, `processed_rows`, `status`, `imported_by`, timestamps.
 - `attendance_logs`: `id` (ULID), `tenant_id`, `employee_id`, `punch_datetime`, `punch_type` (in/out), `device_id`, `import_id`, timestamps.

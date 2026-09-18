@@ -7,6 +7,7 @@ import {
     Users,
     Clock,
     CalendarDays,
+    CalendarRange,
     FileSpreadsheet,
     CalendarCheck,
     Palmtree,
@@ -233,9 +234,13 @@ export default function AuthenticatedLayout({
                                     <FileSpreadsheet className="w-5 h-5 flex-shrink-0" />
                                     {!collapsed && <span>Biometric Import</span>}
                                 </Link>
-                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shifts">
+                                <Link href="/roster" className={navItemClass('/roster')} title="Duty Roster">
+                                    <CalendarRange className="w-5 h-5 flex-shrink-0" />
+                                    {!collapsed && <span>Duty Roster</span>}
+                                </Link>
+                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Templates">
                                     <Clock className="w-5 h-5 flex-shrink-0" />
-                                    {!collapsed && <span>Shifts Roster</span>}
+                                    {!collapsed && <span>Shift Templates</span>}
                                 </Link>
                                 <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar">
                                     <CalendarDays className="w-5 h-5 flex-shrink-0" />

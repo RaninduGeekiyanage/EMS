@@ -50,6 +50,7 @@ The audit verified 100% architectural alignment between system documentation (`d
 | `/attendance/daily` | `Pages/Attendance/Daily.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |
 | `/attendance/import` | `Pages/Attendance/Import.tsx` | `AuthenticatedLayout` | `/attendance/daily` | `<Link>` |
 | `/shifts` | `Pages/Shifts/Index.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |
+| `/roster` | `Pages/Roster/Index.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |
 | `/work-calendar` | `Pages/WorkCalendar/Index.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |
 | `/leave/requests` | `Pages/Leave/Requests.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |
 | `/payroll` | `Pages/Payroll/Index.tsx` | `AuthenticatedLayout` | `/dashboard` | `<Link>` |

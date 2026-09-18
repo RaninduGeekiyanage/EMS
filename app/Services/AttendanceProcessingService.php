@@ -235,7 +235,26 @@ final class AttendanceProcessingService
                 ];
             }
 
-            $status = $isHoliday ? 'holiday' : ($isSunday ? 'rest_day' : 'absent');
+            // Check for explicit roster entry on this date
+            $rosterEntry = $this->shiftService->getRosterEntryForEmployee($employee, $date);
+            $isRosterRestDay = $rosterEntry !== null && ($rosterEntry->schedule_type === 'rest_day' || $rosterEntry->schedule_type === 'off');
+
+            if ($isHoliday) {
+                $status = 'holiday';
+                $notes = "Holiday: {$holiday->name}";
+            } elseif ($isRosterRestDay) {
+                $status = 'rest_day';
+                $notes = 'Scheduled Rest Day (Duty Roster)';
+            } elseif ($rosterEntry !== null && $rosterEntry->schedule_type === 'shift') {
+                $status = 'absent';
+                $notes = 'No biometric punches recorded for scheduled roster shift';
+            } elseif ($isSunday) {
+                $status = 'rest_day';
+                $notes = 'Rest Day (Sunday)';
+            } else {
+                $status = 'absent';
+                $notes = 'No biometric punches recorded';
+            }
 
             return [
                 'check_in' => null,
@@ -250,7 +269,7 @@ final class AttendanceProcessingService
                 'calculation_breakdown' => [
                     'rule' => $rule->rule_name,
                     'punches_count' => 0,
-                    'notes' => $isHoliday ? "Holiday: {$holiday->name}" : ($isSunday ? 'Rest Day' : 'No biometric punches recorded'),
+                    'notes' => $notes,
                 ],
             ];
         }

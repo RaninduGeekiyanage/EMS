@@ -170,5 +170,16 @@ final class Employee extends Model
     {
         return $this->hasMany(LeaveRequest::class, 'employee_id');
     }
+
+    /**
+     * Get the roster entries for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<RosterEntry, $this>
+     */
+    public function rosterEntries(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(RosterEntry::class, 'employee_id');
+    }
 }
+
 

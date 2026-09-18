@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Employee;
 use App\Models\PublicHoliday;
+use App\Models\RosterEntry;
 use App\Models\Shift;
 use App\Models\ShiftAssignment;
 use Carbon\Carbon;
@@ -226,11 +227,29 @@ final class ShiftService
 
     /**
      * Find effective shift for an employee on a given date.
+     * Prioritizes scheduled RosterEntry (if exists) before falling back to permanent ShiftAssignment.
      */
     public function getEffectiveShiftForEmployee(Employee $employee, CarbonInterface $date): ?Shift
     {
         $dateString = $date->toDateString();
 
+        // 1. Check for specific roster entry on this date
+        $rosterEntry = RosterEntry::where('employee_id', $employee->id)
+            ->whereDate('roster_date', $dateString)
+            ->with('shift')
+            ->first();
+
+        if ($rosterEntry !== null) {
+            if ($rosterEntry->schedule_type === 'rest_day' || $rosterEntry->schedule_type === 'off') {
+                return null;
+            }
+
+            if ($rosterEntry->shift !== null) {
+                return $rosterEntry->shift;
+            }
+        }
+
+        // 2. Fallback to permanent baseline ShiftAssignment
         $assignment = ShiftAssignment::where('employee_id', $employee->id)
             ->where('effective_from', '<=', $dateString)
             ->where(static function ($q) use ($dateString) {
@@ -241,6 +260,17 @@ final class ShiftService
             ->first();
 
         return $assignment?->shift;
+    }
+
+    /**
+     * Get specific roster entry for an employee on a given date.
+     */
+    public function getRosterEntryForEmployee(Employee $employee, CarbonInterface $date): ?RosterEntry
+    {
+        return RosterEntry::where('employee_id', $employee->id)
+            ->whereDate('roster_date', $date->toDateString())
+            ->with('shift')
+            ->first();
     }
 
     /**
