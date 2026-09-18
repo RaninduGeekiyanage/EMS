@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Head, useForm, router } from '@inertiajs/react';
+import { Head, useForm, router, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Calendar as CalendarIcon,
@@ -456,6 +456,15 @@ export default function Index({
 
                         {/* Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                                href="/shifts"
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
+                                title="Configure Shift Hours & Baseline Assignments"
+                            >
+                                <Clock className="w-4 h-4 text-indigo-400" />
+                                Shift Definitions
+                            </Link>
+
                             <button
                                 onClick={handleExportCsv}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"

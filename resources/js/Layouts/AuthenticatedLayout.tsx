@@ -238,9 +238,9 @@ export default function AuthenticatedLayout({
                                     <CalendarRange className="w-5 h-5 flex-shrink-0" />
                                     {!collapsed && <span>Duty Roster</span>}
                                 </Link>
-                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Templates">
+                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions">
                                     <Clock className="w-5 h-5 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Templates</span>}
+                                    {!collapsed && <span>Shift Definitions</span>}
                                 </Link>
                                 <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar">
                                     <CalendarDays className="w-5 h-5 flex-shrink-0" />

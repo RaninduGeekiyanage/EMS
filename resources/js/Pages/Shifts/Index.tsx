@@ -23,6 +23,7 @@ import {
     Search,
     UserMinus,
     Fingerprint,
+    CalendarRange,
 } from 'lucide-react';
 
 interface Shift {
@@ -241,7 +242,7 @@ export default function Index({ shifts, employees, stats }: Props) {
     };
 
     return (
-        <AuthenticatedLayout title="Shift Roster & Schedules" backUrl="/dashboard">
+        <AuthenticatedLayout title="Shift Definitions & Baseline Schedules" backUrl="/dashboard">
             <div className="max-w-7xl mx-auto space-y-8">
                 {/* Header Subnavigation Bar */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
@@ -252,19 +253,27 @@ export default function Index({ shifts, employees, stats }: Props) {
                         <div>
                             <div className="flex items-center gap-2">
                                 <h1 className="text-xl font-bold tracking-tight text-white">
-                                    Shift Roster & Schedules
+                                    Shift Definitions & Baseline Schedules
                                 </h1>
                                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                     M02 AMS
                                 </span>
                             </div>
                             <p className="text-xs text-slate-400">
-                                Roster models, rotational patterns, night shifts, and employee timetable assignments
+                                Master shift hours, break policies, and permanent contractual defaults for fixed-schedule personnel
                             </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                            href="/roster"
+                            className="text-xs font-semibold text-white px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 shadow-md shadow-indigo-500/20 transition flex items-center gap-1.5"
+                            title="Open interactive monthly Duty Roster planner"
+                        >
+                            <CalendarRange className="w-4 h-4" />
+                            Open Duty Roster Planner
+                        </Link>
                         <Link
                             href="/work-calendar"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
@@ -278,12 +287,6 @@ export default function Index({ shifts, employees, stats }: Props) {
                         >
                             <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
                             Biometric Import
-                        </Link>
-                        <Link
-                            href="/employees"
-                            className="text-xs font-medium text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 transition"
-                        >
-                            Employees Directory
                         </Link>
                         <button
                             type="button"
@@ -303,6 +306,33 @@ export default function Index({ shifts, employees, stats }: Props) {
                             Add Shift
                         </button>
                     </div>
+                </div>
+
+                {/* Enterprise Workflow Guidance Card */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-slate-900/80 to-purple-950/40 border border-indigo-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <CalendarRange className="w-4 h-4 text-indigo-400" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Enterprise Scheduling Workflow</h2>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-medium">Standard WFM Flow</span>
+                            </div>
+                            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                                <strong className="text-white">Fixed 9–5 Personnel:</strong> Assign their permanent default shift once in the table below.
+                                <br />
+                                <strong className="text-indigo-300">Rotational / Shift Workers:</strong> Use the <strong className="text-white">Duty Roster Planner</strong> to schedule dynamic monthly patterns (7-Day, 4x2 Cyclical), manage swaps, and track statutory rest intervals.
+                            </p>
+                        </div>
+                    </div>
+                    <Link
+                        href="/roster"
+                        className="self-start md:self-center px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 group"
+                    >
+                        <span>Launch Duty Roster Planner</span>
+                        <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                    </Link>
                 </div>
                 {/* Metric Summary Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
