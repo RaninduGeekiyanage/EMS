@@ -138,9 +138,17 @@ final class RosterPatternController extends Controller
     /**
      * Auto-generate complementary rotated squad groups from an existing cyclical pattern.
      */
-    public function generateComplementarySquads(RosterPattern $pattern): RedirectResponse
+    public function generateComplementarySquads(Request $request, RosterPattern $pattern): RedirectResponse
     {
-        $created = $this->rosterService->generateComplementarySquads($pattern);
+        $validated = $request->validate([
+            'total_squads' => ['nullable', 'integer', 'min:2', 'max:26'],
+            'stagger_days' => ['nullable', 'integer', 'min:1', 'max:365'],
+        ]);
+
+        $totalSquads = isset($validated['total_squads']) ? (int) $validated['total_squads'] : null;
+        $staggerDays = isset($validated['stagger_days']) ? (int) $validated['stagger_days'] : null;
+
+        $created = $this->rosterService->generateComplementarySquads($pattern, $totalSquads, $staggerDays);
         $count = count($created);
 
         return redirect()->back()->with(

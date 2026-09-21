@@ -1012,7 +1012,7 @@ final class RosterService
      *
      * @return array<int, RosterPattern>
      */
-    public function generateComplementarySquads(RosterPattern $sourcePattern): array
+    public function generateComplementarySquads(RosterPattern $sourcePattern, ?int $totalSquads = null, ?int $staggerDays = null): array
     {
         if ($sourcePattern->pattern_type !== 'cyclical') {
             throw new DomainException('Complementary squads can only be generated for cyclical patterns.');
@@ -1024,14 +1024,32 @@ final class RosterService
             throw new DomainException('Cycle length must be at least 2 to generate complementary squads.');
         }
 
-        return DB::transaction(function () use ($sourcePattern, $steps, $count): array {
+        // Auto-detect uniform block size (e.g. 2-2-2-2 in 8-step cycle -> block size 2 -> 4 squads)
+        if ($totalSquads === null || $totalSquads < 2) {
+            $blockSize = $this->detectBlockSize($steps);
+            if ($blockSize > 1 && ($count % $blockSize) === 0) {
+                $totalSquads = (int) ($count / $blockSize);
+            } else {
+                $totalSquads = $count;
+            }
+        }
+
+        // Cap squads to 26 (A-Z)
+        $totalSquads = min($totalSquads, 26);
+
+        if ($staggerDays === null || $staggerDays < 1) {
+            $staggerDays = max(1, (int) round($count / $totalSquads));
+        }
+
+        return DB::transaction(function () use ($sourcePattern, $steps, $count, $totalSquads, $staggerDays): array {
             $created = [];
             $alphabet = range('A', 'Z');
             $baseName = preg_replace('/(\s*-\s*Group\s*[A-Z].*)$/i', '', $sourcePattern->name);
             $baseCode = preg_replace('/(-GRP-[A-Z].*)$/i', '', $sourcePattern->code);
 
-            for ($offset = 1; $offset < $count; $offset++) {
-                $letter = $alphabet[$offset] ?? ('G'.($offset + 1));
+            for ($squadIndex = 1; $squadIndex < $totalSquads; $squadIndex++) {
+                $letter = $alphabet[$squadIndex] ?? ('G'.($squadIndex + 1));
+                $offset = ($squadIndex * $staggerDays) % $count;
                 $rotated = [];
                 for ($i = 0; $i < $count; $i++) {
                     $src = $steps[($i + $offset) % $count];
@@ -1063,6 +1081,55 @@ final class RosterService
 
             return $created;
         });
+    }
+
+    /**
+     * Detect if a cyclical step sequence is arranged in uniform blocks (e.g. 2 Morn, 2 Eve, 2 Night, 2 Off -> block size 2).
+     */
+    private function detectBlockSize(array $steps): int
+    {
+        $count = count($steps);
+        if ($count < 2) {
+            return 1;
+        }
+
+        // Count length of first consecutive block
+        $firstShiftId = $steps[0]['shift_id'] ?? null;
+        $firstIsRest = (bool) ($steps[0]['is_rest_day'] ?? false);
+        $firstBlockLen = 0;
+        for ($i = 0; $i < $count; $i++) {
+            $shiftId = $steps[$i]['shift_id'] ?? null;
+            $isRest = (bool) ($steps[$i]['is_rest_day'] ?? false);
+            if ($shiftId === $firstShiftId && $isRest === $firstIsRest) {
+                $firstBlockLen++;
+            } else {
+                break;
+            }
+        }
+
+        if ($firstBlockLen <= 1 || ($count % $firstBlockLen) !== 0) {
+            return 1;
+        }
+
+        // Verify if all subsequent blocks match this uniform block length
+        $pos = 0;
+        while ($pos < $count) {
+            $blockShiftId = $steps[$pos]['shift_id'] ?? null;
+            $blockIsRest = (bool) ($steps[$pos]['is_rest_day'] ?? false);
+            for ($k = 0; $k < $firstBlockLen; $k++) {
+                if ($pos + $k >= $count) {
+                    return 1;
+                }
+                $sId = $steps[$pos + $k]['shift_id'] ?? null;
+                $iRest = (bool) ($steps[$pos + $k]['is_rest_day'] ?? false);
+                if ($sId !== $blockShiftId || $iRest !== $blockIsRest) {
+                    return 1;
+                }
+            }
+            $pos += $firstBlockLen;
+        }
+
+        return $firstBlockLen;
     }
 
     /**

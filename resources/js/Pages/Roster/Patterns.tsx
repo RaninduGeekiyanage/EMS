@@ -144,6 +144,13 @@ export default function Patterns({
         })(),
     });
 
+    // Complementary Squad Generator Modal State
+    const [isSquadGenModalOpen, setIsSquadGenModalOpen] = useState(false);
+    const [squadGenPattern, setSquadGenPattern] = useState<RosterPattern | null>(null);
+    const [targetSquadCount, setTargetSquadCount] = useState<number>(4);
+    const [staggerInterval, setStaggerInterval] = useState<number>(2);
+    const [isGeneratingSquads, setIsGeneratingSquads] = useState(false);
+
     // Assign Form State
     const assignForm = useForm({
         pattern_id: '',
@@ -282,12 +289,93 @@ export default function Patterns({
         }
     };
 
-    // Auto-generate Complementary Rotated Squad Groups
-    const handleGenerateComplementarySquads = (pattern: RosterPattern) => {
-        if (confirm(`Auto-generate remaining rotated squad groups (B, C, D...) for "${pattern.name}"?`)) {
-            router.post(`/roster/patterns/${pattern.id}/generate-squads`, {}, { preserveScroll: true });
+    // Open Auto-generate Squads Modal with Smart Suggestions
+    const openSquadGenModal = (pattern: RosterPattern) => {
+        setSquadGenPattern(pattern);
+        const steps = pattern.pattern_data?.steps || pattern.pattern_data || [];
+        const count = steps.length || pattern.cycle_length_days || 4;
+
+        // Detect consecutive identical shift block length (e.g. 2 Morn, 2 Eve, 2 Night, 2 Off -> block size 2)
+        let blockSize = 1;
+        if (count >= 2) {
+            const firstShiftId = steps[0]?.shift_id ?? null;
+            const firstIsRest = Boolean(steps[0]?.is_rest_day);
+            let bLen = 0;
+            for (let i = 0; i < count; i++) {
+                if (steps[i]?.shift_id === firstShiftId && Boolean(steps[i]?.is_rest_day) === firstIsRest) {
+                    bLen++;
+                } else {
+                    break;
+                }
+            }
+            if (bLen > 1 && count % bLen === 0) {
+                blockSize = bLen;
+            }
         }
+
+        const suggestedSquads = blockSize > 1 ? Math.floor(count / blockSize) : (count <= 4 ? count : 4);
+        const suggestedStagger = blockSize > 1 ? blockSize : Math.max(1, Math.round(count / suggestedSquads));
+        setTargetSquadCount(suggestedSquads);
+        setStaggerInterval(suggestedStagger);
+        setIsSquadGenModalOpen(true);
     };
+
+    const handleSquadGenSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!squadGenPattern) return;
+        setIsGeneratingSquads(true);
+        router.post(
+            `/roster/patterns/${squadGenPattern.id}/generate-squads`,
+            {
+                total_squads: targetSquadCount,
+                stagger_days: staggerInterval,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setIsSquadGenModalOpen(false);
+                    setIsGeneratingSquads(false);
+                },
+                onError: () => {
+                    setIsGeneratingSquads(false);
+                },
+            }
+        );
+    };
+
+    // Live Squad Rotation Previews
+    const squadPreviews = useMemo(() => {
+        if (!squadGenPattern) return [];
+        const steps = squadGenPattern.pattern_data?.steps || squadGenPattern.pattern_data || [];
+        const count = steps.length || squadGenPattern.cycle_length_days || 4;
+        const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+        const baseName = squadGenPattern.name.replace(/(\s*-\s*Group\s*[A-Z].*)$/i, '');
+        const baseCode = squadGenPattern.code.replace(/(-GRP-[A-Z].*)$/i, '');
+
+        const previews = [];
+        for (let i = 1; i < targetSquadCount; i++) {
+            const letter = alphabet[i] || `G${i + 1}`;
+            const offset = (i * staggerInterval) % count;
+            const rotatedChips = [];
+            for (let j = 0; j < count; j++) {
+                const src = steps[(j + offset) % count];
+                const shift = shifts.find((s) => s.id === src?.shift_id);
+                rotatedChips.push({
+                    label: src?.is_rest_day ? 'OFF' : shift?.code || 'SHIFT',
+                    isRest: Boolean(src?.is_rest_day),
+                    color: shift?.color,
+                });
+            }
+            previews.push({
+                letter,
+                name: `${baseName} - Group ${letter}`,
+                code: `${baseCode}-GRP-${letter}`,
+                offset,
+                chips: rotatedChips,
+            });
+        }
+        return previews;
+    }, [squadGenPattern, targetSquadCount, staggerInterval, shifts]);
 
     // Submit 1-Click Group Set
     const handleGroupSetSubmit = (e: React.FormEvent) => {
@@ -738,9 +826,9 @@ export default function Patterns({
 
                                                         {pattern.pattern_type === 'cyclical' && (pattern.cycle_length_days || 0) > 1 && (
                                                             <button
-                                                                onClick={() => handleGenerateComplementarySquads(pattern)}
+                                                                onClick={() => openSquadGenModal(pattern)}
                                                                 className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-950/50 transition border border-transparent hover:border-emerald-500/30"
-                                                                title="Auto-generate remaining rotating squad groups"
+                                                                title="Auto-generate complementary rotating squad groups (B, C, D...)"
                                                             >
                                                                 <Copy className="w-3.5 h-3.5" />
                                                             </button>
@@ -1783,6 +1871,207 @@ export default function Patterns({
                                 >
                                     <Zap className="w-4 h-4 text-amber-300" />
                                     <span>{groupSetForm.processing ? 'Generating...' : 'Generate Shift Group Set'}</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ========================================================================= */}
+            {/* 8. AUTO-GENERATE COMPLEMENTARY SQUAD GROUPS MODAL */}
+            {/* ========================================================================= */}
+            {isSquadGenModalOpen && squadGenPattern && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                                    <Copy className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">
+                                        Auto-Generate Complementary Squad Groups
+                                    </h3>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        Derive remaining rotated squad groups (B, C, D...) from <span className="text-indigo-300 font-semibold">{squadGenPattern.name}</span>.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setIsSquadGenModalOpen(false)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Base Roster Info Card */}
+                        <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div>
+                                    <span className="text-slate-400">Base Squad Card: </span>
+                                    <strong className="text-white font-mono">{squadGenPattern.code}</strong> — <span className="text-slate-300">{squadGenPattern.name}</span>
+                                </div>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                    Cycle Length: {squadGenPattern.cycle_length_days} Days
+                                </span>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleSquadGenSubmit} className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Total Squad Groups Desired
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={2}
+                                        max={26}
+                                        value={targetSquadCount}
+                                        onChange={(e) => {
+                                            const n = Math.max(2, Math.min(26, Number(e.target.value) || 2));
+                                            setTargetSquadCount(n);
+                                            const count = squadGenPattern.cycle_length_days || 4;
+                                            setStaggerInterval(Math.max(1, Math.round(count / n)));
+                                        }}
+                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 font-bold"
+                                        required
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                        Includes Group A. Generates <strong>{targetSquadCount - 1}</strong> new complementary squad cards.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Stagger Offset Interval (Days)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={squadGenPattern.cycle_length_days || 365}
+                                        value={staggerInterval}
+                                        onChange={(e) => setStaggerInterval(Math.max(1, Number(e.target.value) || 1))}
+                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 font-bold"
+                                        required
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                        Each subsequent squad shifts forward by <strong>{staggerInterval}</strong> days.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Quick Presets based on cycle length */}
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <span className="text-[11px] text-slate-400 font-medium">Quick Presets:</span>
+                                {squadGenPattern.cycle_length_days === 8 && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setTargetSquadCount(4); setStaggerInterval(2); }}
+                                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 transition"
+                                        >
+                                            4 Squads (2-day stagger - Continental)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setTargetSquadCount(2); setStaggerInterval(4); }}
+                                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                                        >
+                                            2 Squads (4-day stagger)
+                                        </button>
+                                    </>
+                                )}
+                                {squadGenPattern.cycle_length_days === 4 && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setTargetSquadCount(4); setStaggerInterval(1); }}
+                                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 transition"
+                                        >
+                                            4 Squads (1-day stagger - 24/7)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setTargetSquadCount(2); setStaggerInterval(2); }}
+                                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                                        >
+                                            2 Squads (2-day stagger)
+                                        </button>
+                                    </>
+                                )}
+                                {squadGenPattern.cycle_length_days === 3 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setTargetSquadCount(3); setStaggerInterval(1); }}
+                                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 transition"
+                                    >
+                                        3 Squads (1-day stagger - 2 Shifts + 1 OFF)
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Live Preview of Groups to be Created */}
+                            <div className="space-y-2 pt-2">
+                                <span className="text-xs font-semibold text-slate-300">
+                                    Generated Squad Groups Preview ({squadPreviews.length} New Patterns):
+                                </span>
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                    {squadPreviews.map((p, idx) => (
+                                        <div key={idx} className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono text-[10px] font-bold text-emerald-300 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                                        {p.code}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-white truncate">{p.name}</span>
+                                                    <span className="text-[10px] text-slate-400 font-mono">
+                                                        (+{idx * staggerInterval + staggerInterval}d offset)
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                                    {p.chips.map((chip, cIdx) => (
+                                                        <span
+                                                            key={cIdx}
+                                                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                                                chip.isRest
+                                                                    ? 'bg-slate-800 border-slate-700 text-slate-400'
+                                                                    : 'bg-indigo-600/20 border-indigo-500/30 text-indigo-200'
+                                                            }`}
+                                                            style={chip.color ? { borderColor: `${chip.color}66`, color: chip.color } : {}}
+                                                        >
+                                                            {cIdx + 1}:{chip.label}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsSquadGenModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isGeneratingSquads || squadPreviews.length === 0}
+                                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-xs font-bold text-white transition shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+                                >
+                                    <Zap className="w-4 h-4 text-amber-300" />
+                                    <span>
+                                        {isGeneratingSquads
+                                            ? 'Generating...'
+                                            : `⚡ Generate ${squadPreviews.length} Squad Groups`}
+                                    </span>
                                 </button>
                             </div>
                         </form>

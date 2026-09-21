@@ -19,6 +19,7 @@ import {
     UserCheck,
     Coffee,
     ShieldAlert,
+    ChevronLeft,
     ChevronRight,
     ChevronDown,
     Search,
@@ -88,6 +89,21 @@ export default function Index({ shifts, employees, stats }: Props) {
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [assignmentSearch, setAssignmentSearch] = useState('');
+
+    // Pagination States (max 10 records per page)
+    const SHIFT_PAGE_SIZE = 10;
+    const [shiftPage, setShiftPage] = useState(1);
+    const ASSIGNMENT_PAGE_SIZE = 10;
+    const [assignmentPage, setAssignmentPage] = useState(1);
+
+    // Reset pagination to page 1 on filter or search changes
+    useEffect(() => {
+        setShiftPage(1);
+    }, [searchQuery, filterType, statusFilter]);
+
+    useEffect(() => {
+        setAssignmentPage(1);
+    }, [assignmentSearch]);
 
     // Modal States
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
@@ -355,6 +371,44 @@ export default function Index({ shifts, employees, stats }: Props) {
         });
     }, [shifts, filterType, statusFilter, searchQuery]);
 
+    const totalShiftPages = Math.ceil(filteredShifts.length / SHIFT_PAGE_SIZE) || 1;
+    const paginatedShifts = useMemo(() => {
+        const start = (shiftPage - 1) * SHIFT_PAGE_SIZE;
+        return filteredShifts.slice(start, start + SHIFT_PAGE_SIZE);
+    }, [filteredShifts, shiftPage]);
+
+    const filteredAssignments = useMemo(() => {
+        const list: { emp: EmployeeAssignment; assignment: NonNullable<EmployeeAssignment['shift_assignments']>[number] }[] = [];
+        employees
+            .filter((e) => e.shift_assignments && e.shift_assignments.length > 0)
+            .filter((e) => {
+                if (!assignmentSearch) return true;
+                const q = assignmentSearch.toLowerCase();
+                return (
+                    e.full_name.toLowerCase().includes(q) ||
+                    e.emp_no.toLowerCase().includes(q) ||
+                    (e.department?.name && e.department.name.toLowerCase().includes(q)) ||
+                    e.shift_assignments?.some(
+                        (a) =>
+                            a.shift.name.toLowerCase().includes(q) ||
+                            a.shift.code.toLowerCase().includes(q)
+                    )
+                );
+            })
+            .forEach((emp) => {
+                emp.shift_assignments?.forEach((assignment) => {
+                    list.push({ emp, assignment });
+                });
+            });
+        return list;
+    }, [employees, assignmentSearch]);
+
+    const totalAssignmentPages = Math.ceil(filteredAssignments.length / ASSIGNMENT_PAGE_SIZE) || 1;
+    const paginatedAssignments = useMemo(() => {
+        const start = (assignmentPage - 1) * ASSIGNMENT_PAGE_SIZE;
+        return filteredAssignments.slice(start, start + ASSIGNMENT_PAGE_SIZE);
+    }, [filteredAssignments, assignmentPage]);
+
     const calculateDuration = (start: string, end: string, isNight: boolean): string => {
         try {
             const [sh, sm] = start.substring(0, 5).split(':').map(Number);
@@ -413,7 +467,7 @@ export default function Index({ shifts, employees, stats }: Props) {
         <AuthenticatedLayout title="Shift Definitions & Baseline Schedules" backUrl="/dashboard">
             <Head title="Shift Definitions" />
 
-            <div className="max-w-7xl mx-auto space-y-6">
+            <div className="max-w-7xl mx-auto space-y-4">
                 {/* Header & Subnavigation Bar */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                     <div className="flex items-center gap-3">
@@ -487,32 +541,49 @@ export default function Index({ shifts, employees, stats }: Props) {
                     </div>
                 </div>
 
-                {/* Metric Summary Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-                    <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-                        <span className="text-xs text-slate-400 font-medium">Total Shifts</span>
-                        <div className="text-2xl font-bold text-white mt-0.5">{stats.total_shifts}</div>
-                        <span className="text-[10px] text-slate-500">Configured in tenant</span>
+                {/* Metric Summary Bar (Compact single line) */}
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm text-xs">
+                    <div className="flex items-center gap-2" title="Configured in tenant">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
+                        <span className="text-slate-400 font-medium">Total Shifts:</span>
+                        <span className="font-bold text-white">{stats.total_shifts}</span>
+                        <span className="text-[11px] text-slate-500 hidden xl:inline">• Configured in tenant</span>
                     </div>
-                    <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-                        <span className="text-xs text-emerald-400 font-medium">Active Definitions</span>
-                        <div className="text-2xl font-bold text-emerald-400 mt-0.5">{stats.active_shifts}</div>
-                        <span className="text-[10px] text-slate-500">Available for assignment</span>
+
+                    <div className="hidden md:block h-3.5 w-px bg-slate-800" />
+
+                    <div className="flex items-center gap-2" title="Available for assignment">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span className="text-emerald-400 font-medium">Active Definitions:</span>
+                        <span className="font-bold text-emerald-400">{stats.active_shifts}</span>
+                        <span className="text-[11px] text-slate-500 hidden xl:inline">• Available for assignment</span>
                     </div>
-                    <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-                        <span className="text-xs text-purple-400 font-medium">Night Shifts</span>
-                        <div className="text-2xl font-bold text-purple-400 mt-0.5">{stats.night_shifts}</div>
-                        <span className="text-[10px] text-slate-500">Cross-midnight hours</span>
+
+                    <div className="hidden md:block h-3.5 w-px bg-slate-800" />
+
+                    <div className="flex items-center gap-2" title="Cross-midnight hours">
+                        <span className="w-2 h-2 rounded-full bg-purple-400" />
+                        <span className="text-purple-400 font-medium">Night Shifts:</span>
+                        <span className="font-bold text-purple-400">{stats.night_shifts}</span>
+                        <span className="text-[11px] text-slate-500 hidden xl:inline">• Cross-midnight hours</span>
                     </div>
-                    <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-                        <span className="text-xs text-amber-400 font-medium">Rotational Cycles</span>
-                        <div className="text-2xl font-bold text-amber-400 mt-0.5">{stats.rotational_shifts}</div>
-                        <span className="text-[10px] text-slate-500">Roster template base</span>
+
+                    <div className="hidden md:block h-3.5 w-px bg-slate-800" />
+
+                    <div className="flex items-center gap-2" title="Roster template base">
+                        <span className="w-2 h-2 rounded-full bg-amber-400" />
+                        <span className="text-amber-400 font-medium">Rotational Cycles:</span>
+                        <span className="font-bold text-amber-400">{stats.rotational_shifts}</span>
+                        <span className="text-[11px] text-slate-500 hidden xl:inline">• Roster template base</span>
                     </div>
-                    <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-                        <span className="text-xs text-sky-400 font-medium">Baseline Assigned</span>
-                        <div className="text-2xl font-bold text-sky-400 mt-0.5">{stats.total_assignments}</div>
-                        <span className="text-[10px] text-slate-500">Fixed schedule staff</span>
+
+                    <div className="hidden md:block h-3.5 w-px bg-slate-800" />
+
+                    <div className="flex items-center gap-2" title="Fixed schedule staff">
+                        <span className="w-2 h-2 rounded-full bg-sky-400" />
+                        <span className="text-sky-400 font-medium">Baseline Assigned:</span>
+                        <span className="font-bold text-sky-400">{stats.total_assignments}</span>
+                        <span className="text-[11px] text-slate-500 hidden xl:inline">• Fixed schedule staff</span>
                     </div>
                 </div>
 
@@ -547,7 +618,12 @@ export default function Index({ shifts, employees, stats }: Props) {
 
                     {activeTab === 'shifts' && (
                         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-                            <span>Showing <strong className="text-white">{filteredShifts.length}</strong> of {shifts.length} shifts</span>
+                            <span>
+                                Showing <strong className="text-white">{filteredShifts.length > 0 ? (shiftPage - 1) * SHIFT_PAGE_SIZE + 1 : 0}</strong>–
+                                <strong className="text-white">{Math.min(shiftPage * SHIFT_PAGE_SIZE, filteredShifts.length)}</strong> of{' '}
+                                <strong className="text-white">{filteredShifts.length}</strong> shifts
+                                {filteredShifts.length !== shifts.length && ` (${shifts.length} total)`}
+                            </span>
                         </div>
                     )}
                 </div>
@@ -639,7 +715,7 @@ export default function Index({ shifts, employees, stats }: Props) {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60">
-                                        {filteredShifts.map((shift) => {
+                                        {paginatedShifts.map((shift) => {
                                             const duration = calculateDuration(shift.start_time, shift.end_time, shift.is_night_shift);
                                             const otHours = Math.floor(shift.ot_threshold_minutes / 60);
                                             const otMins = shift.ot_threshold_minutes % 60;
@@ -858,6 +934,83 @@ export default function Index({ shifts, employees, stats }: Props) {
                                     </tbody>
                                 </table>
                             </div>
+
+                            {/* Shift Catalog Pagination */}
+                            {filteredShifts.length > 0 && (
+                                <div className="p-3.5 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+                                    <div>
+                                        Showing <span className="font-semibold text-white">{(shiftPage - 1) * SHIFT_PAGE_SIZE + 1}</span> to{' '}
+                                        <span className="font-semibold text-white">{Math.min(shiftPage * SHIFT_PAGE_SIZE, filteredShifts.length)}</span> of{' '}
+                                        <span className="font-semibold text-white">{filteredShifts.length}</span> shifts
+                                        {totalShiftPages > 1 && (
+                                            <span className="ml-1.5 text-slate-500">(Page {shiftPage} of {totalShiftPages})</span>
+                                        )}
+                                    </div>
+
+                                    {totalShiftPages > 1 && (
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={shiftPage === 1}
+                                                onClick={() => setShiftPage((p) => Math.max(1, p - 1))}
+                                                className={`p-1.5 rounded-lg border border-slate-800 transition flex items-center justify-center ${
+                                                    shiftPage === 1
+                                                        ? 'opacity-30 cursor-not-allowed text-slate-600'
+                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                                }`}
+                                                title="Previous Page"
+                                            >
+                                                <ChevronLeft className="w-4 h-4" />
+                                            </button>
+
+                                            {Array.from({ length: totalShiftPages }, (_, i) => i + 1)
+                                                .filter((p) => {
+                                                    if (totalShiftPages <= 7) return true;
+                                                    return p === 1 || p === totalShiftPages || Math.abs(p - shiftPage) <= 1;
+                                                })
+                                                .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                                                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) {
+                                                        acc.push('...');
+                                                    }
+                                                    acc.push(p);
+                                                    return acc;
+                                                }, [])
+                                                .map((item, idx) =>
+                                                    item === '...' ? (
+                                                        <span key={`ellipsis-${idx}`} className="px-2 text-slate-600">...</span>
+                                                    ) : (
+                                                        <button
+                                                            key={item}
+                                                            type="button"
+                                                            onClick={() => setShiftPage(Number(item))}
+                                                            className={`px-3 py-1 rounded-lg border text-xs font-semibold transition ${
+                                                                shiftPage === item
+                                                                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm shadow-indigo-600/30'
+                                                                    : 'border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white'
+                                                            }`}
+                                                        >
+                                                            {item}
+                                                        </button>
+                                                    )
+                                                )}
+
+                                            <button
+                                                type="button"
+                                                disabled={shiftPage === totalShiftPages}
+                                                onClick={() => setShiftPage((p) => Math.min(totalShiftPages, p + 1))}
+                                                className={`p-1.5 rounded-lg border border-slate-800 transition flex items-center justify-center ${
+                                                    shiftPage === totalShiftPages
+                                                        ? 'opacity-30 cursor-not-allowed text-slate-600'
+                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                                }`}
+                                                title="Next Page"
+                                            >
+                                                <ChevronRight className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -917,80 +1070,143 @@ export default function Index({ shifts, employees, stats }: Props) {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60">
-                                        {employees
-                                            .filter((e) => e.shift_assignments && e.shift_assignments.length > 0)
-                                            .filter((e) => {
-                                                if (!assignmentSearch) return true;
-                                                const q = assignmentSearch.toLowerCase();
-                                                return (
-                                                    e.full_name.toLowerCase().includes(q) ||
-                                                    e.emp_no.toLowerCase().includes(q) ||
-                                                    (e.department?.name && e.department.name.toLowerCase().includes(q)) ||
-                                                    e.shift_assignments?.some(
-                                                        (a) =>
-                                                            a.shift.name.toLowerCase().includes(q) ||
-                                                            a.shift.code.toLowerCase().includes(q)
-                                                    )
-                                                );
-                                            })
-                                            .map((emp) =>
-                                                emp.shift_assignments?.map((assignment) => (
-                                                    <tr key={assignment.id} className="hover:bg-slate-800/30 transition">
-                                                        <td className="px-4 py-3 font-mono font-bold text-indigo-400">
-                                                            {emp.emp_no}
-                                                        </td>
-                                                        <td className="px-4 py-3 font-semibold text-slate-200">
-                                                            {emp.full_name}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-slate-400">
-                                                            {emp.department?.name || '—'}
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            <span
-                                                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-white border"
-                                                                style={{
-                                                                    backgroundColor: `${assignment.shift.color || '#3B82F6'}22`,
-                                                                    borderColor: assignment.shift.color || '#3B82F6',
-                                                                }}
-                                                            >
-                                                                {assignment.shift.name} ({assignment.shift.code})
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-3 text-slate-400 font-mono text-xs">
-                                                            {assignment.effective_from} → {assignment.effective_to || 'Ongoing'}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-right">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    confirmRemoveAssignment(
-                                                                        assignment.id,
-                                                                        emp.full_name,
-                                                                        assignment.shift.name
-                                                                    )
-                                                                }
-                                                                title="Remove Shift Assignment"
-                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))
-                                            )}
+                                        {paginatedAssignments.map(({ emp, assignment }) => (
+                                            <tr key={assignment.id} className="hover:bg-slate-800/30 transition">
+                                                <td className="px-4 py-3 font-mono font-bold text-indigo-400">
+                                                    {emp.emp_no}
+                                                </td>
+                                                <td className="px-4 py-3 font-semibold text-slate-200">
+                                                    {emp.full_name}
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-400">
+                                                    {emp.department?.name || '—'}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span
+                                                        className="px-2.5 py-1 rounded-md text-xs font-semibold text-white border"
+                                                        style={{
+                                                            backgroundColor: `${assignment.shift.color || '#3B82F6'}22`,
+                                                            borderColor: assignment.shift.color || '#3B82F6',
+                                                        }}
+                                                    >
+                                                        {assignment.shift.name} ({assignment.shift.code})
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-400 font-mono text-xs">
+                                                    {assignment.effective_from} → {assignment.effective_to || 'Ongoing'}
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            confirmRemoveAssignment(
+                                                                assignment.id,
+                                                                emp.full_name,
+                                                                assignment.shift.name
+                                                            )
+                                                        }
+                                                        title="Remove Shift Assignment"
+                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
 
-                                        {employees.filter((e) => e.shift_assignments && e.shift_assignments.length > 0).length === 0 && (
+                                        {filteredAssignments.length === 0 && (
                                             <tr>
                                                 <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                                                     <Users className="w-10 h-10 mx-auto text-slate-600 mb-2" />
-                                                    <p className="text-sm text-slate-400">No baseline shift assignments registered yet.</p>
-                                                    <p className="text-xs text-slate-500 mt-1">Click "Assign Baseline Shift" above to map staff to permanent shifts.</p>
+                                                    <p className="text-sm text-slate-400">No baseline shift assignments found.</p>
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        {assignmentSearch
+                                                            ? 'No assignments match your search query.'
+                                                            : 'Click "Assign Baseline Shift" above to map staff to permanent shifts.'}
+                                                    </p>
                                                 </td>
                                             </tr>
                                         )}
                                     </tbody>
                                 </table>
                             </div>
+
+                            {/* Assignments Pagination */}
+                            {filteredAssignments.length > 0 && (
+                                <div className="p-3.5 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+                                    <div>
+                                        Showing <span className="font-semibold text-white">{(assignmentPage - 1) * ASSIGNMENT_PAGE_SIZE + 1}</span> to{' '}
+                                        <span className="font-semibold text-white">{Math.min(assignmentPage * ASSIGNMENT_PAGE_SIZE, filteredAssignments.length)}</span> of{' '}
+                                        <span className="font-semibold text-white">{filteredAssignments.length}</span> assignments
+                                        {totalAssignmentPages > 1 && (
+                                            <span className="ml-1.5 text-slate-500">(Page {assignmentPage} of {totalAssignmentPages})</span>
+                                        )}
+                                    </div>
+
+                                    {totalAssignmentPages > 1 && (
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={assignmentPage === 1}
+                                                onClick={() => setAssignmentPage((p) => Math.max(1, p - 1))}
+                                                className={`p-1.5 rounded-lg border border-slate-800 transition flex items-center justify-center ${
+                                                    assignmentPage === 1
+                                                        ? 'opacity-30 cursor-not-allowed text-slate-600'
+                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                                }`}
+                                                title="Previous Page"
+                                            >
+                                                <ChevronLeft className="w-4 h-4" />
+                                            </button>
+
+                                            {Array.from({ length: totalAssignmentPages }, (_, i) => i + 1)
+                                                .filter((p) => {
+                                                    if (totalAssignmentPages <= 7) return true;
+                                                    return p === 1 || p === totalAssignmentPages || Math.abs(p - assignmentPage) <= 1;
+                                                })
+                                                .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                                                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) {
+                                                        acc.push('...');
+                                                    }
+                                                    acc.push(p);
+                                                    return acc;
+                                                }, [])
+                                                .map((item, idx) =>
+                                                    item === '...' ? (
+                                                        <span key={`ellipsis-${idx}`} className="px-2 text-slate-600">...</span>
+                                                    ) : (
+                                                        <button
+                                                            key={item}
+                                                            type="button"
+                                                            onClick={() => setAssignmentPage(Number(item))}
+                                                            className={`px-3 py-1 rounded-lg border text-xs font-semibold transition ${
+                                                                assignmentPage === item
+                                                                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm shadow-indigo-600/30'
+                                                                    : 'border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white'
+                                                            }`}
+                                                        >
+                                                            {item}
+                                                        </button>
+                                                    )
+                                                )}
+
+                                            <button
+                                                type="button"
+                                                disabled={assignmentPage === totalAssignmentPages}
+                                                onClick={() => setAssignmentPage((p) => Math.min(totalAssignmentPages, p + 1))}
+                                                className={`p-1.5 rounded-lg border border-slate-800 transition flex items-center justify-center ${
+                                                    assignmentPage === totalAssignmentPages
+                                                        ? 'opacity-30 cursor-not-allowed text-slate-600'
+                                                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                                }`}
+                                                title="Next Page"
+                                            >
+                                                <ChevronRight className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
