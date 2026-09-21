@@ -9,6 +9,8 @@ use App\Http\Requests\Roster\GenerateRosterRequest;
 use App\Http\Requests\Roster\PublishRosterRequest;
 use App\Http\Requests\Roster\SwapRosterRequest;
 use App\Http\Requests\Roster\UpdateRosterEntryRequest;
+use App\Models\Roster;
+use App\Models\RosterGroup;
 use App\Services\RosterService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -31,10 +33,188 @@ final class RosterController extends Controller
         $year = (int) $request->input('year', Carbon::now()->year);
         $month = (int) $request->input('month', Carbon::now()->month);
         $departmentId = $request->input('department_id');
+        $rosterId = $request->input('roster_id');
+        $squadId = $request->input('squad_id');
 
-        $data = $this->rosterService->getMonthMatrix($year, $month, $departmentId);
+        $data = $this->rosterService->getMonthMatrix($year, $month, $departmentId, $rosterId, $squadId);
 
         return Inertia::render('Roster/Index', $data);
+    }
+
+    /**
+     * Store a newly created Named Roster.
+     */
+    public function storeRoster(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'department_id' => ['nullable', 'string'],
+            'start_date' => ['required', 'date'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
+            'status' => ['nullable', 'string', 'in:draft,published'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $roster = $this->rosterService->createRoster($validated);
+
+        return redirect()->route('roster.index', [
+            'roster_id' => $roster->id,
+            'year' => Carbon::parse($roster->start_date)->year,
+            'month' => Carbon::parse($roster->start_date)->month,
+        ])->with('success', "Roster '{$roster->name}' created successfully.");
+    }
+
+    /**
+     * Update an existing Named Roster.
+     */
+    public function updateRoster(Request $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:150'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'department_id' => ['nullable', 'string'],
+            'start_date' => ['sometimes', 'required', 'date'],
+            'end_date' => ['sometimes', 'required', 'date', 'after_or_equal:start_date'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $this->rosterService->updateRoster($roster, $validated);
+
+        return redirect()->back()->with('success', "Roster '{$roster->name}' updated successfully.");
+    }
+
+    /**
+     * Delete a Named Roster.
+     */
+    public function destroyRoster(Roster $roster): RedirectResponse
+    {
+        $this->rosterService->deleteRoster($roster);
+
+        return redirect()->route('roster.index')->with('success', "Roster deleted successfully.");
+    }
+
+    /**
+     * Publish or unpublish a Named Roster.
+     */
+    public function publishNamedRoster(Request $request, Roster $roster): RedirectResponse
+    {
+        $publish = (bool) $request->input('publish', true);
+        $this->rosterService->publishNamedRoster($roster, $publish);
+
+        $action = $publish ? 'published' : 'reverted to draft';
+
+        return redirect()->back()->with('success', "Roster '{$roster->name}' {$action} successfully.");
+    }
+
+    /**
+     * Clone a Named Roster, its Squads, and Member Enrollments to a new date range.
+     */
+    public function cloneRoster(Request $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'start_date' => ['required', 'date'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
+        ]);
+
+        $newRoster = $this->rosterService->cloneRoster($roster, $validated);
+
+        return redirect()->route('roster.index', [
+            'roster_id' => $newRoster->id,
+            'year' => Carbon::parse($newRoster->start_date)->year,
+            'month' => Carbon::parse($newRoster->start_date)->month,
+        ])->with('success', "Roster cloned to '{$newRoster->name}' successfully with squads and enrollments.");
+    }
+
+    /**
+     * Synchronize and recalculate calendar entries for all squads in a Named Roster.
+     */
+    public function syncRoster(Roster $roster): RedirectResponse
+    {
+        $result = $this->rosterService->syncRosterDates($roster);
+
+        return redirect()->back()->with(
+            'success',
+            "Roster '{$roster->name}' synchronized successfully ({$result['created']} created, {$result['updated']} refreshed)."
+        );
+    }
+
+    /**
+     * Create a new Squad under a Roster.
+     */
+    public function storeSquad(Request $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'color' => ['nullable', 'string', 'max:20'],
+            'roster_pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
+            'description' => ['nullable', 'string'],
+        ]);
+
+        $this->rosterService->createSquad($roster, $validated);
+
+        return redirect()->back()->with('success', 'Squad created successfully.');
+    }
+
+    /**
+     * Update an existing Squad.
+     */
+    public function updateSquad(Request $request, RosterGroup $squad): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:100'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'color' => ['nullable', 'string', 'max:20'],
+            'roster_pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
+            'description' => ['nullable', 'string'],
+        ]);
+
+        $this->rosterService->updateSquad($squad, $validated);
+
+        return redirect()->back()->with('success', "Squad '{$squad->name}' updated successfully.");
+    }
+
+    /**
+     * Delete a Squad.
+     */
+    public function destroySquad(RosterGroup $squad): RedirectResponse
+    {
+        $this->rosterService->deleteSquad($squad);
+
+        return redirect()->back()->with('success', 'Squad deleted successfully.');
+    }
+
+    /**
+     * Enroll one or more employees into a Squad.
+     */
+    public function enrollSquadMembers(Request $request, RosterGroup $squad): RedirectResponse
+    {
+        $validated = $request->validate([
+            'employee_ids' => ['required', 'array', 'min:1'],
+            'employee_ids.*' => ['required', 'string', 'exists:employees,id'],
+        ]);
+
+        $enrolled = $this->rosterService->enrollEmployees($squad, $validated['employee_ids']);
+        $count = count($enrolled);
+
+        return redirect()->back()->with('success', "{$count} staff member(s) enrolled into {$squad->name}.");
+    }
+
+    /**
+     * Remove an employee from a Squad.
+     */
+    public function removeSquadMember(Request $request, RosterGroup $squad): RedirectResponse
+    {
+        $validated = $request->validate([
+            'employee_id' => ['required', 'string', 'exists:employees,id'],
+        ]);
+
+        $this->rosterService->removeEmployeeFromSquad($squad, $validated['employee_id']);
+
+        return redirect()->back()->with('success', 'Employee removed from squad successfully.');
     }
 
     /**
@@ -51,7 +231,7 @@ final class RosterController extends Controller
     }
 
     /**
-     * Update single cell roster entry.
+     * Update single cell roster entry with audit trail and override reason.
      */
     public function updateEntry(UpdateRosterEntryRequest $request): JsonResponse|RedirectResponse
     {
@@ -63,7 +243,8 @@ final class RosterController extends Controller
             $validated['shift_id'] ?? null,
             $validated['schedule_type'],
             $validated['notes'] ?? null,
-            $validated['status'] ?? 'published'
+            $validated['status'] ?? 'published',
+            $validated['override_reason'] ?? null
         );
 
         if ($request->wantsJson()) {
@@ -77,6 +258,28 @@ final class RosterController extends Controller
     }
 
     /**
+     * Schedule an extended shift or extra duty.
+     */
+    public function extend(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'employee_id' => ['required', 'string', 'exists:employees,id'],
+            'date' => ['required', 'date'],
+            'shift_id' => ['required', 'string', 'exists:shifts,id'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $this->rosterService->extendShift(
+            $validated['employee_id'],
+            $validated['date'],
+            $validated['shift_id'],
+            $validated['notes'] ?? null
+        );
+
+        return redirect()->back()->with('success', 'Extended operational duty scheduled successfully.');
+    }
+
+    /**
      * Atomic shift swap between two employees on a given date.
      */
     public function swap(SwapRosterRequest $request): RedirectResponse
@@ -86,7 +289,8 @@ final class RosterController extends Controller
         $this->rosterService->swapShift(
             $validated['employee_a_id'],
             $validated['employee_b_id'],
-            $validated['date']
+            $validated['date'],
+            $request->input('reason')
         );
 
         return redirect()->back()->with('success', 'Shifts swapped successfully.');

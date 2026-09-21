@@ -25,6 +25,7 @@ final class UpdateRosterEntryRequest extends FormRequest
             'schedule_type' => ['required', 'string', 'in:shift,rest_day,off'],
             'notes' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'in:draft,published'],
+            'override_reason' => ['nullable', 'string', 'max:100'],
         ];
     }
 }

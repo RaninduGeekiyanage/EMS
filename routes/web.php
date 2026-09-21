@@ -127,9 +127,25 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/roster/export', [RosterExportController::class, 'export'])->middleware('can:roster.view')->name('roster.export');
         Route::post('/roster/generate', [RosterController::class, 'generate'])->middleware('can:roster.create')->name('roster.generate');
         Route::post('/roster/entry', [RosterController::class, 'updateEntry'])->middleware('can:roster.update')->name('roster.entry.update');
+        Route::post('/roster/extend', [RosterController::class, 'extend'])->middleware('can:roster.update')->name('roster.extend');
         Route::post('/roster/swap', [RosterController::class, 'swap'])->middleware('can:roster.update')->name('roster.swap');
         Route::post('/roster/publish', [RosterController::class, 'publish'])->middleware('can:roster.publish')->name('roster.publish');
         Route::delete('/roster/clear', [RosterController::class, 'clear'])->middleware('can:roster.delete')->name('roster.clear');
+
+        // Named Rosters & Squads Management
+        Route::post('/roster/rosters', [RosterController::class, 'storeRoster'])->middleware('can:roster.create')->name('roster.rosters.store');
+        Route::put('/roster/rosters/{roster}', [RosterController::class, 'updateRoster'])->middleware('can:roster.update')->name('roster.rosters.update');
+        Route::delete('/roster/rosters/{roster}', [RosterController::class, 'destroyRoster'])->middleware('can:roster.delete')->name('roster.rosters.destroy');
+        Route::post('/roster/rosters/{roster}/publish', [RosterController::class, 'publishNamedRoster'])->middleware('can:roster.publish')->name('roster.rosters.publish');
+        Route::post('/roster/rosters/{roster}/clone', [RosterController::class, 'cloneRoster'])->middleware('can:roster.create')->name('roster.rosters.clone');
+        Route::post('/roster/rosters/{roster}/sync', [RosterController::class, 'syncRoster'])->middleware('can:roster.create')->name('roster.rosters.sync');
+
+        // Squads & Member Enrollment
+        Route::post('/roster/rosters/{roster}/squads', [RosterController::class, 'storeSquad'])->middleware('can:roster.create')->name('roster.squads.store');
+        Route::put('/roster/squads/{squad}', [RosterController::class, 'updateSquad'])->middleware('can:roster.update')->name('roster.squads.update');
+        Route::delete('/roster/squads/{squad}', [RosterController::class, 'destroySquad'])->middleware('can:roster.delete')->name('roster.squads.destroy');
+        Route::post('/roster/squads/{squad}/enroll', [RosterController::class, 'enrollSquadMembers'])->middleware('can:roster.create')->name('roster.squads.enroll');
+        Route::post('/roster/squads/{squad}/remove-member', [RosterController::class, 'removeSquadMember'])->middleware('can:roster.delete')->name('roster.squads.remove-member');
 
         // Departmentalized Shift Swap Requests
         Route::get('/roster/shift-swaps', [ShiftSwapController::class, 'index'])->middleware('can:shift_swap.view')->name('roster.shift-swaps.index');

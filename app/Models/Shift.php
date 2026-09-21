@@ -169,5 +169,23 @@ final class Shift extends Model
     {
         return $this->hasMany(RosterEntry::class, 'shift_id');
     }
+
+    /**
+     * Permanent contractual shift assignments using this shift.
+     *
+     * @return HasMany<ShiftAssignment, $this>
+     */
+    public function shiftAssignments(): HasMany
+    {
+        return $this->hasMany(ShiftAssignment::class, 'shift_id');
+    }
+
+    /**
+     * Check if this shift can be safely deleted without breaking active rosters or assignments.
+     */
+    public function canBeDeleted(): bool
+    {
+        return ! $this->rosterEntries()->exists() && ! $this->shiftAssignments()->exists();
+    }
 }
 

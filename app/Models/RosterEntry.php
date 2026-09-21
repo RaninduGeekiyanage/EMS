@@ -29,12 +29,18 @@ final class RosterEntry extends Model
      */
     protected $fillable = [
         'tenant_id',
+        'roster_id',
+        'roster_group_id',
+        'roster_pattern_id',
         'employee_id',
         'roster_date',
         'shift_id',
         'schedule_type',
         'status',
         'is_overridden',
+        'original_shift_id',
+        'override_reason',
+        'overridden_by',
         'notes',
         'created_by',
     ];
@@ -50,6 +56,36 @@ final class RosterEntry extends Model
             'roster_date' => 'date:Y-m-d',
             'is_overridden' => 'boolean',
         ];
+    }
+
+    /**
+     * Parent Roster.
+     *
+     * @return BelongsTo<Roster, $this>
+     */
+    public function roster(): BelongsTo
+    {
+        return $this->belongsTo(Roster::class, 'roster_id');
+    }
+
+    /**
+     * Squad group assignment.
+     *
+     * @return BelongsTo<RosterGroup, $this>
+     */
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(RosterGroup::class, 'roster_group_id');
+    }
+
+    /**
+     * Rotation pattern template.
+     *
+     * @return BelongsTo<RosterPattern, $this>
+     */
+    public function pattern(): BelongsTo
+    {
+        return $this->belongsTo(RosterPattern::class, 'roster_pattern_id');
     }
 
     /**
@@ -70,6 +106,26 @@ final class RosterEntry extends Model
     public function shift(): BelongsTo
     {
         return $this->belongsTo(Shift::class, 'shift_id');
+    }
+
+    /**
+     * Original scheduled shift prior to any operational overrides.
+     *
+     * @return BelongsTo<Shift, $this>
+     */
+    public function originalShift(): BelongsTo
+    {
+        return $this->belongsTo(Shift::class, 'original_shift_id');
+    }
+
+    /**
+     * Supervisor who performed the operational override.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function overriddenBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'overridden_by');
     }
 
     /**

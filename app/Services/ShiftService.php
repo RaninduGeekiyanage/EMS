@@ -119,10 +119,14 @@ final class ShiftService
     }
 
     /**
-     * Delete a shift.
+     * Delete a shift with safety validation against active rosters.
      */
     public function deleteShift(Shift $shift): bool
     {
+        if (! $shift->canBeDeleted()) {
+            throw new \DomainException("Cannot delete shift '{$shift->name}' ({$shift->code}) because it is actively referenced in duty rosters or contractual employee assignments. Please deactivate the shift instead to preserve historical records.");
+        }
+
         return (bool) $shift->delete();
     }
 

@@ -24,6 +24,17 @@ import {
     AlertTriangle,
     Loader2,
     ShieldCheck,
+    Layers,
+    UserPlus,
+    UserMinus,
+    Plus,
+    Check,
+    ChevronDown,
+    ChevronUp,
+    HelpCircle,
+    Info,
+    CalendarDays,
+    Settings,
 } from 'lucide-react';
 
 interface Shift {
@@ -53,6 +64,49 @@ interface Department {
     code: string;
 }
 
+interface RosterHeader {
+    id: string;
+    name: string;
+    code: string;
+    department_id: string | null;
+    start_date: string;
+    end_date: string;
+    status: 'draft' | 'published' | 'locked' | 'archived';
+    published_at: string | null;
+    notes?: string | null;
+    department?: Department | null;
+    publisher?: { id: number; name: string } | null;
+    groups_count?: number;
+    entries_count?: number;
+}
+
+interface RosterGroup {
+    id: string;
+    roster_id: string;
+    roster_pattern_id?: string | null;
+    name: string;
+    code: string;
+    color: string | null;
+    description?: string | null;
+    pattern?: RosterPattern | null;
+    employees?: {
+        id: string;
+        emp_no: string;
+        full_name: string;
+        department?: { id: string; name: string } | null;
+    }[];
+}
+
+interface AvailableEmployee {
+    id: string;
+    emp_no: string;
+    full_name: string;
+    department_name: string;
+    designation_title: string;
+    is_available: boolean;
+    exclusion_reason?: string | null;
+}
+
 interface DayHeader {
     day: number;
     date: string;
@@ -72,8 +126,16 @@ interface MatrixCell {
     date: string;
     schedule_type: 'shift' | 'rest_day' | 'off' | null;
     shift: Shift | null;
+    original_shift?: {
+        id: string;
+        name: string;
+        code: string;
+        color: string | null;
+    } | null;
     status: 'draft' | 'published' | 'locked' | null;
     is_overridden: boolean;
+    override_reason?: string | null;
+    overridden_by?: string | null;
     notes: string | null;
     fatigue_warning?: boolean;
     rest_hours?: number | null;
@@ -92,6 +154,13 @@ interface MatrixRow {
         full_name: string;
         department: { id: string; name: string } | null;
     };
+    squad?: {
+        id: string;
+        name: string;
+        code: string;
+        color: string | null;
+        pattern_name?: string | null;
+    } | null;
     cells: Record<string, MatrixCell>;
     stats: {
         work_days: number;
@@ -110,6 +179,10 @@ interface Props {
     patterns: RosterPattern[];
     departments: Department[];
     selected_department: string | null;
+    rosters: RosterHeader[];
+    active_roster: RosterHeader | null;
+    squads: RosterGroup[];
+    available_employees: AvailableEmployee[];
     coverage_summary?: Record<string, {
         shifts: Record<string, number>;
         total_working: number;
@@ -137,13 +210,24 @@ export default function Index({
     patterns,
     departments,
     selected_department,
+    rosters,
+    active_roster,
+    squads,
+    available_employees,
     coverage_summary,
     is_payroll_locked = false,
     summary,
 }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [departmentFilter, setDepartmentFilter] = useState<string>(selected_department || 'all');
-    const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+    const [viewMode, setViewMode] = useState<'squad' | 'flat'>('squad');
+    const [squadFilter, setSquadFilter] = useState<string>('all');
+    const [collapsedSquads, setCollapsedSquads] = useState<Record<string, boolean>>({});
+
+    // Modals & Drawers
+    const [isNewRosterModalOpen, setIsNewRosterModalOpen] = useState(false);
+    const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
+    const [isManageMembersModalOpen, setIsManageMembersModalOpen] = useState(false);
+    const [targetSquadForEnroll, setTargetSquadForEnroll] = useState<RosterGroup | null>(null);
     const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
     const [selectedCell, setSelectedCell] = useState<{
         employeeId: string;
@@ -152,47 +236,66 @@ export default function Index({
         cell: MatrixCell;
     } | null>(null);
 
-    // Enhanced Roster Generation States
-    const [generationSource, setGenerationSource] = useState<'template' | 'custom'>(patterns.length > 0 ? 'template' : 'custom');
-    const [selectedPatternId, setSelectedPatternId] = useState<string>(patterns[0]?.id || '');
-    const [staffScope, setStaffScope] = useState<'all' | 'department' | 'specific'>('all');
-    const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
-    const [staffSearchQuery, setStaffSearchQuery] = useState<string>('');
-
-    const staffList = useMemo(() => {
-        return matrix.map((r) => r.employee);
-    }, [matrix]);
-
-    const filteredStaffList = useMemo(() => {
-        return staffList.filter((s) => {
-            const q = staffSearchQuery.toLowerCase();
-            return (
-                s.full_name.toLowerCase().includes(q) ||
-                s.emp_no.toLowerCase().includes(q) ||
-                (s.department?.name && s.department.name.toLowerCase().includes(q))
-            );
-        });
-    }, [staffList, staffSearchQuery]);
-
-    // Filter rows by search
+    // Filter matrix rows
     const filteredMatrix = useMemo(() => {
         return matrix.filter((row) => {
             const matchesSearch =
                 row.employee.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 row.employee.emp_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (row.employee.department?.name && row.employee.department.name.toLowerCase().includes(searchQuery.toLowerCase()));
-            return matchesSearch;
-        });
-    }, [matrix, searchQuery]);
 
-    // Navigation handlers
+            const matchesSquad = squadFilter === 'all' || row.squad?.id === squadFilter;
+
+            return matchesSearch && matchesSquad;
+        });
+    }, [matrix, searchQuery, squadFilter]);
+
+    // Group rows by Squad for Squad View
+    const groupedBySquad = useMemo(() => {
+        const groups: Record<string, { squad: RosterGroup | { id: string; name: string; color: string; pattern_name?: string }; rows: MatrixRow[] }> = {};
+
+        // Prepopulate all squads belonging to active roster
+        squads.forEach((sq) => {
+            groups[sq.id] = { squad: sq, rows: [] };
+        });
+
+        // Add 'Unassigned' group bucket
+        groups['unassigned'] = {
+            squad: { id: 'unassigned', name: 'General / Unassigned to Squad', color: '#64748b' },
+            rows: [],
+        };
+
+        filteredMatrix.forEach((row) => {
+            const sqId = row.squad?.id || 'unassigned';
+            if (!groups[sqId]) {
+                groups[sqId] = {
+                    squad: row.squad || { id: sqId, name: 'Other Group', color: '#64748b' },
+                    rows: [],
+                };
+            }
+            groups[sqId].rows.push(row);
+        });
+
+        // Filter out empty unassigned bucket if empty
+        if (groups['unassigned'].rows.length === 0 && squads.length > 0) {
+            delete groups['unassigned'];
+        }
+
+        return groups;
+    }, [filteredMatrix, squads]);
+
+    // Navigation & Switchers
+    const handleRosterChange = (rosterId: string) => {
+        router.get('/roster', { roster_id: rosterId }, { preserveState: false });
+    };
+
     const navigateMonth = (targetYear: number, targetMonth: number) => {
         router.get(
             '/roster',
             {
                 year: targetYear,
                 month: targetMonth,
-                department_id: departmentFilter !== 'all' ? departmentFilter : undefined,
+                roster_id: active_roster?.id,
             },
             { preserveState: true }
         );
@@ -218,89 +321,34 @@ export default function Index({
         navigateMonth(newYear, newMonth);
     };
 
-    const handleDepartmentChange = (deptId: string) => {
-        setDepartmentFilter(deptId);
-        router.get(
-            '/roster',
-            {
-                year,
-                month,
-                department_id: deptId !== 'all' ? deptId : undefined,
-            },
-            { preserveState: true }
-        );
-    };
-
-    // Quick jump to next month or current month
-    const handleQuickJump = (target: 'current' | 'next' | 'quarter') => {
-        const now = new Date();
-        if (target === 'current') {
-            navigateMonth(now.getFullYear(), now.getMonth() + 1);
-        } else if (target === 'next') {
-            let nextMonth = now.getMonth() + 2;
-            let nextYear = now.getFullYear();
-            if (nextMonth > 12) {
-                nextMonth = 1;
-                nextYear += 1;
-            }
-            navigateMonth(nextYear, nextMonth);
-        } else if (target === 'quarter') {
-            let qMonth = now.getMonth() + 4;
-            let qYear = now.getFullYear();
-            if (qMonth > 12) {
-                qMonth -= 12;
-                qYear += 1;
-            }
-            navigateMonth(qYear, qMonth);
-        }
-    };
-
-    // Export to noticeboard CSV
-    const handleExportCsv = () => {
-        const url = `/roster/export?year=${year}&month=${month}${departmentFilter !== 'all' ? `&department_id=${departmentFilter}` : ''}`;
-        window.location.href = url;
-    };
-
-    // Print Noticeboard
-    const handlePrintNoticeboard = () => {
-        window.print();
-    };
-
-    // Form for Single Cell Edit
-    interface CellFormData {
-        employee_id: string;
-        date: string;
-        shift_id: string;
-        schedule_type: 'shift' | 'rest_day' | 'off';
-        notes: string;
-        status: 'draft' | 'published' | 'locked';
-    }
-
-    const cellForm = useForm<CellFormData>({
+    // Forms
+    // 1. Single Cell Override Form
+    const cellForm = useForm({
         employee_id: '',
         date: '',
         shift_id: '',
-        schedule_type: 'shift',
+        schedule_type: 'shift' as 'shift' | 'rest_day' | 'off',
+        override_reason: 'Sick Cover',
         notes: '',
         status: 'published',
     });
 
-    const openCellModal = (empId: string, empName: string, date: string, cell: MatrixCell) => {
+    const openCellDrawer = (empId: string, empName: string, date: string, cell: MatrixCell) => {
         if (is_payroll_locked) {
             alert('Cannot edit roster entries for a finalized and locked payroll period.');
             return;
         }
 
         setSelectedCell({ employeeId: empId, employeeName: empName, date, cell });
-        cellForm.setData((prev) => ({
-            ...prev,
+        cellForm.setData({
             employee_id: empId,
             date: date,
-            shift_id: cell.shift?.id || (shifts[0]?.id ?? ''),
+            shift_id: cell.shift?.id || shifts[0]?.id || '',
             schedule_type: cell.schedule_type || 'shift',
+            override_reason: cell.override_reason || 'Supervisor Operational Reassignment',
             notes: cell.notes || '',
             status: cell.status || 'published',
-        }));
+        });
     };
 
     const handleCellSubmit = (e: React.FormEvent) => {
@@ -311,11 +359,103 @@ export default function Index({
         });
     };
 
-    // Form for Shift Swap
+    // 2. New Roster Form
+    const newRosterForm = useForm({
+        name: `${month_name} - Operations Roster`,
+        code: `RST-${year}-${String(month).padStart(2, '0')}-OPS`,
+        department_id: departments[0]?.id || '',
+        start_date: `${year}-${String(month).padStart(2, '0')}-01`,
+        end_date: (() => {
+            const lastDay = new Date(year, month, 0).getDate();
+            return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        })(),
+        status: 'draft',
+        notes: '',
+    });
+
+    const handleNewRosterSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        newRosterForm.post('/roster/rosters', {
+            onSuccess: () => setIsNewRosterModalOpen(false),
+        });
+    };
+
+    // 3. Clone Roster Form
+    const cloneForm = useForm({
+        name: '',
+        start_date: '',
+        end_date: '',
+    });
+
+    const openCloneModal = () => {
+        if (!active_roster) return;
+        const curStart = new Date(active_roster.start_date);
+        curStart.setMonth(curStart.getMonth() + 1);
+        const y = curStart.getFullYear();
+        const m = curStart.getMonth() + 1;
+        const lastD = new Date(y, m, 0).getDate();
+
+        const monthName = curStart.toLocaleString('default', { month: 'long' });
+
+        cloneForm.setData({
+            name: `${monthName} ${y} - ${active_roster.name.replace(/^[A-Za-z]+ \d{4} - /, '')}`,
+            start_date: `${y}-${String(m).padStart(2, '0')}-01`,
+            end_date: `${y}-${String(m).padStart(2, '0')}-${String(lastD).padStart(2, '0')}`,
+        });
+        setIsCloneModalOpen(true);
+    };
+
+    const handleCloneSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!active_roster) return;
+        cloneForm.post(`/roster/rosters/${active_roster.id}/clone`, {
+            onSuccess: () => setIsCloneModalOpen(false),
+        });
+    };
+
+    // 4. Enroll Members Form
+    const [selectedEnrollEmpIds, setSelectedEnrollEmpIds] = useState<string[]>([]);
+    const [memberSearchQuery, setMemberSearchQuery] = useState('');
+    const [memberDeptFilter, setMemberDeptFilter] = useState('all');
+
+    const openManageMembers = (squad: RosterGroup) => {
+        setTargetSquadForEnroll(squad);
+        setSelectedEnrollEmpIds([]);
+        setMemberSearchQuery('');
+        setIsManageMembersModalOpen(true);
+    };
+
+    const handleEnrollSubmit = () => {
+        if (!targetSquadForEnroll || selectedEnrollEmpIds.length === 0) return;
+        router.post(
+            `/roster/squads/${targetSquadForEnroll.id}/enroll`,
+            { employee_ids: selectedEnrollEmpIds },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setSelectedEnrollEmpIds([]);
+                    setIsManageMembersModalOpen(false);
+                },
+            }
+        );
+    };
+
+    const handleRemoveMember = (squadId: string, empId: string, empName: string) => {
+        if (confirm(`Are you sure you want to remove ${empName} from this squad?`)) {
+            router.post(
+                `/roster/squads/${squadId}/remove-member`,
+                { employee_id: empId },
+                { preserveScroll: true }
+            );
+        }
+    };
+
+    // 5. Shift Swap Form
     const swapForm = useForm({
         employee_a_id: matrix[0]?.employee.id || '',
         employee_b_id: matrix[1]?.employee.id || '',
         date: days[0]?.date || `${year}-${String(month).padStart(2, '0')}-01`,
+        reason: 'Mutual shift trade',
     });
 
     const handleSwapSubmit = (e: React.FormEvent) => {
@@ -326,664 +466,565 @@ export default function Index({
         });
     };
 
-    // Form for Roster Generator
-    const firstDayStr = `${year}-${String(month).padStart(2, '0')}-01`;
-    const lastDayStr = days[days.length - 1]?.date || `${year}-${String(month).padStart(2, '0')}-28`;
-
-    const defaultWeeklyConfig = [
-        { shift_id: shifts[0]?.id || '', is_rest_day: false }, // Mon (0)
-        { shift_id: shifts[0]?.id || '', is_rest_day: false }, // Tue (1)
-        { shift_id: shifts[0]?.id || '', is_rest_day: false }, // Wed (2)
-        { shift_id: shifts[0]?.id || '', is_rest_day: false }, // Thu (3)
-        { shift_id: shifts[0]?.id || '', is_rest_day: false }, // Fri (4)
-        { shift_id: shifts[4]?.id || shifts[0]?.id || '', is_rest_day: false }, // Sat (5)
-        { shift_id: '', is_rest_day: true }, // Sun (6)
-    ];
-
-    const generateForm = useForm({
-        pattern_mode: 'weekly' as 'daily' | 'weekly' | 'cyclical' | 'copy_month',
-        start_date: firstDayStr,
-        end_date: lastDayStr,
-        department_id: departmentFilter !== 'all' ? departmentFilter : '',
-        conflict_mode: 'overwrite' as 'overwrite' | 'preserve',
-        status: 'published' as 'draft' | 'published',
-        preserve_leaves: true,
-
-        // Daily mode
-        daily_config: {
-            shift_id: shifts[0]?.id || '',
-            rest_days: ['Sunday'],
-        },
-
-        // Weekly mode
-        weekly_config: defaultWeeklyConfig,
-
-        // Cyclical mode
-        cyclical_config: {
-            anchor_date: firstDayStr,
-            steps: [
-                { shift_id: shifts[0]?.id || '', is_rest_day: false, notes: 'Day 1' },
-                { shift_id: shifts[0]?.id || '', is_rest_day: false, notes: 'Day 2' },
-                { shift_id: shifts[0]?.id || '', is_rest_day: false, notes: 'Day 3' },
-                { shift_id: shifts[0]?.id || '', is_rest_day: false, notes: 'Day 4' },
-                { shift_id: '', is_rest_day: true, notes: 'Rest Day 1' },
-                { shift_id: '', is_rest_day: true, notes: 'Rest Day 2' },
-            ],
-        },
-
-        // Copy Month mode
-        copy_config: {
-            source_year: month === 1 ? year - 1 : year,
-            source_month: month === 1 ? 12 : month - 1,
-        },
-    });
-
-    const handleGenerateSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        const payload: any = {
-            start_date: generateForm.data.start_date,
-            end_date: generateForm.data.end_date,
-            conflict_mode: generateForm.data.conflict_mode,
-            status: generateForm.data.status,
-            preserve_leaves: generateForm.data.preserve_leaves,
-        };
-
-        if (generationSource === 'template') {
-            if (!selectedPatternId) {
-                alert('Please select a roster template.');
-                return;
-            }
-            payload.pattern_id = selectedPatternId;
-        } else {
-            payload.pattern_mode = generateForm.data.pattern_mode;
-            if (generateForm.data.pattern_mode === 'weekly') {
-                payload.weekly_config = generateForm.data.weekly_config;
-            } else if (generateForm.data.pattern_mode === 'cyclical') {
-                payload.cyclical_config = generateForm.data.cyclical_config;
-            } else if (generateForm.data.pattern_mode === 'daily') {
-                payload.daily_config = generateForm.data.daily_config;
-            } else if (generateForm.data.pattern_mode === 'copy_month') {
-                payload.copy_config = generateForm.data.copy_config;
-            }
+    // 6. 1-Click Roster Sync
+    const handleSyncRoster = () => {
+        if (!active_roster) return;
+        if (confirm(`Synchronize calendar entries for all squads in '${active_roster.name}'? Existing manual supervisor overrides will be preserved.`)) {
+            router.post(`/roster/rosters/${active_roster.id}/sync`, {}, { preserveScroll: true });
         }
-
-        if (staffScope === 'specific') {
-            if (selectedStaffIds.length === 0) {
-                alert('Please select at least one employee.');
-                return;
-            }
-            payload.employee_ids = selectedStaffIds;
-        } else if (staffScope === 'department') {
-            payload.department_id = generateForm.data.department_id;
-        }
-
-        router.post('/roster/generate', payload, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setIsGenerateModalOpen(false);
-                setSelectedStaffIds([]);
-            },
-        });
     };
 
-    // Toggle Publish Status
+    // 7. Publish / Draft Toggle
     const handlePublishToggle = (publish: boolean) => {
+        if (!active_roster) return;
         router.post(
-            '/roster/publish',
-            {
-                year,
-                month,
-                department_id: departmentFilter !== 'all' ? departmentFilter : undefined,
-                publish,
-            },
+            `/roster/rosters/${active_roster.id}/publish`,
+            { publish },
             { preserveScroll: true }
         );
     };
 
-    // Clear Roster
-    const handleClearRoster = () => {
-        if (confirm(`Are you sure you want to clear roster entries for ${month_name}?`)) {
-            router.delete('/roster/clear', {
-                data: {
-                    year,
-                    month,
-                    department_id: departmentFilter !== 'all' ? departmentFilter : undefined,
-                    only_drafts: false,
-                },
-                preserveScroll: true,
-            });
-        }
+    const toggleSquadCollapse = (squadId: string) => {
+        setCollapsedSquads((prev) => ({ ...prev, [squadId]: !prev[squadId] }));
     };
 
-    const isGlobalProcessing = generateForm.processing || cellForm.processing || swapForm.processing;
+    const isGlobalProcessing =
+        cellForm.processing ||
+        newRosterForm.processing ||
+        cloneForm.processing ||
+        swapForm.processing;
+
+    const renderMatrixRow = (row: MatrixRow) => {
+        return (
+            <tr key={row.employee.id} className="hover:bg-slate-800/40 transition">
+                {/* Employee Name (Sticky Left) */}
+                <td className="sticky left-0 z-20 bg-slate-900 px-4 py-2.5 border-r border-slate-800 max-w-[260px]">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                            <div className="font-bold text-white truncate text-xs">
+                                {row.employee.full_name}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono truncate">
+                                {row.employee.emp_no} &bull; {row.employee.department?.name || 'General'}
+                            </div>
+                        </div>
+                        {row.squad && viewMode === 'flat' && (
+                            <span
+                                className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white shrink-0"
+                                style={{ backgroundColor: row.squad.color || '#3b82f6' }}
+                            >
+                                {row.squad.code}
+                            </span>
+                        )}
+                    </div>
+                </td>
+
+                {/* Calendar Date Cells */}
+                {days.map((d) => {
+                    const cell = row.cells[d.date];
+                    if (!cell) {
+                        return (
+                            <td
+                                key={d.date}
+                                onClick={() => openCellDrawer(row.employee.id, row.employee.full_name, d.date, {} as any)}
+                                className="border-r border-slate-800/60 text-center p-0.5 hover:bg-indigo-600/20 cursor-pointer"
+                            >
+                                <span className="text-[10px] text-slate-600">-</span>
+                            </td>
+                        );
+                    }
+
+                    const isRest = cell.schedule_type === 'rest_day' || cell.schedule_type === 'off';
+                    const hasLeave = cell.leave !== null;
+                    const isOverridden = cell.is_overridden;
+
+                    return (
+                        <td
+                            key={d.date}
+                            onClick={() => openCellDrawer(row.employee.id, row.employee.full_name, d.date, cell)}
+                            className={`border-r border-slate-800/60 p-0.5 text-center relative cursor-pointer transition select-none hover:ring-1 hover:ring-indigo-400 ${
+                                isRest
+                                    ? 'bg-slate-950/40 text-slate-500'
+                                    : cell.shift
+                                    ? 'text-white'
+                                    : 'text-slate-600'
+                            }`}
+                        >
+                            {/* Operational Override Amber Indicator Dot */}
+                            {isOverridden && (
+                                <span
+                                    className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400 ring-2 ring-slate-900"
+                                    title={`Operational Override:\nOriginal: ${cell.original_shift?.name || 'Base Pattern'}\nReason: ${cell.override_reason || 'Manual override'}\nBy: ${cell.overridden_by || 'Supervisor'}`}
+                                />
+                            )}
+
+                            {/* Fatigue Warning Indicator */}
+                            {cell.fatigue_warning && (
+                                <span
+                                    className="absolute bottom-0.5 left-0.5 w-1.5 h-1.5 rounded-full bg-rose-500"
+                                    title={`Fatigue Warning: Rest gap < 11h (${cell.rest_hours}h turnaround)`}
+                                />
+                            )}
+
+                            {hasLeave ? (
+                                <span className="inline-block px-1 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                    {cell.leave?.leave_code || 'LV'}
+                                </span>
+                            ) : isRest ? (
+                                <span className="text-[10px] font-mono text-slate-500 font-semibold">
+                                    OFF
+                                </span>
+                            ) : cell.shift ? (
+                                <span
+                                    className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono tracking-tighter truncate max-w-full"
+                                    style={{
+                                        backgroundColor: cell.shift.color ? `${cell.shift.color}22` : '#3b82f622',
+                                        borderColor: cell.shift.color || '#3b82f6',
+                                        color: cell.shift.color || '#93c5fd',
+                                        borderWidth: '1px',
+                                    }}
+                                    title={`${cell.shift.name} (${cell.shift.start_time} - ${cell.shift.end_time})`}
+                                >
+                                    {cell.shift.code}
+                                </span>
+                            ) : (
+                                <span className="text-[10px] text-slate-600">-</span>
+                            )}
+                        </td>
+                    );
+                })}
+
+                {/* Summary Hours */}
+                <td className="px-2 py-2 text-center font-bold text-slate-300 font-mono text-xs">
+                    {row.stats.total_hours}h
+                </td>
+            </tr>
+        );
+    };
 
     return (
         <AuthenticatedLayout>
-            <Head title={`Duty Roster - ${month_name}`} />
+            <Head title={`Duty Roster - ${active_roster ? active_roster.name : month_name}`} />
 
-            {/* Print Stylesheet for Physical Noticeboards */}
+            {/* Print Stylesheet for Noticeboards */}
             <style>{`
                 @media print {
-                    body {
-                        background-color: white !important;
-                        color: black !important;
-                    }
-                    nav, header, .no-print {
-                        display: none !important;
-                    }
-                    .print-only {
-                        display: block !important;
-                    }
-                    table {
-                        width: 100% !important;
-                        border-collapse: collapse !important;
-                    }
-                    th, td {
-                        border: 1px solid #94a3b8 !important;
-                        color: black !important;
-                        background: white !important;
-                    }
+                    body { background: white !important; color: black !important; }
+                    nav, header, .no-print { display: none !important; }
+                    .print-only { display: block !important; }
+                    table { width: 100% !important; border-collapse: collapse !important; }
+                    th, td { border: 1px solid #cbd5e1 !important; padding: 4px !important; }
                 }
             `}</style>
 
-            {/* Global Spinner Processing Overlay (Prevents UI Freezing) */}
-            {isGlobalProcessing && (
-                <div className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-sm flex flex-col items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 max-w-sm text-center">
-                        <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
-                        <h3 className="text-base font-bold text-white">Updating Duty Roster</h3>
-                        <p className="text-xs text-slate-400">
-                            Executing atomic database transaction with low-memory batching... please wait.
-                        </p>
-                    </div>
-                </div>
-            )}
-
-            <div className="space-y-6">
-                {/* 1. Header Banner */}
-                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 border border-indigo-900/40 shadow-xl relative overflow-hidden no-print">
-                    <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                        <div>
-                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                                <CalendarRange className="w-3.5 h-3.5" />
-                                Workforce Scheduling (M02 - AMS)
+            <div className="max-w-[1780px] mx-auto space-y-4 pb-12">
+                {/* 1. Header & Roster Switcher Bar */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        {/* Title & Active Roster Selector */}
+                        <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    Enterprise Workforce Scheduling
+                                </span>
+                                {active_roster?.status === 'published' ? (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>Published &amp; Active</span>
+                                    </span>
+                                ) : active_roster?.status === 'locked' ? (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 flex items-center gap-1">
+                                        <Lock className="w-3 h-3" />
+                                        <span>Payroll Finalized</span>
+                                    </span>
+                                ) : (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        <span>Draft Mode</span>
+                                    </span>
+                                )}
                             </div>
-                            <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight">
-                                Duty Roster Planner
-                            </h1>
-                            <p className="text-slate-400 text-sm mt-1">
-                                Plan, rotate, and publish month-by-month employee shift schedules, dynamic rest days, and noticeboard sheets.
-                            </p>
+
+                            <div className="flex flex-wrap items-center gap-3">
+                                {/* Named Roster Dropdown */}
+                                <div className="relative">
+                                    <select
+                                        value={active_roster?.id || ''}
+                                        onChange={(e) => handleRosterChange(e.target.value)}
+                                        className="bg-slate-950 border border-slate-700 text-white font-bold text-base sm:text-lg rounded-xl px-3.5 py-1.5 pr-9 hover:border-indigo-500 focus:ring-2 focus:ring-indigo-500 transition shadow-inner cursor-pointer"
+                                    >
+                                        {rosters.map((rst) => (
+                                            <option key={rst.id} value={rst.id}>
+                                                {rst.name} ({rst.status.toUpperCase()})
+                                            </option>
+                                        ))}
+                                        {rosters.length === 0 && <option value="">No Rosters Found</option>}
+                                    </select>
+                                </div>
+
+                                <button
+                                    onClick={() => setIsNewRosterModalOpen(true)}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
+                                    title="Create a new Named Roster"
+                                >
+                                    <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>New Roster</span>
+                                </button>
+
+                                {active_roster && (
+                                    <button
+                                        onClick={openCloneModal}
+                                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
+                                        title="Clone this roster to next month"
+                                    >
+                                        <Copy className="w-3.5 h-3.5 text-sky-400" />
+                                        <span>Clone</span>
+                                    </button>
+                                )}
+                            </div>
+
+                            {active_roster && (
+                                <p className="text-xs text-slate-400 flex items-center gap-3">
+                                    <span>
+                                        Period: <strong className="text-slate-300 font-mono">{active_roster.start_date} &rarr; {active_roster.end_date}</strong>
+                                    </span>
+                                    <span>&bull;</span>
+                                    <span>
+                                        Department: <strong className="text-slate-300">{active_roster.department?.name || 'All Company'}</strong>
+                                    </span>
+                                </p>
+                            )}
                         </div>
 
-                        {/* Action Buttons */}
+                        {/* Top Operational Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2">
-                            <Link
-                                href="/roster/patterns"
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition shadow-sm"
-                                title="Manage Reusable Roster Patterns & Templates"
-                            >
-                                <Sparkles className="w-4 h-4 text-indigo-400" />
-                                Roster Patterns
-                            </Link>
-
-                            <Link
-                                href="/roster/shift-swaps"
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition shadow-sm"
-                                title="Departmentalized Shift Swaps & HOD Approvals"
-                            >
-                                <ArrowLeftRight className="w-4 h-4 text-cyan-400" />
-                                Shift Swaps
-                            </Link>
-
-                            <Link
-                                href="/shifts"
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-                                title="Configure Shift Hours & Baseline Assignments"
-                            >
-                                <Clock className="w-4 h-4 text-indigo-400" />
-                                Shift Definitions
-                            </Link>
-
-                            <button
-                                onClick={handleExportCsv}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-                                title="Export Noticeboard CSV Matrix"
-                            >
-                                <Download className="w-4 h-4" />
-                                Export CSV
-                            </button>
-
-                            <button
-                                onClick={handlePrintNoticeboard}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-                                title="Print Physical Noticeboard Matrix"
-                            >
-                                <Printer className="w-4 h-4" />
-                                Print
-                            </button>
-
-                            {!is_payroll_locked && (
+                            {active_roster && (
                                 <>
                                     <button
-                                        onClick={() => setIsGenerateModalOpen(true)}
-                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition"
+                                        onClick={handleSyncRoster}
+                                        className="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                        title="Recalculate squad patterns for the month (preserves manual overrides)"
                                     >
-                                        <Sparkles className="w-4 h-4" />
-                                        Generate Roster
+                                        <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                                        <span>Sync Dates</span>
                                     </button>
 
-                                    <button
-                                        onClick={() => setIsSwapModalOpen(true)}
-                                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition"
-                                    >
-                                        <ArrowLeftRight className="w-4 h-4" />
-                                        Shift Swap
-                                    </button>
-
-                                    {summary.published_entries > 0 ? (
+                                    {active_roster.status === 'published' ? (
                                         <button
                                             onClick={() => handlePublishToggle(false)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-xs transition"
-                                            title="Revert to Draft for modifications"
+                                            className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                            title="Revert Roster to Draft"
                                         >
-                                            <AlertCircle className="w-4 h-4" />
-                                            Revert to Draft
+                                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Draft Mode</span>
                                         </button>
                                     ) : (
                                         <button
                                             onClick={() => handlePublishToggle(true)}
-                                            disabled={summary.draft_entries === 0 && summary.total_scheduled_shifts === 0}
-                                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs shadow-lg shadow-emerald-600/30 transition"
+                                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-md"
+                                            title="Publish Roster as official operational schedule"
                                         >
-                                            <CheckCircle2 className="w-4 h-4" />
-                                            Publish Roster
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                            <span>Publish Official</span>
                                         </button>
                                     )}
-
-                                    <button
-                                        onClick={handleClearRoster}
-                                        disabled={summary.total_scheduled_shifts === 0 && summary.total_rest_days === 0}
-                                        className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-900 transition disabled:opacity-30"
-                                        title="Clear Roster Entries"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
                                 </>
                             )}
-                        </div>
-                    </div>
 
-                    {/* Stats strip */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800">
-                        <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
-                            <span className="text-xs text-slate-400 font-medium">Total Staff</span>
-                            <div className="text-xl font-bold text-white mt-0.5">{summary.total_employees}</div>
-                        </div>
-                        <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
-                            <span className="text-xs text-slate-400 font-medium">Scheduled Shifts</span>
-                            <div className="text-xl font-bold text-indigo-400 mt-0.5">{summary.total_scheduled_shifts}</div>
-                        </div>
-                        <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
-                            <span className="text-xs text-slate-400 font-medium">Scheduled Rest Days</span>
-                            <div className="text-xl font-bold text-amber-400 mt-0.5">{summary.total_rest_days}</div>
-                        </div>
-                        <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
-                            <span className="text-xs text-slate-400 font-medium">Roster Status</span>
-                            <div className="mt-1">
-                                {is_payroll_locked ? (
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                        <Lock className="w-3 h-3" /> Locked by Payroll
-                                    </span>
-                                ) : summary.published_entries > 0 && summary.draft_entries === 0 ? (
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                        <CheckCircle2 className="w-3 h-3" /> Published
-                                    </span>
-                                ) : summary.draft_entries > 0 ? (
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                        <AlertCircle className="w-3 h-3" /> Draft Mode
-                                    </span>
-                                ) : (
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
-                                        Unscheduled
-                                    </span>
-                                )}
-                            </div>
+                            <button
+                                onClick={() => setIsSwapModalOpen(true)}
+                                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                            >
+                                <ArrowLeftRight className="w-3.5 h-3.5 text-sky-400" />
+                                <span>Swap Shift</span>
+                            </button>
+
+                            <Link
+                                href="/roster/patterns"
+                                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                title="Pattern & Rotation Formulas Library"
+                            >
+                                <Layers className="w-3.5 h-3.5 text-purple-400" />
+                                <span>Pattern Library</span>
+                            </Link>
+
+                            <button
+                                onClick={() => window.print()}
+                                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                                title="Print Wall Noticeboard"
+                            >
+                                <Printer className="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                {/* 2. Month Navigator & Filter Bar */}
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row items-center justify-between gap-4 no-print">
-                    {/* Month Picker Controls */}
-                    <div className="flex items-center gap-3 w-full md:w-auto">
-                        <button
-                            onClick={handlePrevMonth}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-                            title="Previous Month"
-                        >
-                            <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 rounded-xl border border-slate-700">
-                            <CalendarIcon className="w-4 h-4 text-indigo-400" />
-                            <span className="text-base font-bold text-white min-w-[140px] text-center">
-                                {month_name}
-                            </span>
-                        </div>
-                        <button
-                            onClick={handleNextMonth}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-                            title="Next Month"
-                        >
-                            <ChevronRight className="w-4 h-4" />
-                        </button>
-
-                        {/* Quick jumps */}
-                        <div className="hidden sm:flex items-center gap-1 border-l border-slate-800 pl-3">
+                {/* 2. Control & Filter Strip */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+                    {/* View Switcher & Squad Filter */}
+                    <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+                        {/* View Switcher */}
+                        <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center text-xs font-semibold">
                             <button
-                                onClick={() => handleQuickJump('current')}
-                                className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                                onClick={() => setViewMode('squad')}
+                                className={`px-3 py-1 rounded-lg transition ${
+                                    viewMode === 'squad'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
                             >
-                                Current
+                                Group by Squad
                             </button>
                             <button
-                                onClick={() => handleQuickJump('next')}
-                                className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 transition"
+                                onClick={() => setViewMode('flat')}
+                                className={`px-3 py-1 rounded-lg transition ${
+                                    viewMode === 'flat'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
                             >
-                                Next Month
-                            </button>
-                            <button
-                                onClick={() => handleQuickJump('quarter')}
-                                className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                            >
-                                Next Quarter
+                                All Personnel
                             </button>
                         </div>
-                    </div>
 
-                    {/* Department & Search Filters */}
-                    <div className="flex items-center gap-3 w-full md:w-auto">
-                        <div className="relative flex-1 md:w-48">
-                            <Filter className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        {/* Squad Filter Dropdown */}
+                        <div className="relative">
                             <select
-                                value={departmentFilter}
-                                onChange={(e) => handleDepartmentChange(e.target.value)}
-                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl pl-9 pr-8 py-2 focus:ring-2 focus:ring-indigo-500 transition"
+                                value={squadFilter}
+                                onChange={(e) => setSquadFilter(e.target.value)}
+                                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-1.5 pr-8 hover:border-slate-700 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                             >
-                                <option value="all">All Departments</option>
-                                {departments.map((dept) => (
-                                    <option key={dept.id} value={dept.id}>
-                                        {dept.name}
+                                <option value="all">All Squads ({squads.length})</option>
+                                {squads.map((sq) => (
+                                    <option key={sq.id} value={sq.id}>
+                                        {sq.name}
                                     </option>
                                 ))}
                             </select>
                         </div>
 
-                        <div className="relative flex-1 md:w-56">
-                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        {/* Search Input */}
+                        <div className="relative flex-1 sm:w-60">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                             <input
                                 type="text"
-                                placeholder="Search personnel..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl pl-9 pr-3 py-2 focus:ring-2 focus:ring-indigo-500 transition placeholder-slate-500"
+                                placeholder="Search employee..."
+                                className="bg-slate-950 border border-slate-800 text-white text-xs rounded-xl pl-9 pr-3 py-1.5 w-full focus:ring-1 focus:ring-indigo-500 placeholder-slate-500"
                             />
                         </div>
                     </div>
-                </div>
 
-                {/* 3. Shifts Legend & Fatigue Warning Alert Strip */}
-                <div className="bg-slate-900/70 px-4 py-3 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs no-print">
-                    <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Legend:</span>
-                        {shifts.map((s) => (
-                            <div key={s.id} className="flex items-center gap-1.5">
-                                <span
-                                    className="w-2.5 h-2.5 rounded-full"
-                                    style={{ backgroundColor: s.color || '#3B82F6' }}
-                                />
-                                <span className="text-slate-200 font-medium">{s.code}</span>
-                                <span className="text-slate-500 text-[10px]">({s.start_time.substring(0, 5)}-{s.end_time.substring(0, 5)})</span>
-                            </div>
-                        ))}
-                        <div className="flex items-center gap-1.5 border-l border-slate-800 pl-2.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                            <span className="text-amber-300 font-medium">OFF</span>
-                            <span className="text-slate-500 text-[10px]">(Rest)</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                            <span className="text-rose-300 font-medium">PH</span>
-                            <span className="text-slate-500 text-[10px]">(Holiday)</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                            <span className="text-teal-300 font-medium">LV</span>
-                            <span className="text-slate-500 text-[10px]">(Leave)</span>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg text-amber-300 text-[11px]">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                        <span>Fatigue Alert: Badges flag &lt;11h rest between consecutive shifts (Shop &amp; Office Law).</span>
+                    {/* Month Navigator */}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handlePrevMonth}
+                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 transition"
+                            title="Previous Month"
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="font-bold text-xs text-white px-2 font-mono">
+                            {month_name}
+                        </span>
+                        <button
+                            onClick={handleNextMonth}
+                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 transition"
+                            title="Next Month"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
 
-                {/* 4. Interactive Matrix Grid */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
-                    <div className="overflow-x-auto max-h-[750px]">
-                        <table className="w-full border-collapse text-left text-xs">
-                            {/* Table Header */}
-                            <thead className="bg-slate-950 text-slate-400 sticky top-0 z-20 shadow-md">
+                {/* 3. Main Roster Matrix Table */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+                    <div className="overflow-x-auto max-h-[750px] relative">
+                        <table className="w-full text-left border-collapse text-xs">
+                            {/* Sticky Header */}
+                            <thead className="sticky top-0 z-30 bg-slate-950 border-b border-slate-800">
                                 <tr>
-                                    {/* Sticky Employee column header */}
-                                    <th className="p-3.5 sticky left-0 z-30 bg-slate-950 border-r border-slate-800 min-w-[220px] font-semibold text-slate-300 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
-                                        Employee ({filteredMatrix.length})
+                                    {/* Employee Info Header (Sticky Left) */}
+                                    <th className="sticky left-0 z-40 bg-slate-950 px-4 py-3 min-w-[220px] max-w-[260px] font-bold text-slate-300 border-r border-slate-800">
+                                        <div className="flex items-center justify-between">
+                                            <span>Personnel</span>
+                                            <span className="text-[10px] text-slate-500 font-mono">
+                                                {filteredMatrix.length} Staff
+                                            </span>
+                                        </div>
                                     </th>
 
-                                    {/* Sticky Monthly stats header */}
-                                    <th className="p-2.5 text-center bg-slate-950 border-r border-slate-800 min-w-[75px] font-semibold text-slate-400 text-[11px]">
-                                        Work / Off
-                                    </th>
-
-                                    {/* Day columns */}
-                                    {days.map((day) => (
+                                    {/* Days Headers */}
+                                    {days.map((d) => (
                                         <th
-                                            key={day.day}
-                                            className={`p-2 text-center border-r border-slate-800/60 min-w-[42px] max-w-[48px] ${
-                                                day.is_sunday
-                                                    ? 'bg-amber-950/20 text-amber-400'
-                                                    : day.is_saturday
-                                                    ? 'bg-slate-900/60 text-indigo-300'
+                                            key={d.date}
+                                            className={`px-1.5 py-2 text-center min-w-[36px] max-w-[42px] border-r border-slate-800/80 ${
+                                                d.is_sunday
+                                                    ? 'bg-rose-950/20 text-rose-300'
+                                                    : d.is_saturday
+                                                    ? 'bg-amber-950/20 text-amber-300'
                                                     : 'text-slate-300'
                                             }`}
                                         >
-                                            <div className="font-bold text-xs">{day.day}</div>
-                                            <div className="text-[10px] uppercase font-semibold text-slate-500">
-                                                {day.day_name}
+                                            <div className="text-[10px] font-mono text-slate-400 uppercase">
+                                                {d.day_name}
                                             </div>
-                                            {day.holiday && (
+                                            <div className="text-xs font-bold font-mono text-white">
+                                                {d.day}
+                                            </div>
+                                            {d.holiday && (
                                                 <div
                                                     className="w-1.5 h-1.5 rounded-full bg-rose-500 mx-auto mt-0.5"
-                                                    title={`Holiday: ${day.holiday.name} (${day.holiday.type})`}
+                                                    title={`Public Holiday: ${d.holiday.name}`}
                                                 />
                                             )}
                                         </th>
                                     ))}
+
+                                    {/* Summary Stats Header */}
+                                    <th className="px-3 py-3 text-center min-w-[70px] font-bold text-slate-300 bg-slate-950">
+                                        Hours
+                                    </th>
                                 </tr>
                             </thead>
 
                             {/* Table Body */}
                             <tbody className="divide-y divide-slate-800/60">
-                                {filteredMatrix.length === 0 ? (
+                                {viewMode === 'squad' ? (
+                                    // SQUAD GROUPED VIEW
+                                    Object.entries(groupedBySquad).map(([sqId, groupData]) => {
+                                        const squad = groupData.squad;
+                                        const rows = groupData.rows;
+                                        const isCollapsed = collapsedSquads[sqId];
+
+                                        return (
+                                            <React.Fragment key={sqId}>
+                                                {/* Squad Header Row */}
+                                                <tr className="bg-slate-950/90 border-y border-indigo-500/20">
+                                                    <td
+                                                        colSpan={days.length + 2}
+                                                        className="px-4 py-2 text-xs font-bold text-white"
+                                                    >
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <button
+                                                                    onClick={() => toggleSquadCollapse(sqId)}
+                                                                    className="p-1 rounded text-slate-400 hover:text-white"
+                                                                >
+                                                                    {isCollapsed ? (
+                                                                        <ChevronDown className="w-4 h-4" />
+                                                                    ) : (
+                                                                        <ChevronUp className="w-4 h-4" />
+                                                                    )}
+                                                                </button>
+                                                                <span
+                                                                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                    style={{ backgroundColor: squad.color || '#3b82f6' }}
+                                                                />
+                                                                <span className="font-bold text-white text-xs">
+                                                                    {squad.name}
+                                                                </span>
+                                                                {'pattern' in squad && squad.pattern && (
+                                                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                                                        Pattern: {squad.pattern.name} ({squad.pattern.cycle_length_days}d cycle)
+                                                                    </span>
+                                                                )}
+                                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                                    ({rows.length} Members)
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Squad Actions: Add Staff */}
+                                                            {'roster_id' in squad && (
+                                                                <button
+                                                                    onClick={() => openManageMembers(squad as RosterGroup)}
+                                                                    className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition"
+                                                                >
+                                                                    <UserPlus className="w-3.5 h-3.5" />
+                                                                    <span>Add / Manage Staff</span>
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+
+                                                {/* Squad Member Rows */}
+                                                {!isCollapsed &&
+                                                    rows.map((row) => renderMatrixRow(row))}
+
+                                                {!isCollapsed && rows.length === 0 && (
+                                                    <tr>
+                                                        <td
+                                                            colSpan={days.length + 2}
+                                                            className="px-6 py-4 text-center text-xs text-slate-500 italic"
+                                                        >
+                                                            No personnel enrolled in this squad yet.{' '}
+                                                            {'roster_id' in squad && (
+                                                                <button
+                                                                    onClick={() => openManageMembers(squad as RosterGroup)}
+                                                                    className="text-indigo-400 underline font-semibold ml-1"
+                                                                >
+                                                                    Enroll Staff Now
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })
+                                ) : (
+                                    // FLAT STAFF VIEW
+                                    filteredMatrix.map((row) => renderMatrixRow(row))
+                                )}
+
+                                {filteredMatrix.length === 0 && (
                                     <tr>
-                                        <td colSpan={days.length + 2} className="text-center py-16 text-slate-500">
-                                            <Users className="w-8 h-8 mx-auto mb-2 text-slate-600" />
-                                            No employee records found matching your filters.
+                                        <td
+                                            colSpan={days.length + 2}
+                                            className="px-6 py-12 text-center text-slate-400"
+                                        >
+                                            <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                                            <p className="text-sm font-semibold text-white">
+                                                No personnel roster entries found.
+                                            </p>
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                Enroll staff into squads or create a new Named Roster.
+                                            </p>
                                         </td>
                                     </tr>
-                                ) : (
-                                    filteredMatrix.map((row) => (
-                                        <tr key={row.employee.id} className="hover:bg-slate-800/40 transition">
-                                            {/* Employee info (Sticky left) */}
-                                            <td className="p-3 sticky left-0 z-10 bg-slate-900/95 border-r border-slate-800 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">
-                                                <div className="font-semibold text-slate-200 text-xs truncate max-w-[190px]">
-                                                    {row.employee.full_name}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
-                                                    <span className="font-mono text-indigo-400 font-semibold">{row.employee.emp_no}</span>
-                                                    {row.employee.department && (
-                                                        <span>• {row.employee.department.name}</span>
-                                                    )}
-                                                </div>
-                                            </td>
-
-                                            {/* Employee Monthly Stats */}
-                                            <td className="p-2 text-center border-r border-slate-800 bg-slate-900/70">
-                                                <div className="font-bold text-xs text-white">
-                                                    <span className="text-emerald-400">{row.stats.work_days}</span>
-                                                    <span className="text-slate-500">/</span>
-                                                    <span className="text-amber-400">{row.stats.rest_days}</span>
-                                                </div>
-                                                <div className="text-[10px] text-slate-500 font-medium">
-                                                    {row.stats.total_hours}h
-                                                </div>
-                                            </td>
-
-                                            {/* Daily cells */}
-                                            {days.map((day) => {
-                                                const cell = row.cells[day.date];
-                                                const isHoliday = day.holiday !== null;
-                                                const isLeave = cell?.leave !== null;
-                                                const isRest = cell?.schedule_type === 'rest_day' || cell?.schedule_type === 'off';
-                                                const hasShift = cell?.schedule_type === 'shift' && cell?.shift !== null;
-                                                const hasFatigue = Boolean(cell?.fatigue_warning);
-
-                                                return (
-                                                    <td
-                                                        key={day.date}
-                                                        onClick={() =>
-                                                            openCellModal(
-                                                                row.employee.id,
-                                                                row.employee.full_name,
-                                                                day.date,
-                                                                cell || {
-                                                                    entry_id: null,
-                                                                    date: day.date,
-                                                                    schedule_type: null,
-                                                                    shift: null,
-                                                                    status: null,
-                                                                    is_overridden: false,
-                                                                    notes: null,
-                                                                    leave: null,
-                                                                }
-                                                            )
-                                                        }
-                                                        className={`p-1 text-center border-r border-slate-800/40 cursor-pointer hover:ring-2 hover:ring-indigo-500/50 transition relative ${
-                                                            day.is_sunday ? 'bg-amber-950/5' : ''
-                                                        }`}
-                                                    >
-                                                        {isLeave ? (
-                                                            <div
-                                                                className="h-8 rounded-lg bg-teal-500/15 border border-teal-500/30 flex flex-col items-center justify-center text-teal-300 font-bold text-[10px] shadow-sm"
-                                                                title={`Approved Leave: ${cell.leave?.leave_type}`}
-                                                            >
-                                                                <span>{cell.leave?.leave_code || 'LV'}</span>
-                                                            </div>
-                                                        ) : isHoliday && !hasShift ? (
-                                                            <div
-                                                                className="h-8 rounded-lg bg-rose-500/10 border border-rose-500/25 flex flex-col items-center justify-center text-rose-300 font-bold text-[10px]"
-                                                                title={`Holiday: ${day.holiday?.name}`}
-                                                            >
-                                                                <span>PH</span>
-                                                            </div>
-                                                        ) : isRest ? (
-                                                            <div
-                                                                className="h-8 rounded-lg bg-amber-500/10 border border-amber-500/25 flex flex-col items-center justify-center text-amber-300 font-bold text-[10px]"
-                                                                title="Scheduled Rest Day"
-                                                            >
-                                                                <span>OFF</span>
-                                                            </div>
-                                                        ) : hasShift ? (
-                                                            <div
-                                                                className="h-8 rounded-lg flex flex-col items-center justify-center text-white font-bold text-[10px] shadow-sm transition relative"
-                                                                style={{
-                                                                    backgroundColor: `${cell.shift?.color || '#3B82F6'}25`,
-                                                                    borderColor: hasFatigue ? '#F59E0B' : `${cell.shift?.color || '#3B82F6'}60`,
-                                                                    borderWidth: hasFatigue ? '1.5px' : '1px',
-                                                                    color: cell.shift?.color || '#93C5FD',
-                                                                }}
-                                                                title={`${cell.shift?.name} (${cell.shift?.start_time}-${cell.shift?.end_time})${
-                                                                    hasFatigue ? `\n⚠️ Alert: Rest turnaround is ${cell.rest_hours}h (<11h).` : ''
-                                                                }`}
-                                                            >
-                                                                <span>{cell.shift?.code}</span>
-                                                                {hasFatigue && (
-                                                                    <span
-                                                                        className="w-2 h-2 rounded-full bg-amber-400 absolute -top-1 -right-1 border border-slate-900"
-                                                                        title={`Rest interval ${cell.rest_hours}h (<11h)`}
-                                                                    />
-                                                                )}
-                                                                {cell.is_overridden && (
-                                                                    <span className="w-1 h-1 rounded-full bg-indigo-400 absolute bottom-0.5 right-0.5" />
-                                                                )}
-                                                            </div>
-                                                        ) : (
-                                                            <div className="h-8 rounded-lg border border-dashed border-slate-800 flex items-center justify-center text-slate-600 hover:border-slate-700 hover:text-slate-400">
-                                                                <span className="text-[10px]">-</span>
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    ))
                                 )}
                             </tbody>
 
-                            {/* 5. Sticky Daily Coverage Headcount Summary Footer */}
+                            {/* Sticky Daily Coverage Summary Footer */}
                             {coverage_summary && (
-                                <tfoot className="bg-slate-950 text-slate-300 border-t-2 border-slate-700 sticky bottom-0 z-20 shadow-[0_-4px_6px_rgba(0,0,0,0.3)]">
+                                <tfoot className="sticky bottom-0 z-30 bg-slate-950 border-t-2 border-slate-700 text-xs font-mono font-semibold">
                                     <tr>
-                                        <td className="p-2.5 font-bold text-xs sticky left-0 bg-slate-950 border-r border-slate-800 text-indigo-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
-                                            Daily Working Headcount
+                                        <td className="sticky left-0 z-40 bg-slate-950 px-4 py-2.5 font-bold text-white border-r border-slate-800">
+                                            Daily On-Duty Count
                                         </td>
-                                        <td className="p-2 text-center border-r border-slate-800 bg-slate-950 text-[10px] text-slate-400 font-semibold">
-                                            Staff On Duty
-                                        </td>
-                                        {days.map((day) => {
-                                            const stat = coverage_summary[day.date];
-                                            const count = stat?.total_working ?? 0;
+                                        {days.map((d) => {
+                                            const cov = coverage_summary[d.date];
+                                            const working = cov?.total_working || 0;
                                             return (
                                                 <td
-                                                    key={day.date}
-                                                    className={`p-1.5 text-center border-r border-slate-800/60 font-bold text-xs ${
-                                                        count === 0 && !day.is_sunday
-                                                            ? 'text-rose-400 bg-rose-950/20'
-                                                            : 'text-indigo-300'
-                                                    }`}
-                                                    title={`Working: ${count} staff\nRest: ${stat?.total_rest ?? 0}\nLeave: ${stat?.total_leave ?? 0}`}
+                                                    key={d.date}
+                                                    className="px-1 py-2 text-center border-r border-slate-800 text-[11px]"
                                                 >
-                                                    {count}
+                                                    <span
+                                                        className={`font-bold ${
+                                                            working > 0 ? 'text-emerald-400' : 'text-slate-500'
+                                                        }`}
+                                                    >
+                                                        {working}
+                                                    </span>
                                                 </td>
                                             );
                                         })}
-                                    </tr>
-                                    <tr>
-                                        <td className="p-2 text-xs sticky left-0 bg-slate-950 border-r border-slate-800 text-amber-400 font-semibold shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
-                                            Scheduled Rest Days (OFF)
+                                        <td className="text-center font-bold text-indigo-400 px-2">
+                                            Total
                                         </td>
-                                        <td className="p-1 text-center border-r border-slate-800 bg-slate-950 text-[10px] text-slate-500">
-                                            Rest Days
-                                        </td>
-                                        {days.map((day) => (
-                                            <td
-                                                key={day.date}
-                                                className="p-1 text-center border-r border-slate-800/60 text-amber-400 text-[11px] font-medium"
-                                            >
-                                                {coverage_summary[day.date]?.total_rest ?? 0}
-                                            </td>
-                                        ))}
                                     </tr>
                                 </tfoot>
                             )}
@@ -992,49 +1033,56 @@ export default function Index({
                 </div>
             </div>
 
-            {/* 6. Cell Edit Modal */}
+
+
+            {/* MODAL 1: Operational Cell Override Drawer */}
             {selectedCell && (
-                <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                            <div>
-                                <h3 className="text-base font-bold text-white">Adjust Roster Entry</h3>
-                                <p className="text-xs text-slate-400 mt-0.5">
-                                    {selectedCell.employeeName} • {selectedCell.date}
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => setSelectedCell(null)}
-                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setSelectedCell(null)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Operational Shift Override
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                {selectedCell.employeeName}
+                            </h3>
+                            <p className="text-xs text-slate-400 font-mono">
+                                Date: {selectedCell.date}
+                            </p>
                         </div>
 
-                        <form onSubmit={handleCellSubmit} className="space-y-4">
+                        <form onSubmit={handleCellSubmit} className="space-y-3.5">
+                            {/* Schedule Type */}
                             <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                    Schedule Type
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Duty Status
                                 </label>
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => cellForm.setData((p) => ({ ...p, schedule_type: 'shift' }))}
+                                        onClick={() => cellForm.setData('schedule_type', 'shift')}
                                         className={`py-2 px-3 rounded-xl border text-xs font-semibold transition ${
                                             cellForm.data.schedule_type === 'shift'
-                                                ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
-                                                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                                                ? 'bg-indigo-600 border-indigo-500 text-white'
+                                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                                         }`}
                                     >
-                                        Work Shift
+                                        Working Shift
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => cellForm.setData((p) => ({ ...p, schedule_type: 'rest_day' }))}
+                                        onClick={() => cellForm.setData('schedule_type', 'rest_day')}
                                         className={`py-2 px-3 rounded-xl border text-xs font-semibold transition ${
                                             cellForm.data.schedule_type === 'rest_day'
-                                                ? 'bg-amber-600 border-amber-500 text-white shadow-md'
-                                                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                                                ? 'bg-slate-800 border-slate-600 text-white'
+                                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                                         }`}
                                     >
                                         Rest Day (OFF)
@@ -1042,53 +1090,73 @@ export default function Index({
                                 </div>
                             </div>
 
+                            {/* Shift Selector */}
                             {cellForm.data.schedule_type === 'shift' && (
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                        Select Shift
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Assigned Shift
                                     </label>
                                     <select
                                         value={cellForm.data.shift_id}
-                                        onChange={(e) => cellForm.setData((p) => ({ ...p, shift_id: e.target.value }))}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
-                                        required
+                                        onChange={(e) => cellForm.setData('shift_id', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
                                     >
                                         {shifts.map((s) => (
                                             <option key={s.id} value={s.id}>
-                                                {s.name} ({s.code}) [{s.start_time.substring(0, 5)} - {s.end_time.substring(0, 5)}]
+                                                {s.name} ({s.code}: {s.start_time} - {s.end_time})
                                             </option>
                                         ))}
                                     </select>
                                 </div>
                             )}
 
+                            {/* Reason for Override */}
                             <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                    Notes (Optional)
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Reason for Override (Audit Log)
+                                </label>
+                                <select
+                                    value={cellForm.data.override_reason}
+                                    onChange={(e) => cellForm.setData('override_reason', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    <option value="Sick Cover">Sick Cover (Relief for absent colleague)</option>
+                                    <option value="Shift Swap">Approved Shift Swap</option>
+                                    <option value="Extra Duty / Extend">Extra Duty / Operational Surge</option>
+                                    <option value="Staff Shortage">Line Staff Shortage</option>
+                                    <option value="Personal Request">Employee Personal Request</option>
+                                    <option value="Supervisor Operational Reassignment">Supervisor Operational Reassignment</option>
+                                </select>
+                            </div>
+
+                            {/* Notes */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Supervisor Notes
                                 </label>
                                 <input
                                     type="text"
-                                    placeholder="e.g., Managerial substitution or emergency cover"
                                     value={cellForm.data.notes}
-                                    onChange={(e) => cellForm.setData((p) => ({ ...p, notes: e.target.value }))}
-                                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                                    onChange={(e) => cellForm.setData('notes', e.target.value)}
+                                    placeholder="Optional reason details..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600"
                                 />
                             </div>
 
-                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                            <div className="pt-2 flex items-center justify-end gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setSelectedCell(null)}
-                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={cellForm.processing}
-                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30"
+                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
                                 >
-                                    Save Entry
+                                    {cellForm.processing ? 'Saving...' : 'Apply Shift Change'}
                                 </button>
                             </div>
                         </form>
@@ -1096,756 +1164,499 @@ export default function Index({
                 </div>
             )}
 
-            {/* 7. Shift Swap Modal */}
-            {isSwapModalOpen && (
-                <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            {/* MODAL 2: Add / Manage Squad Members (With Exclusivity Guard) */}
+            {isManageMembersModalOpen && targetSquadForEnroll && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl relative max-h-[85vh] flex flex-col">
+                        <button
+                            onClick={() => setIsManageMembersModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
                             <div className="flex items-center gap-2">
-                                <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400">
-                                    <ArrowLeftRight className="w-5 h-5" />
-                                </div>
-                                <div>
-                                    <h3 className="text-base font-bold text-white">Shift Swap</h3>
-                                    <p className="text-xs text-slate-400 mt-0.5">
-                                        Atomically swap shifts between two employees on a chosen date.
-                                    </p>
-                                </div>
+                                <span
+                                    className="w-3 h-3 rounded-full"
+                                    style={{ backgroundColor: targetSquadForEnroll.color || '#3b82f6' }}
+                                />
+                                <h3 className="text-base font-bold text-white">
+                                    Manage Squad Members: {targetSquadForEnroll.name}
+                                </h3>
                             </div>
-                            <button
-                                onClick={() => setIsSwapModalOpen(false)}
-                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
+                            <p className="text-xs text-slate-400 mt-1">
+                                Enrolled personnel rotate automatically using the squad's attached pattern. Exclusivity guard prevents duplicate roster scheduling.
+                            </p>
                         </div>
 
-                        <form onSubmit={handleSwapSubmit} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                    Swap Date
-                                </label>
-                                <input
-                                    type="date"
-                                    value={swapForm.data.date}
-                                    onChange={(e) => swapForm.setData('date', e.target.value)}
-                                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
-                                    required
-                                />
+                        {/* Currently Enrolled Members */}
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                            <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                                Currently Enrolled in {targetSquadForEnroll.code} ({(targetSquadForEnroll.employees || []).length})
+                            </span>
+                            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                                {(targetSquadForEnroll.employees || []).map((emp) => (
+                                    <div
+                                        key={emp.id}
+                                        className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 px-2.5 py-1 rounded-lg text-xs text-white"
+                                    >
+                                        <span className="font-semibold">{emp.full_name}</span>
+                                        <span className="text-[10px] text-slate-400 font-mono">({emp.emp_no})</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveMember(targetSquadForEnroll.id, emp.id, emp.full_name)}
+                                            className="text-slate-400 hover:text-rose-400 ml-1"
+                                            title="Unassign from this squad"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                ))}
+                                {(targetSquadForEnroll.employees || []).length === 0 && (
+                                    <span className="text-xs text-slate-500 italic">No personnel enrolled yet.</span>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Available Personnel List (Exclusivity Filtered) */}
+                        <div className="space-y-2 flex-1 overflow-hidden flex flex-col">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                                    Available Personnel to Enroll
+                                </span>
+                                <span className="text-[10px] text-emerald-400 font-semibold">
+                                    {selectedEnrollEmpIds.length} Selected
+                                </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                        Employee A
-                                    </label>
-                                    <select
-                                        value={swapForm.data.employee_a_id}
-                                        onChange={(e) => swapForm.setData('employee_a_id', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
-                                        required
-                                    >
-                                        {matrix.map((m) => (
-                                            <option key={m.employee.id} value={m.employee.id}>
-                                                {m.employee.emp_no} - {m.employee.full_name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                        Employee B
-                                    </label>
-                                    <select
-                                        value={swapForm.data.employee_b_id}
-                                        onChange={(e) => swapForm.setData('employee_b_id', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
-                                        required
-                                    >
-                                        {matrix.map((m) => (
-                                            <option key={m.employee.id} value={m.employee.id}>
-                                                {m.employee.emp_no} - {m.employee.full_name}
-                                            </option>
-                                        ))}
-                                    </select>
+                            <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <input
+                                        type="text"
+                                        value={memberSearchQuery}
+                                        onChange={(e) => setMemberSearchQuery(e.target.value)}
+                                        placeholder="Search available staff..."
+                                        className="bg-slate-950 border border-slate-800 text-white text-xs rounded-xl pl-9 pr-3 py-1.5 w-full focus:ring-1 focus:ring-indigo-500"
+                                    />
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                            {/* Staff Scrollable List */}
+                            <div className="flex-1 overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-xl bg-slate-950">
+                                {available_employees
+                                    .filter((emp) => {
+                                        const matchesSearch =
+                                            emp.full_name.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
+                                            emp.emp_no.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
+                                            emp.department_name.toLowerCase().includes(memberSearchQuery.toLowerCase());
+                                        return matchesSearch;
+                                    })
+                                    .map((emp) => {
+                                        const isSelected = selectedEnrollEmpIds.includes(emp.id);
+                                        const isAlreadyInThisSquad = (targetSquadForEnroll.employees || []).some(
+                                            (e) => e.id === emp.id
+                                        );
+
+                                        return (
+                                            <div
+                                                key={emp.id}
+                                                className={`p-2.5 flex items-center justify-between transition ${
+                                                    isAlreadyInThisSquad
+                                                        ? 'opacity-40 bg-slate-900/50'
+                                                        : !emp.is_available
+                                                        ? 'opacity-50 bg-rose-950/10'
+                                                        : isSelected
+                                                        ? 'bg-indigo-950/40'
+                                                        : 'hover:bg-slate-900'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2.5">
+                                                    <input
+                                                        type="checkbox"
+                                                        disabled={isAlreadyInThisSquad || !emp.is_available}
+                                                        checked={isSelected}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setSelectedEnrollEmpIds((prev) => [...prev, emp.id]);
+                                                            } else {
+                                                                setSelectedEnrollEmpIds((prev) =>
+                                                                    prev.filter((id) => id !== emp.id)
+                                                                );
+                                                            }
+                                                        }}
+                                                        className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 disabled:opacity-30 cursor-pointer"
+                                                    />
+                                                    <div>
+                                                        <div className="font-semibold text-white text-xs">
+                                                            {emp.full_name}
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-400 font-mono">
+                                                            {emp.emp_no} &bull; {emp.department_name} ({emp.designation_title})
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    {isAlreadyInThisSquad ? (
+                                                        <span className="text-[10px] text-slate-500 font-mono">Already in Squad</span>
+                                                    ) : !emp.is_available ? (
+                                                        <span className="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                                                            Rostered in Other Squad
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                                            Available
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        </div>
+
+                        <div className="pt-2 flex items-center justify-between border-t border-slate-800">
+                            <span className="text-xs text-slate-400">
+                                Enrolling staff automatically syncs their monthly duty roster.
+                            </span>
+                            <div className="flex items-center gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setIsSwapModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                    onClick={() => setIsManageMembersModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    type="submit"
-                                    disabled={swapForm.processing}
-                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30"
+                                    type="button"
+                                    disabled={selectedEnrollEmpIds.length === 0}
+                                    onClick={handleEnrollSubmit}
+                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-40"
                                 >
-                                    Execute Swap
+                                    Enroll Selected ({selectedEnrollEmpIds.length})
                                 </button>
                             </div>
-                        </form>
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* 8. Bulk Pattern-Based Roster Generator Modal */}
-            {isGenerateModalOpen && (
-                <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-6 my-8">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                            <div className="flex items-center gap-2.5">
-                                <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400">
-                                    <Sparkles className="w-5 h-5" />
-                                </div>
-                                <div>
-                                    <h3 className="text-base font-bold text-white">Generate Duty Roster</h3>
-                                    <p className="text-xs text-slate-400 mt-0.5">
-                                        Build schedules across date ranges using high-performance chunked database batching.
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setIsGenerateModalOpen(false)}
-                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
+            {/* MODAL 3: Create New Named Roster */}
+            {isNewRosterModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsNewRosterModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Setup Workforce Schedule
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Create Named Roster
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Defines the master schedule header for a department or team over a date range.
+                            </p>
                         </div>
 
-                        <form onSubmit={handleGenerateSubmit} className="space-y-5">
-                            {/* Generation Source: Saved Template vs Custom */}
-                            <div className="flex items-center justify-between p-1 bg-slate-950 rounded-xl border border-slate-800">
-                                <button
-                                    type="button"
-                                    onClick={() => setGenerationSource('template')}
-                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition ${
-                                        generationSource === 'template'
-                                            ? 'bg-indigo-600 text-white shadow-md'
-                                            : 'text-slate-400 hover:text-white'
-                                    }`}
-                                >
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    <span>Apply Saved Template ({patterns.length})</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setGenerationSource('custom')}
-                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition ${
-                                        generationSource === 'custom'
-                                            ? 'bg-indigo-600 text-white shadow-md'
-                                            : 'text-slate-400 hover:text-white'
-                                    }`}
-                                >
-                                    <CalendarIcon className="w-3.5 h-3.5" />
-                                    <span>Custom On-The-Fly Pattern</span>
-                                </button>
-                            </div>
-
-                            {/* If Saved Template: Pattern Picker & Preview */}
-                            {generationSource === 'template' && (
-                                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-slate-300">
-                                            Select Shift Group / Rotation Template
-                                        </label>
-                                        <a
-                                            href="/roster/patterns"
-                                            className="text-[11px] text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
-                                            target="_blank"
-                                            rel="noreferrer"
-                                        >
-                                            Manage Shift Groups &rarr;
-                                        </a>
-                                    </div>
-                                    {patterns.length === 0 ? (
-                                        <div className="text-center py-4 text-xs text-slate-500">
-                                            No shift group templates configured yet.{' '}
-                                            <a href="/roster/patterns" className="text-indigo-400 underline">
-                                                Create your first Shift Group
-                                            </a>{' '}
-                                            or switch to "Custom On-The-Fly".
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            <select
-                                                value={selectedPatternId}
-                                                onChange={(e) => setSelectedPatternId(e.target.value)}
-                                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
-                                            >
-                                                {patterns.map((p) => (
-                                                    <option key={p.id} value={p.id}>
-                                                        {p.name} ({p.code}) — {p.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Shift Group Rotation'}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            {/* Preview selected pattern sequence */}
-                                            {(() => {
-                                                const sel = patterns.find((p) => p.id === selectedPatternId);
-                                                if (!sel) return null;
-                                                return (
-                                                    <div className="pt-1">
-                                                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5">
-                                                            Rotation Sequence Preview ({sel.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Shift Group Cycle'}):
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {sel.pattern_type === 'weekly' && Array.isArray(sel.pattern_data) &&
-                                                                sel.pattern_data.map((day: any, idx: number) => {
-                                                                    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                                                                    const shift = shifts.find((s) => s.id === day.shift_id);
-                                                                    return (
-                                                                        <span
-                                                                            key={idx}
-                                                                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
-                                                                                day.is_rest_day
-                                                                                    ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
-                                                                                    : 'bg-indigo-950/60 text-indigo-300 border border-indigo-800/60'
-                                                                            }`}
-                                                                        >
-                                                                            {dayNames[idx]}: {day.is_rest_day ? 'OFF' : (shift?.code || 'Shift')}
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                            {sel.pattern_type === 'cyclical' &&
-                                                                (Array.isArray(sel.pattern_data?.steps) ? sel.pattern_data.steps : Array.isArray(sel.pattern_data) ? sel.pattern_data : []).map((step: any, idx: number) => {
-                                                                    const shift = shifts.find((s) => s.id === step.shift_id);
-                                                                    return (
-                                                                        <span
-                                                                            key={idx}
-                                                                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
-                                                                                step.is_rest_day
-                                                                                    ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
-                                                                                    : 'bg-teal-950/60 text-teal-300 border border-teal-800/60'
-                                                                            }`}
-                                                                        >
-                                                                            Step {idx + 1}: {step.is_rest_day ? 'OFF' : (shift?.code || 'Shift')}
-                                                                        </span>
-                                                                    );
-                                                                })}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* If Custom: Mode Tabs and Configurations */}
-                            {generationSource === 'custom' && (
-                                <>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-300 mb-2">
-                                            Select Generation Pattern
-                                        </label>
-                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => generateForm.setData('pattern_mode', 'weekly')}
-                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                                    generateForm.data.pattern_mode === 'weekly'
-                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                <CalendarIcon className="w-4 h-4" />
-                                                <span>7-Day Weekly</span>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => generateForm.setData('pattern_mode', 'cyclical')}
-                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                                    generateForm.data.pattern_mode === 'cyclical'
-                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                <RefreshCw className="w-4 h-4" />
-                                                <span>Rolling N-Day</span>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => generateForm.setData('pattern_mode', 'daily')}
-                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                                    generateForm.data.pattern_mode === 'daily'
-                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                <Clock className="w-4 h-4" />
-                                                <span>Daily Single</span>
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => generateForm.setData('pattern_mode', 'copy_month')}
-                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                                    generateForm.data.pattern_mode === 'copy_month'
-                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                <Copy className="w-4 h-4" />
-                                                <span>Clone Month</span>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Custom Weekly Matrix */}
-                                    {generateForm.data.pattern_mode === 'weekly' && (
-                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                            <div className="text-xs font-bold text-indigo-400">Weekly 7-Day Schedule Matrix</div>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
-                                                    (dayName, idx) => {
-                                                        const dayCfg = generateForm.data.weekly_config[idx] || {
-                                                            shift_id: shifts[0]?.id || '',
-                                                            is_rest_day: idx === 6,
-                                                        };
-
-                                                        return (
-                                                            <div
-                                                                key={dayName}
-                                                                className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800"
-                                                            >
-                                                                <span className="w-12 text-xs font-bold text-slate-300">{dayName.substring(0, 3)}</span>
-                                                                <select
-                                                                    disabled={dayCfg.is_rest_day}
-                                                                    value={dayCfg.shift_id}
-                                                                    onChange={(e) => {
-                                                                        const updated = [...generateForm.data.weekly_config];
-                                                                        updated[idx] = { ...dayCfg, shift_id: e.target.value };
-                                                                        generateForm.setData('weekly_config', updated);
-                                                                    }}
-                                                                    className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 disabled:opacity-30"
-                                                                >
-                                                                    {shifts.map((s) => (
-                                                                        <option key={s.id} value={s.id}>
-                                                                            {s.name} ({s.code})
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                                <label className="flex items-center gap-1 text-[11px] text-amber-400 cursor-pointer">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={dayCfg.is_rest_day}
-                                                                        onChange={(e) => {
-                                                                            const updated = [...generateForm.data.weekly_config];
-                                                                            updated[idx] = {
-                                                                                ...dayCfg,
-                                                                                is_rest_day: e.target.checked,
-                                                                            };
-                                                                            generateForm.setData('weekly_config', updated);
-                                                                        }}
-                                                                        className="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-400"
-                                                                    />
-                                                                    <span>Off</span>
-                                                                </label>
-                                                            </div>
-                                                        );
-                                                    }
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Custom Cyclical Matrix */}
-                                    {generateForm.data.pattern_mode === 'cyclical' && (
-                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                            <div className="flex items-center justify-between">
-                                                <div className="text-xs font-bold text-indigo-400">
-                                                    Rolling Rotation Cycle ({generateForm.data.cyclical_config.steps.length} Steps)
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const steps = [...generateForm.data.cyclical_config.steps];
-                                                        steps.push({
-                                                            shift_id: shifts[0]?.id || '',
-                                                            is_rest_day: false,
-                                                            notes: `Day ${steps.length + 1}`,
-                                                        });
-                                                        generateForm.setData('cyclical_config', {
-                                                            ...generateForm.data.cyclical_config,
-                                                            steps,
-                                                        });
-                                                    }}
-                                                    className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
-                                                >
-                                                    + Add Step
-                                                </button>
-                                            </div>
-
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                                                {generateForm.data.cyclical_config.steps.map((step, idx) => (
-                                                    <div
-                                                        key={idx}
-                                                        className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs"
-                                                    >
-                                                        <span className="w-14 text-slate-400 font-bold">Step {idx + 1}</span>
-                                                        <select
-                                                            disabled={step.is_rest_day}
-                                                            value={step.shift_id}
-                                                            onChange={(e) => {
-                                                                const steps = [...generateForm.data.cyclical_config.steps];
-                                                                steps[idx] = { ...step, shift_id: e.target.value };
-                                                                generateForm.setData('cyclical_config', {
-                                                                    ...generateForm.data.cyclical_config,
-                                                                    steps,
-                                                                });
-                                                            }}
-                                                            className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 disabled:opacity-30"
-                                                        >
-                                                            {shifts.map((s) => (
-                                                                <option key={s.id} value={s.id}>
-                                                                    {s.code}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        <label className="flex items-center gap-1 text-[11px] text-amber-400">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={step.is_rest_day}
-                                                                onChange={(e) => {
-                                                                    const steps = [...generateForm.data.cyclical_config.steps];
-                                                                    steps[idx] = { ...step, is_rest_day: e.target.checked };
-                                                                    generateForm.setData('cyclical_config', {
-                                                                        ...generateForm.data.cyclical_config,
-                                                                        steps,
-                                                                    });
-                                                                }}
-                                                                className="rounded bg-slate-800 border-slate-700 text-amber-500"
-                                                            />
-                                                            <span>Off</span>
-                                                        </label>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Custom Daily Matrix */}
-                                    {generateForm.data.pattern_mode === 'daily' && (
-                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                    Working Shift
-                                                </label>
-                                                <select
-                                                    value={generateForm.data.daily_config.shift_id}
-                                                    onChange={(e) =>
-                                                        generateForm.setData('daily_config', {
-                                                            ...generateForm.data.daily_config,
-                                                            shift_id: e.target.value,
-                                                        })
-                                                    }
-                                                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                                >
-                                                    {shifts.map((s) => (
-                                                        <option key={s.id} value={s.id}>
-                                                            {s.name} ({s.code}) [{s.start_time.substring(0, 5)} - {s.end_time.substring(0, 5)}]
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Custom Copy Month Matrix */}
-                                    {generateForm.data.pattern_mode === 'copy_month' && (
-                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                        Source Year
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        value={generateForm.data.copy_config.source_year}
-                                                        onChange={(e) =>
-                                                            generateForm.setData('copy_config', {
-                                                                ...generateForm.data.copy_config,
-                                                                source_year: parseInt(e.target.value) || year,
-                                                            })
-                                                        }
-                                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                        Source Month
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        min={1}
-                                                        max={12}
-                                                        value={generateForm.data.copy_config.source_month}
-                                                        onChange={(e) =>
-                                                            generateForm.setData('copy_config', {
-                                                                ...generateForm.data.copy_config,
-                                                                source_month: parseInt(e.target.value) || 1,
-                                                            })
-                                                        }
-                                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-
-                            {/* Personnel Assignment Target Scope */}
-                            <div className="space-y-3">
-                                <label className="block text-xs font-semibold text-slate-300">
-                                    Target Personnel Scope
+                        <form onSubmit={handleNewRosterSubmit} className="space-y-3.5">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Roster Name
                                 </label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setStaffScope('all')}
-                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
-                                            staffScope === 'all'
-                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
-                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
-                                        }`}
-                                    >
-                                        All Personnel ({staffList.length})
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setStaffScope('department')}
-                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
-                                            staffScope === 'department'
-                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
-                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
-                                        }`}
-                                    >
-                                        By Department
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setStaffScope('specific')}
-                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
-                                            staffScope === 'specific'
-                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
-                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
-                                        }`}
-                                    >
-                                        Specific Staff ({selectedStaffIds.length})
-                                    </button>
-                                </div>
-
-                                {staffScope === 'department' && (
-                                    <div>
-                                        <select
-                                            value={generateForm.data.department_id}
-                                            onChange={(e) => generateForm.setData('department_id', e.target.value)}
-                                            className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
-                                        >
-                                            <option value="">Select a Department</option>
-                                            {departments.map((d) => (
-                                                <option key={d.id} value={d.id}>
-                                                    {d.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {staffScope === 'specific' && (
-                                    <div className="space-y-2.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="relative flex-1">
-                                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                <input
-                                                    type="text"
-                                                    placeholder="Search personnel by name or ID..."
-                                                    value={staffSearchQuery}
-                                                    onChange={(e) => setStaffSearchQuery(e.target.value)}
-                                                    className="w-full bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg pl-8 pr-3 py-1.5 focus:ring-1 focus:ring-indigo-500"
-                                                />
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const allVisibleIds = filteredStaffList.map((s) => s.id);
-                                                    const isAllSelected = allVisibleIds.every((id) => selectedStaffIds.includes(id));
-                                                    if (isAllSelected) {
-                                                        setSelectedStaffIds(selectedStaffIds.filter((id) => !allVisibleIds.includes(id)));
-                                                    } else {
-                                                        setSelectedStaffIds(Array.from(new Set([...selectedStaffIds, ...allVisibleIds])));
-                                                    }
-                                                }}
-                                                className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-800 border border-slate-700 whitespace-nowrap"
-                                            >
-                                                Select Visible
-                                            </button>
-                                        </div>
-
-                                        <div className="max-h-40 overflow-y-auto space-y-1 divide-y divide-slate-800/50">
-                                            {filteredStaffList.map((st) => {
-                                                const isChecked = selectedStaffIds.includes(st.id);
-                                                return (
-                                                    <label
-                                                        key={st.id}
-                                                        className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer text-xs"
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isChecked}
-                                                            onChange={(e) => {
-                                                                if (e.target.checked) {
-                                                                    setSelectedStaffIds([...selectedStaffIds, st.id]);
-                                                                } else {
-                                                                    setSelectedStaffIds(selectedStaffIds.filter((id) => id !== st.id));
-                                                                }
-                                                            }}
-                                                            className="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
-                                                        />
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-slate-200 font-medium truncate">{st.full_name}</div>
-                                                            <div className="text-[10px] text-slate-500 truncate">
-                                                                {st.emp_no} {st.department ? `· ${st.department.name}` : ''}
-                                                            </div>
-                                                        </div>
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
+                                <input
+                                    type="text"
+                                    required
+                                    value={newRosterForm.data.name}
+                                    onChange={(e) => newRosterForm.setData('name', e.target.value)}
+                                    placeholder="e.g. November 2026 - Operations Roster"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                />
                             </div>
 
-                            {/* Date Range */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Roster Code
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newRosterForm.data.code}
+                                        onChange={(e) => newRosterForm.setData('code', e.target.value)}
+                                        placeholder="e.g. RST-NOV-OPS"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Department
+                                    </label>
+                                    <select
+                                        value={newRosterForm.data.department_id}
+                                        onChange={(e) => newRosterForm.setData('department_id', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                        <option value="">All Company</option>
+                                        {departments.map((d) => (
+                                            <option key={d.id} value={d.id}>
+                                                {d.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
                                         Start Date
                                     </label>
                                     <input
                                         type="date"
-                                        value={generateForm.data.start_date}
-                                        onChange={(e) => generateForm.setData('start_date', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
                                         required
+                                        value={newRosterForm.data.start_date}
+                                        onChange={(e) => newRosterForm.setData('start_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
                                     />
                                 </div>
-
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
                                         End Date
                                     </label>
                                     <input
                                         type="date"
-                                        value={generateForm.data.end_date}
-                                        onChange={(e) => generateForm.setData('end_date', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
                                         required
+                                        value={newRosterForm.data.end_date}
+                                        onChange={(e) => newRosterForm.setData('end_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
                                     />
                                 </div>
                             </div>
 
-                            {/* Leave Protection Option */}
-                            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                                <div>
-                                    <div className="text-xs font-bold text-teal-400">Preserve Approved Leaves</div>
-                                    <p className="text-[11px] text-slate-400">
-                                        Do not schedule work shifts over days with pre-approved employee leaves.
-                                    </p>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={generateForm.data.preserve_leaves}
-                                    onChange={(e) => generateForm.setData('preserve_leaves', e.target.checked)}
-                                    className="rounded bg-slate-800 border-slate-700 text-teal-500 focus:ring-teal-400 w-4 h-4 cursor-pointer"
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Notes
+                                </label>
+                                <textarea
+                                    rows={2}
+                                    value={newRosterForm.data.notes}
+                                    onChange={(e) => newRosterForm.setData('notes', e.target.value)}
+                                    placeholder="Operational goals or staffing notes..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600"
                                 />
                             </div>
 
-                            {/* Conflict & State options */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                        Existing Entries Conflict Mode
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => generateForm.setData('conflict_mode', 'overwrite')}
-                                            className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-medium ${
-                                                generateForm.data.conflict_mode === 'overwrite'
-                                                    ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-                                                    : 'bg-slate-800 border-slate-700 text-slate-400'
-                                            }`}
-                                        >
-                                            Overwrite
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => generateForm.setData('conflict_mode', 'preserve')}
-                                            className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-medium ${
-                                                generateForm.data.conflict_mode === 'preserve'
-                                                    ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-                                                    : 'bg-slate-800 border-slate-700 text-slate-400'
-                                            }`}
-                                        >
-                                            Preserve Existing
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                        Roster Status
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => generateForm.setData('status', 'published')}
-                                            className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-medium ${
-                                                generateForm.data.status === 'published'
-                                                    ? 'bg-emerald-600/30 border-emerald-500 text-emerald-300'
-                                                    : 'bg-slate-800 border-slate-700 text-slate-400'
-                                            }`}
-                                        >
-                                            Published
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => generateForm.setData('status', 'draft')}
-                                            className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-medium ${
-                                                generateForm.data.status === 'draft'
-                                                    ? 'bg-amber-600/30 border-amber-500 text-amber-300'
-                                                    : 'bg-slate-800 border-slate-700 text-slate-400'
-                                            }`}
-                                        >
-                                            Draft
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                            <div className="pt-2 flex items-center justify-end gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setIsGenerateModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                    onClick={() => setIsNewRosterModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={generateForm.processing}
-                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30"
+                                    disabled={newRosterForm.processing}
+                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
                                 >
-                                    <Sparkles className="w-4 h-4" />
-                                    Generate Roster
+                                    {newRosterForm.processing ? 'Creating...' : 'Create Roster'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 4: Clone Roster to Next Month */}
+            {isCloneModalOpen && active_roster && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsCloneModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                1-Click Roll Forward
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Clone Roster: {active_roster.name}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Clones all rotating squads and enrolled staff to the new period, automatically generating their synchronized shifts.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleCloneSubmit} className="space-y-3.5">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    New Roster Name
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={cloneForm.data.name}
+                                    onChange={(e) => cloneForm.setData('name', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Target Start Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={cloneForm.data.start_date}
+                                        onChange={(e) => cloneForm.setData('start_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Target End Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={cloneForm.data.end_date}
+                                        onChange={(e) => cloneForm.setData('end_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCloneModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={cloneForm.processing}
+                                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                >
+                                    {cloneForm.processing ? 'Cloning...' : 'Clone & Populate Shifts'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 5: Shift Swap Modal */}
+            {isSwapModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsSwapModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                Shift Exchange
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Atomic Shift Swap
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Exchanges duty assignments between two personnel on a specific date with audit trail.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleSwapSubmit} className="space-y-3.5">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Date of Swap
+                                </label>
+                                <input
+                                    type="date"
+                                    required
+                                    value={swapForm.data.date}
+                                    onChange={(e) => swapForm.setData('date', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Employee A
+                                </label>
+                                <select
+                                    value={swapForm.data.employee_a_id}
+                                    onChange={(e) => swapForm.setData('employee_a_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    {matrix.map((r) => (
+                                        <option key={r.employee.id} value={r.employee.id}>
+                                            {r.employee.full_name} ({r.employee.emp_no})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Employee B
+                                </label>
+                                <select
+                                    value={swapForm.data.employee_b_id}
+                                    onChange={(e) => swapForm.setData('employee_b_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    {matrix.map((r) => (
+                                        <option key={r.employee.id} value={r.employee.id}>
+                                            {r.employee.full_name} ({r.employee.emp_no})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Reason / Reference
+                                </label>
+                                <input
+                                    type="text"
+                                    value={swapForm.data.reason}
+                                    onChange={(e) => swapForm.setData('reason', e.target.value)}
+                                    placeholder="e.g. Mutual consent / family obligation"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsSwapModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={swapForm.processing || swapForm.data.employee_a_id === swapForm.data.employee_b_id}
+                                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                >
+                                    {swapForm.processing ? 'Swapping...' : 'Execute Shift Swap'}
                                 </button>
                             </div>
                         </form>

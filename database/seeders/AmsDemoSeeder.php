@@ -242,41 +242,136 @@ final class AmsDemoSeeder extends Seeder
             ],
         ];
 
-        $rosterService = app(RosterService::class);
+        // 7. Seed Enterprise Named Rosters, Squads & Enrollments
+        $startDate = Carbon::now()->startOfMonth()->toDateString();
+        $endDate = Carbon::now()->addYear()->endOfMonth()->toDateString();
         $currMonthStart = Carbon::now()->startOfMonth()->toDateString();
         $currMonthEnd = Carbon::now()->endOfMonth()->toDateString();
+        $rosterService = app(RosterService::class);
 
-        foreach ($secGroups as $grp) {
-            $pattern = RosterPattern::updateOrCreate(
-                ['tenant_id' => $tenant->id, 'code' => $grp['code']],
+        // ROSTER 1: 24/7 Security & Plant Operations
+        $secRoster = \App\Models\Roster::firstOrCreate(
+            ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-SEC'],
+            [
+                'name' => Carbon::now()->format('F Y') . ' - Security & Plant Operations',
+                'department_id' => $secDept->id,
+                'start_date' => $currMonthStart,
+                'end_date' => $currMonthEnd,
+                'status' => 'published',
+                'published_at' => now(),
+                'notes' => 'Continuous 24/7 rotational coverage across 4 squads.',
+            ]
+        );
+
+        $secSquadConfigs = [
+            [
+                'code' => 'SEC-SQD-A',
+                'name' => 'Squad A - Morning Rotation',
+                'color' => '#3b82f6',
+                'steps' => [
+                    ['step' => 1, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
+                    ['step' => 2, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
+                    ['step' => 3, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
+                    ['step' => 4, 'shift_id' => '', 'is_rest_day' => true],
+                ],
+                'emp' => $secEmployees[0],
+            ],
+            [
+                'code' => 'SEC-SQD-B',
+                'name' => 'Squad B - Evening Rotation',
+                'color' => '#8b5cf6',
+                'steps' => [
+                    ['step' => 1, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
+                    ['step' => 2, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
+                    ['step' => 3, 'shift_id' => '', 'is_rest_day' => true],
+                    ['step' => 4, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
+                ],
+                'emp' => $secEmployees[1],
+            ],
+            [
+                'code' => 'SEC-SQD-C',
+                'name' => 'Squad C - Night Rotation',
+                'color' => '#ec4899',
+                'steps' => [
+                    ['step' => 1, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
+                    ['step' => 2, 'shift_id' => '', 'is_rest_day' => true],
+                    ['step' => 3, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
+                    ['step' => 4, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
+                ],
+                'emp' => $secEmployees[2],
+            ],
+            [
+                'code' => 'SEC-SQD-D',
+                'name' => 'Squad D - Reliever / Off Start',
+                'color' => '#10b981',
+                'steps' => [
+                    ['step' => 1, 'shift_id' => '', 'is_rest_day' => true],
+                    ['step' => 2, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
+                    ['step' => 3, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
+                    ['step' => 4, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
+                ],
+                'emp' => $secEmployees[3],
+            ],
+        ];
+
+        foreach ($secSquadConfigs as $sc) {
+            $pat = RosterPattern::updateOrCreate(
+                ['tenant_id' => $tenant->id, 'code' => $sc['code'] . '-PAT'],
                 [
-                    'name' => $grp['name'],
+                    'name' => "Security Pattern: {$sc['name']}",
                     'pattern_type' => 'cyclical',
                     'start_date' => $startDate,
                     'end_date' => $endDate,
                     'cycle_length_days' => 4,
-                    'pattern_data' => ['steps' => $grp['steps']],
+                    'pattern_data' => ['steps' => $sc['steps']],
                     'is_active' => true,
                 ]
             );
 
-            // Generate monthly roster for this group member
-            $rosterService->generateRoster([
-                'pattern_id' => $pattern->id,
-                'start_date' => $currMonthStart,
-                'end_date' => $currMonthEnd,
-                'employee_ids' => [$grp['emp']->id],
-                'conflict_mode' => 'overwrite',
-                'status' => 'published',
-                'preserve_leaves' => true,
-            ]);
+            $squad = \App\Models\RosterGroup::firstOrCreate(
+                ['tenant_id' => $tenant->id, 'roster_id' => $secRoster->id, 'code' => $sc['code']],
+                [
+                    'roster_pattern_id' => $pat->id,
+                    'name' => $sc['name'],
+                    'color' => $sc['color'],
+                ]
+            );
+
+            $rosterService->enrollEmployees($squad, [$sc['emp']->id]);
         }
 
-        // BPO 2-Shift: 3 Shift Groups (A, B, C)
-        $bpoGroups = [
+        // Add a realistic sample override to verify audit logging:
+        // Day 14: Sunil Shantha (Night) replaced by Anura Silva (Reliever) with reason 'Sick Cover'
+        $sampleDate = Carbon::now()->startOfMonth()->addDays(13)->toDateString();
+        $rosterService->updateEntry(
+            $secEmployees[3]->id,
+            $sampleDate,
+            $nightShift->id,
+            'shift',
+            'Covered emergency sick leave for Sunil',
+            'published',
+            'Sick Cover'
+        );
+
+        // ROSTER 2: Customer Care & BPO Support
+        $bpoRoster = \App\Models\Roster::firstOrCreate(
+            ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-BPO'],
             [
-                'code' => 'BPO-GRP-A',
-                'name' => 'BPO - Group A (Morn Start)',
+                'name' => Carbon::now()->format('F Y') . ' - Customer Care & BPO Support',
+                'department_id' => $bpoDept->id,
+                'start_date' => $currMonthStart,
+                'end_date' => $currMonthEnd,
+                'status' => 'published',
+                'published_at' => now(),
+                'notes' => '2-Shift 7-day customer service coverage.',
+            ]
+        );
+
+        $bpoSquadConfigs = [
+            [
+                'code' => 'BPO-SQD-A',
+                'name' => 'BPO Squad A - Morning Start',
+                'color' => '#3b82f6',
                 'steps' => [
                     ['step' => 1, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
                     ['step' => 2, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
@@ -285,8 +380,9 @@ final class AmsDemoSeeder extends Seeder
                 'emp' => $bpoEmployees[0],
             ],
             [
-                'code' => 'BPO-GRP-B',
-                'name' => 'BPO - Group B (Eve Start)',
+                'code' => 'BPO-SQD-B',
+                'name' => 'BPO Squad B - Evening Start',
+                'color' => '#8b5cf6',
                 'steps' => [
                     ['step' => 1, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
                     ['step' => 2, 'shift_id' => '', 'is_rest_day' => true],
@@ -295,8 +391,9 @@ final class AmsDemoSeeder extends Seeder
                 'emp' => $bpoEmployees[1],
             ],
             [
-                'code' => 'BPO-GRP-C',
-                'name' => 'BPO - Group C (Off Start)',
+                'code' => 'BPO-SQD-C',
+                'name' => 'BPO Squad C - Off Start',
+                'color' => '#10b981',
                 'steps' => [
                     ['step' => 1, 'shift_id' => '', 'is_rest_day' => true],
                     ['step' => 2, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
@@ -306,33 +403,46 @@ final class AmsDemoSeeder extends Seeder
             ],
         ];
 
-        foreach ($bpoGroups as $grp) {
-            $pattern = RosterPattern::updateOrCreate(
-                ['tenant_id' => $tenant->id, 'code' => $grp['code']],
+        foreach ($bpoSquadConfigs as $bc) {
+            $pat = RosterPattern::updateOrCreate(
+                ['tenant_id' => $tenant->id, 'code' => $bc['code'] . '-PAT'],
                 [
-                    'name' => $grp['name'],
+                    'name' => "BPO Pattern: {$bc['name']}",
                     'pattern_type' => 'cyclical',
                     'start_date' => $startDate,
                     'end_date' => $endDate,
                     'cycle_length_days' => 3,
-                    'pattern_data' => ['steps' => $grp['steps']],
+                    'pattern_data' => ['steps' => $bc['steps']],
                     'is_active' => true,
                 ]
             );
 
-            // Generate monthly roster for this group member
-            $rosterService->generateRoster([
-                'pattern_id' => $pattern->id,
-                'start_date' => $currMonthStart,
-                'end_date' => $currMonthEnd,
-                'employee_ids' => [$grp['emp']->id],
-                'conflict_mode' => 'overwrite',
-                'status' => 'published',
-                'preserve_leaves' => true,
-            ]);
+            $squad = \App\Models\RosterGroup::firstOrCreate(
+                ['tenant_id' => $tenant->id, 'roster_id' => $bpoRoster->id, 'code' => $bc['code']],
+                [
+                    'roster_pattern_id' => $pat->id,
+                    'name' => $bc['name'],
+                    'color' => $bc['color'],
+                ]
+            );
+
+            $rosterService->enrollEmployees($squad, [$bc['emp']->id]);
         }
 
-        // Corporate: 1 Standard General Day Pattern (Mon-Fri)
+        // ROSTER 3: Corporate Administration (Mon-Fri Fixed)
+        $corpRoster = \App\Models\Roster::firstOrCreate(
+            ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-CORP'],
+            [
+                'name' => Carbon::now()->format('F Y') . ' - Corporate Administration',
+                'department_id' => $corpDept->id,
+                'start_date' => $currMonthStart,
+                'end_date' => $currMonthEnd,
+                'status' => 'published',
+                'published_at' => now(),
+                'notes' => 'Fixed Mon-Fri commercial day schedule.',
+            ]
+        );
+
         $corpPattern = RosterPattern::updateOrCreate(
             ['tenant_id' => $tenant->id, 'code' => 'CORP-GEN'],
             [
@@ -354,15 +464,18 @@ final class AmsDemoSeeder extends Seeder
             ]
         );
 
-        // Generate monthly roster for all 3 corporate employees
-        $rosterService->generateRoster([
-            'pattern_id' => $corpPattern->id,
-            'start_date' => $currMonthStart,
-            'end_date' => $currMonthEnd,
-            'employee_ids' => array_map(fn ($e) => $e->id, $corpEmployees),
-            'conflict_mode' => 'overwrite',
-            'status' => 'published',
-            'preserve_leaves' => true,
-        ]);
+        $corpSquad = \App\Models\RosterGroup::firstOrCreate(
+            ['tenant_id' => $tenant->id, 'roster_id' => $corpRoster->id, 'code' => 'CORP-SQD-GEN'],
+            [
+                'roster_pattern_id' => $corpPattern->id,
+                'name' => 'Corporate General Squad',
+                'color' => '#10b981',
+            ]
+        );
+
+        $rosterService->enrollEmployees(
+            $corpSquad,
+            array_map(fn ($e) => $e->id, $corpEmployees)
+        );
     }
 }
