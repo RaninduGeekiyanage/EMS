@@ -67,20 +67,33 @@ In alignment with world-class Workforce Management (WFM) platforms (e.g. **Deput
 
 ---
 
-### 2.2 Workflow 2: Dedicated Roster Pattern Creation (`/roster/patterns`)
-**Navigation:** `Attendance` $\rightarrow$ `Roster Patterns` (`/roster/patterns`)
+### 2.2 Workflow 2: Shift Groups & Rotation Templates (`/roster/patterns`)
+**Navigation:** `Attendance` $\rightarrow$ `Shift Groups & Patterns` (`/roster/patterns`)
 
-Instead of cluttering the monthly duty roster matrix with pattern definitions, patterns are created and managed on their own dedicated screen:
+In alignment with Sri Lankan industrial standard (Option 2: Shift Group / Squad Cards):
+Instead of complex mathematical modulo indexing, workforce rotation is managed via **Shift Group Cards** (Group A, Group B, Group C, Group D):
 
-1. **Pattern Catalog Overview:**
-   - High-level metric cards: Total Roster Patterns, Weekly 7-Day Schemes, Cyclical Rotations, Active Personnel.
-   - Visual cards showing pattern type, cycle length, active status, and an interactive **Sequence Timeline** of shift chips.
-2. **Creating a Pattern:**
-   - Click **"+ Create Roster Pattern"**.
-   - **Pattern Mode**:
-     - **Weekly 7-Day Schedule**: Assign a specific shift or toggle **Rest Day (OFF)** for Monday through Sunday.
-     - **Rolling Cyclical Rotation**: Define an $N$-step sequence (e.g. 4 consecutive days of Morning Shift followed by 2 consecutive Rest Days). Add or remove steps dynamically.
-   - Save the pattern. It is immediately available for single or bulk assignments.
+#### Shift Group Planning Formulas:
+$$\text{Number of Rotating Group Cards} = \text{Shifts Per Day} + \text{Number of Daily Offs}$$
+
+1. **3 Shifts + 1 OFF (Continuous 24/7 Operations)**:
+   - Requires **4 Group Cards**: Group A, Group B, Group C, Group D.
+   - Every calendar day guarantees exactly 3 working shifts (Morn, Eve, Night) and 1 resting manager.
+2. **2 Shifts + 1 OFF (Two-Shift Coverage)**:
+   - Requires **3 Group Cards**: Group A, Group B, Group C.
+   - Guarantees 2 active shifts and 1 resting staff member daily.
+3. **General Day Shift (Fixed Office Hours)**:
+   - Requires **1 Weekly Template** (Mon–Fri Day Shift, Sat/Sun OFF), or zero templates via **Permanent Baseline Shift** in `/shifts`.
+
+#### 1-Click Shift Group Set Generator:
+- Click **"⚡ 1-Click Group Set"** in the header.
+- Select the preset model: `3 Shifts + 1 OFF (24/7)`, `2 Shifts + 1 OFF`, or `General Day Shift`.
+- Enter Name Prefix (e.g. "Security Ops") and Code Prefix (e.g. "SEC").
+- Select Shift 1, Shift 2, Shift 3.
+- Click **"Generate Shift Group Set"**: The system creates all 4 complementary rotated squad group cards atomically.
+
+#### Auto-Generate Shifted Groups from Any Card:
+- On any cyclical pattern card, clicking the **"Auto-Generate Shifted Groups"** button automatically derives the remaining $N-1$ complementary rotated groups without human calculation.
 
 ---
 
@@ -88,10 +101,10 @@ Instead of cluttering the monthly duty roster matrix with pattern definitions, p
 
 The system supports two complementary assignment models depending on operational intent:
 
-#### Model A: Assign Roster Pattern to Employees (Bulk or Individual)
+#### Model A: Assign Shift Group to Employees (Bulk or Individual)
 **Executed from:**
-- **Roster Patterns Screen (`/roster/patterns`)**:
-  1. Click **"Assign to Staff"** on any pattern card.
+- **Shift Groups & Patterns Screen (`/roster/patterns`)**:
+  1. Click **"Assign Group Staff"** on any Group card (e.g., `Group A`).
   2. Select target date range (`Start Date` and `End Date`).
   3. Filter employees by Department or Designation, or use the real-time search box.
   4. Use the **"Select All Visible"** button or individual checkboxes to choose staff members in bulk.
@@ -99,7 +112,7 @@ The system supports two complementary assignment models depending on operational
   6. Click **"Assign Roster to X Personnel"**. The backend invokes `RosterService::generateRoster` with a 250-row chunked database `upsert`.
 - **Duty Roster Planner (`/roster`)**:
   1. Click **"Generate Roster"**.
-  2. Choose **"Apply Saved Template"** and select the pattern from the dropdown.
+  2. Choose **"Apply Saved Template"** and select the Shift Group from the dropdown.
   3. Under **Target Personnel Scope**, select **"All Personnel"**, **"By Department"**, or **"Specific Staff"** (with search, "Select Visible", and individual check selections).
   4. Click **"Generate Roster"**.
 

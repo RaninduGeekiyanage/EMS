@@ -137,9 +137,11 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/roster/shift-swaps/{swap}/approve', [ShiftSwapController::class, 'approve'])->name('roster.shift-swaps.approve');
         Route::post('/roster/shift-swaps/{swap}/reject', [ShiftSwapController::class, 'reject'])->name('roster.shift-swaps.reject');
 
-        // Roster Patterns & Templates Library
+        // Shift Groups & Roster Patterns Library
         Route::get('/roster/patterns', [RosterPatternController::class, 'index'])->middleware('can:roster.view')->name('roster.patterns.index');
         Route::post('/roster/patterns', [RosterPatternController::class, 'store'])->middleware('can:roster.create')->name('roster.patterns.store');
+        Route::post('/roster/patterns/group-set', [RosterPatternController::class, 'storeGroupSet'])->middleware('can:roster.create')->name('roster.patterns.group-set');
+        Route::post('/roster/patterns/{pattern}/generate-squads', [RosterPatternController::class, 'generateComplementarySquads'])->middleware('can:roster.create')->name('roster.patterns.generate-squads');
         Route::put('/roster/patterns/{pattern}', [RosterPatternController::class, 'update'])->middleware('can:roster.update')->name('roster.patterns.update');
         Route::delete('/roster/patterns/{pattern}', [RosterPatternController::class, 'destroy'])->middleware('can:roster.delete')->name('roster.patterns.destroy');
         Route::post('/roster/patterns/assign', [RosterPatternController::class, 'assign'])->middleware('can:roster.create')->name('roster.patterns.assign');

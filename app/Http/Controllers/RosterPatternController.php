@@ -109,4 +109,43 @@ final class RosterPatternController extends Controller
             "Roster assigned successfully. {$result['created']} entries created, {$result['updated']} updated."
         );
     }
+
+    /**
+     * Create an entire Shift Group Set (Option 2 Industry Standard).
+     */
+    public function storeGroupSet(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'preset_type' => ['required', 'string', 'in:three_shift_247,two_shift,general_weekly'],
+            'name_prefix' => ['required', 'string', 'max:100'],
+            'code_prefix' => ['required', 'string', 'max:20'],
+            'shift_1_id' => ['required', 'string', 'exists:shifts,id'],
+            'shift_2_id' => ['nullable', 'string', 'exists:shifts,id'],
+            'shift_3_id' => ['nullable', 'string', 'exists:shifts,id'],
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+        ]);
+
+        $created = $this->rosterService->createGroupSet($validated);
+        $count = count($created);
+
+        return redirect()->back()->with(
+            'success',
+            "Shift Group Set created successfully. {$count} rotating group card(s) generated."
+        );
+    }
+
+    /**
+     * Auto-generate complementary rotated squad groups from an existing cyclical pattern.
+     */
+    public function generateComplementarySquads(RosterPattern $pattern): RedirectResponse
+    {
+        $created = $this->rosterService->generateComplementarySquads($pattern);
+        $count = count($created);
+
+        return redirect()->back()->with(
+            'success',
+            "Generated {$count} complementary rotated squad group cards successfully."
+        );
+    }
 }

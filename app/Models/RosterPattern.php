@@ -31,6 +31,8 @@ final class RosterPattern extends Model
         'name',
         'code',
         'pattern_type',
+        'start_date',
+        'end_date',
         'cycle_length_days',
         'pattern_data',
         'is_active',
@@ -44,6 +46,8 @@ final class RosterPattern extends Model
     protected function casts(): array
     {
         return [
+            'start_date' => 'date:Y-m-d',
+            'end_date' => 'date:Y-m-d',
             'cycle_length_days' => 'integer',
             'pattern_data' => 'array',
             'is_active' => 'boolean',

@@ -68,5 +68,8 @@ class DatabaseSeeder extends Seeder
         $shiftService = app(\App\Services\ShiftService::class);
         $shiftService->seedStandardTemplates();
         $shiftService->seedSriLankanHolidays((int) now()->year);
+
+        // 5. Populate Realistic Sri Lankan AMS Shift Groups & Scenarios
+        $this->call(AmsDemoSeeder::class);
     }
 }

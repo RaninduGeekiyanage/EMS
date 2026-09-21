@@ -244,6 +244,22 @@ export default function AuthenticatedLayout({
                                         Time & Attendance
                                     </p>
                                 )}
+                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions & Master Timings">
+                                    <Clock className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Shift Master</span>}
+                                </Link>
+                                <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} title="Shift Groups & Rotation Templates">
+                                    <Sparkles className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Shift Groups & Patterns</span>}
+                                </Link>
+                                <Link href="/roster" className={navItemClass('/roster')} title="Monthly Duty Roster Calendar">
+                                    <CalendarRange className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Duty Roster</span>}
+                                </Link>
+                                <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} title="Shift Swap Requests">
+                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Shift Swap Requests</span>}
+                                </Link>
                                 <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} title="Daily Attendance Ledger">
                                     <CalendarCheck className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Daily Attendance</span>}
@@ -252,23 +268,7 @@ export default function AuthenticatedLayout({
                                     <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Biometric Import</span>}
                                 </Link>
-                                <Link href="/roster" className={navItemClass('/roster')} title="Duty Roster">
-                                    <CalendarRange className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Duty Roster</span>}
-                                </Link>
-                                <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} title="Shift Swap Requests">
-                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Swap Requests</span>}
-                                </Link>
-                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions">
-                                    <Clock className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Master</span>}
-                                </Link>
-                                <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} title="Roster Patterns">
-                                    <Sparkles className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Roster Templates</span>}
-                                </Link>
-                                <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar">
+                                <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar & Holidays">
                                     <CalendarDays className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Work Calendar & Holidays</span>}
                                 </Link>
@@ -438,13 +438,13 @@ export default function AuthenticatedLayout({
                                     <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">
                                         Time & Attendance
                                     </p>
-                                    <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
-                                        <CalendarCheck className="w-4 h-4" />
-                                        <span>Daily Attendance</span>
+                                    <Link href="/shifts" className={navItemClass('/shifts')} onClick={() => setMobileOpen(false)}>
+                                        <Clock className="w-4 h-4" />
+                                        <span>Shift Master</span>
                                     </Link>
-                                    <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
-                                        <FileSpreadsheet className="w-4 h-4" />
-                                        <span>Biometric Import</span>
+                                    <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} onClick={() => setMobileOpen(false)}>
+                                        <Sparkles className="w-4 h-4" />
+                                        <span>Shift Groups & Patterns</span>
                                     </Link>
                                     <Link href="/roster" className={navItemClass('/roster')} onClick={() => setMobileOpen(false)}>
                                         <CalendarRange className="w-4 h-4" />
@@ -454,13 +454,13 @@ export default function AuthenticatedLayout({
                                         <ArrowLeftRight className="w-4 h-4" />
                                         <span>Shift Swap Requests</span>
                                     </Link>
-                                    <Link href="/shifts" className={navItemClass('/shifts')} onClick={() => setMobileOpen(false)}>
-                                        <Clock className="w-4 h-4" />
-                                        <span>Shift Master</span>
+                                    <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
+                                        <CalendarCheck className="w-4 h-4" />
+                                        <span>Daily Attendance</span>
                                     </Link>
-                                    <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} onClick={() => setMobileOpen(false)}>
-                                        <Sparkles className="w-4 h-4" />
-                                        <span>Roster Templates</span>
+                                    <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
+                                        <FileSpreadsheet className="w-4 h-4" />
+                                        <span>Biometric Import</span>
                                     </Link>
                                     <Link href="/work-calendar" className={navItemClass('/work-calendar')} onClick={() => setMobileOpen(false)}>
                                         <CalendarDays className="w-4 h-4" />

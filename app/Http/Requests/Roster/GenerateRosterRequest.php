@@ -13,6 +13,20 @@ final class GenerateRosterRequest extends FormRequest
         return $this->user() === null || $this->user()->can('roster.create');
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->filled('pattern_id') && ! $this->filled('end_date')) {
+            $pattern = \App\Models\RosterPattern::find($this->input('pattern_id'));
+            if ($pattern && $pattern->end_date) {
+                $this->merge([
+                    'end_date' => $pattern->end_date instanceof \Carbon\CarbonInterface
+                        ? $pattern->end_date->toDateString()
+                        : (string) $pattern->end_date,
+                ]);
+            }
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -22,6 +36,7 @@ final class GenerateRosterRequest extends FormRequest
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'pattern_id' => ['nullable', 'string'],
+            'starting_step' => ['nullable', 'integer', 'min:1'],
             'pattern_mode' => ['required_without:pattern_id', 'nullable', 'string', 'in:daily,weekly,cyclical,copy_month'],
             'employee_ids' => ['nullable', 'array'],
             'employee_ids.*' => ['string'],

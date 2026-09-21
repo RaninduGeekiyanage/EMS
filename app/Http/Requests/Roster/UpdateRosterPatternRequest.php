@@ -22,6 +22,8 @@ final class UpdateRosterPatternRequest extends FormRequest
             'name' => ['required', 'string', 'max:150'],
             'code' => ['required', 'string', 'max:50'],
             'pattern_type' => ['required', 'string', 'in:weekly,cyclical,daily'],
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'cycle_length_days' => ['required', 'integer', 'min:1', 'max:365'],
             'pattern_data' => ['required', 'array'],
             'is_active' => ['nullable', 'boolean'],

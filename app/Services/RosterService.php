@@ -333,9 +333,24 @@ final class RosterService
                 if ($patternMode === 'weekly') {
                     $data['weekly_config'] = $pattern->pattern_data;
                 } elseif ($patternMode === 'cyclical') {
+                    $cyclicalSteps = $pattern->pattern_data['steps'] ?? $pattern->pattern_data;
+                    $stepCount = count($cyclicalSteps);
+                    $startingStep = ! empty($data['starting_step']) ? (int) $data['starting_step'] : null;
+
+                    if ($startingStep !== null && $stepCount > 0) {
+                        // Manager picked custom starting step (Option C):
+                        // Shift anchor so on $startDate, the rotation is at ($startingStep - 1)
+                        $anchorDate = $startDate->copy()->subDays($startingStep - 1)->toDateString();
+                    } else {
+                        // Squad Sync (Option A): use pattern's start_date as reference anchor if set
+                        $anchorDate = $pattern->start_date
+                            ? ($pattern->start_date instanceof CarbonInterface ? $pattern->start_date->toDateString() : (string) $pattern->start_date)
+                            : $data['start_date'];
+                    }
+
                     $data['cyclical_config'] = [
-                        'anchor_date' => $data['start_date'],
-                        'steps' => $pattern->pattern_data['steps'] ?? $pattern->pattern_data,
+                        'anchor_date' => $anchorDate,
+                        'steps' => $cyclicalSteps,
                     ];
                 } elseif ($patternMode === 'daily') {
                     $data['daily_config'] = $pattern->pattern_data;
@@ -828,6 +843,8 @@ final class RosterService
                 'name' => $data['name'],
                 'code' => strtoupper($data['code']),
                 'pattern_type' => $data['pattern_type'],
+                'start_date' => $data['start_date'] ?? null,
+                'end_date' => $data['end_date'] ?? null,
                 'cycle_length_days' => (int) ($data['cycle_length_days'] ?? 7),
                 'pattern_data' => $data['pattern_data'],
                 'is_active' => (bool) ($data['is_active'] ?? true),
@@ -847,6 +864,8 @@ final class RosterService
                 'name' => $data['name'],
                 'code' => strtoupper($data['code']),
                 'pattern_type' => $data['pattern_type'] ?? $pattern->pattern_type,
+                'start_date' => $data['start_date'] ?? $pattern->start_date,
+                'end_date' => $data['end_date'] ?? $pattern->end_date,
                 'cycle_length_days' => (int) ($data['cycle_length_days'] ?? $pattern->cycle_length_days),
                 'pattern_data' => $data['pattern_data'] ?? $pattern->pattern_data,
                 'is_active' => (bool) ($data['is_active'] ?? $pattern->is_active),
@@ -862,6 +881,188 @@ final class RosterService
     public function deletePattern(RosterPattern $pattern): bool
     {
         return (bool) $pattern->delete();
+    }
+
+    /**
+     * Create an entire Shift Group Set (Option 2 Industry Standard).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, RosterPattern>
+     */
+    public function createGroupSet(array $data): array
+    {
+        return DB::transaction(function () use ($data): array {
+            $presetType = $data['preset_type']; // 'three_shift_247', 'two_shift', 'general_weekly'
+            $namePrefix = trim($data['name_prefix']);
+            $codePrefix = strtoupper(trim($data['code_prefix']));
+            $startDate = $data['start_date'] ?? Carbon::now()->startOfMonth()->toDateString();
+            $endDate = $data['end_date'] ?? Carbon::now()->addYear()->endOfMonth()->toDateString();
+            $shift1Id = $data['shift_1_id'] ?? null;
+            $shift2Id = $data['shift_2_id'] ?? null;
+            $shift3Id = $data['shift_3_id'] ?? null;
+
+            $created = [];
+
+            if ($presetType === 'three_shift_247') {
+                // 4 Groups (A, B, C, D) - Cycle length 4
+                $letters = ['A', 'B', 'C', 'D'];
+                $baseCycle = [
+                    ['shift_id' => $shift1Id, 'is_rest_day' => false],
+                    ['shift_id' => $shift2Id, 'is_rest_day' => false],
+                    ['shift_id' => $shift3Id, 'is_rest_day' => false],
+                    ['shift_id' => '', 'is_rest_day' => true],
+                ];
+
+                for ($i = 0; $i < 4; $i++) {
+                    $letter = $letters[$i];
+                    $rotated = [];
+                    for ($stepIdx = 0; $stepIdx < 4; $stepIdx++) {
+                        $sourceItem = $baseCycle[($stepIdx + $i) % 4];
+                        $rotated[] = [
+                            'step' => $stepIdx + 1,
+                            'shift_id' => $sourceItem['shift_id'],
+                            'is_rest_day' => $sourceItem['is_rest_day'],
+                        ];
+                    }
+
+                    $startLabel = match ($i) {
+                        0 => 'Morn Start',
+                        1 => 'Eve Start',
+                        2 => 'Night Start',
+                        3 => 'Off Start',
+                    };
+
+                    $created[] = RosterPattern::create([
+                        'name' => "{$namePrefix} - Group {$letter} ({$startLabel})",
+                        'code' => "{$codePrefix}-GRP-{$letter}",
+                        'pattern_type' => 'cyclical',
+                        'start_date' => $startDate,
+                        'end_date' => $endDate,
+                        'cycle_length_days' => 4,
+                        'pattern_data' => ['steps' => $rotated],
+                        'is_active' => true,
+                    ]);
+                }
+            } elseif ($presetType === 'two_shift') {
+                // 3 Groups (A, B, C) - Cycle length 3
+                $letters = ['A', 'B', 'C'];
+                $baseCycle = [
+                    ['shift_id' => $shift1Id, 'is_rest_day' => false],
+                    ['shift_id' => $shift2Id, 'is_rest_day' => false],
+                    ['shift_id' => '', 'is_rest_day' => true],
+                ];
+
+                for ($i = 0; $i < 3; $i++) {
+                    $letter = $letters[$i];
+                    $rotated = [];
+                    for ($stepIdx = 0; $stepIdx < 3; $stepIdx++) {
+                        $sourceItem = $baseCycle[($stepIdx + $i) % 3];
+                        $rotated[] = [
+                            'step' => $stepIdx + 1,
+                            'shift_id' => $sourceItem['shift_id'],
+                            'is_rest_day' => $sourceItem['is_rest_day'],
+                        ];
+                    }
+
+                    $startLabel = match ($i) {
+                        0 => 'Shift 1 Start',
+                        1 => 'Shift 2 Start',
+                        2 => 'Off Start',
+                    };
+
+                    $created[] = RosterPattern::create([
+                        'name' => "{$namePrefix} - Group {$letter} ({$startLabel})",
+                        'code' => "{$codePrefix}-GRP-{$letter}",
+                        'pattern_type' => 'cyclical',
+                        'start_date' => $startDate,
+                        'end_date' => $endDate,
+                        'cycle_length_days' => 3,
+                        'pattern_data' => ['steps' => $rotated],
+                        'is_active' => true,
+                    ]);
+                }
+            } elseif ($presetType === 'general_weekly') {
+                // 1 Standard Mon-Fri General Shift template
+                $created[] = RosterPattern::create([
+                    'name' => "{$namePrefix} - General Day (Mon-Fri)",
+                    'code' => "{$codePrefix}-GEN",
+                    'pattern_type' => 'weekly',
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'cycle_length_days' => 7,
+                    'pattern_data' => [
+                        ['day' => 0, 'day_name' => 'Mon', 'shift_id' => $shift1Id, 'is_rest_day' => false],
+                        ['day' => 1, 'day_name' => 'Tue', 'shift_id' => $shift1Id, 'is_rest_day' => false],
+                        ['day' => 2, 'day_name' => 'Wed', 'shift_id' => $shift1Id, 'is_rest_day' => false],
+                        ['day' => 3, 'day_name' => 'Thu', 'shift_id' => $shift1Id, 'is_rest_day' => false],
+                        ['day' => 4, 'day_name' => 'Fri', 'shift_id' => $shift1Id, 'is_rest_day' => false],
+                        ['day' => 5, 'day_name' => 'Sat', 'shift_id' => '', 'is_rest_day' => true],
+                        ['day' => 6, 'day_name' => 'Sun', 'shift_id' => '', 'is_rest_day' => true],
+                    ],
+                    'is_active' => true,
+                ]);
+            }
+
+            return $created;
+        });
+    }
+
+    /**
+     * Automatically generate complementary rotated squad group cards from an existing cyclical pattern.
+     *
+     * @return array<int, RosterPattern>
+     */
+    public function generateComplementarySquads(RosterPattern $sourcePattern): array
+    {
+        if ($sourcePattern->pattern_type !== 'cyclical') {
+            throw new DomainException('Complementary squads can only be generated for cyclical patterns.');
+        }
+
+        $steps = $sourcePattern->pattern_data['steps'] ?? $sourcePattern->pattern_data ?? [];
+        $count = count($steps);
+        if ($count <= 1) {
+            throw new DomainException('Cycle length must be at least 2 to generate complementary squads.');
+        }
+
+        return DB::transaction(function () use ($sourcePattern, $steps, $count): array {
+            $created = [];
+            $alphabet = range('A', 'Z');
+            $baseName = preg_replace('/(\s*-\s*Group\s*[A-Z].*)$/i', '', $sourcePattern->name);
+            $baseCode = preg_replace('/(-GRP-[A-Z].*)$/i', '', $sourcePattern->code);
+
+            for ($offset = 1; $offset < $count; $offset++) {
+                $letter = $alphabet[$offset] ?? ('G'.($offset + 1));
+                $rotated = [];
+                for ($i = 0; $i < $count; $i++) {
+                    $src = $steps[($i + $offset) % $count];
+                    $rotated[] = [
+                        'step' => $i + 1,
+                        'shift_id' => $src['shift_id'] ?? null,
+                        'is_rest_day' => (bool) ($src['is_rest_day'] ?? false),
+                    ];
+                }
+
+                $newCode = "{$baseCode}-GRP-{$letter}";
+
+                // Avoid duplicate codes
+                if (RosterPattern::where('code', $newCode)->exists()) {
+                    $newCode .= '-'.Str::random(3);
+                }
+
+                $created[] = RosterPattern::create([
+                    'name' => "{$baseName} - Group {$letter}",
+                    'code' => strtoupper($newCode),
+                    'pattern_type' => 'cyclical',
+                    'start_date' => $sourcePattern->start_date,
+                    'end_date' => $sourcePattern->end_date,
+                    'cycle_length_days' => $count,
+                    'pattern_data' => ['steps' => $rotated],
+                    'is_active' => true,
+                ]);
+            }
+
+            return $created;
+        });
     }
 
     /**

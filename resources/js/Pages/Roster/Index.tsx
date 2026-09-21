@@ -1251,7 +1251,7 @@ export default function Index({
                                 <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3">
                                     <div className="flex items-center justify-between">
                                         <label className="text-xs font-semibold text-slate-300">
-                                            Select Roster Template
+                                            Select Shift Group / Rotation Template
                                         </label>
                                         <a
                                             href="/roster/patterns"
@@ -1259,14 +1259,14 @@ export default function Index({
                                             target="_blank"
                                             rel="noreferrer"
                                         >
-                                            Manage Templates &rarr;
+                                            Manage Shift Groups &rarr;
                                         </a>
                                     </div>
                                     {patterns.length === 0 ? (
                                         <div className="text-center py-4 text-xs text-slate-500">
-                                            No roster templates configured yet.{' '}
+                                            No shift group templates configured yet.{' '}
                                             <a href="/roster/patterns" className="text-indigo-400 underline">
-                                                Create your first template
+                                                Create your first Shift Group
                                             </a>{' '}
                                             or switch to "Custom On-The-Fly".
                                         </div>
@@ -1279,7 +1279,7 @@ export default function Index({
                                             >
                                                 {patterns.map((p) => (
                                                     <option key={p.id} value={p.id}>
-                                                        {p.name} ({p.code}) — {p.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Rolling Cyclical'}
+                                                        {p.name} ({p.code}) — {p.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Shift Group Rotation'}
                                                     </option>
                                                 ))}
                                             </select>
@@ -1290,7 +1290,7 @@ export default function Index({
                                                 return (
                                                     <div className="pt-1">
                                                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5">
-                                                            Sequence Preview ({sel.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Rolling Cyclical'}):
+                                                            Rotation Sequence Preview ({sel.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Shift Group Cycle'}):
                                                         </div>
                                                         <div className="flex flex-wrap gap-1.5">
                                                             {sel.pattern_type === 'weekly' && Array.isArray(sel.pattern_data) &&
