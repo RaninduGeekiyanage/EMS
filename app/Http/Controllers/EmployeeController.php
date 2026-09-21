@@ -80,6 +80,8 @@ final class EmployeeController extends Controller
                 'value' => $mode->value,
                 'label' => $mode->label(),
             ]),
+            'jobGrades' => \App\Models\JobGrade::where('is_active', true)->orderBy('rank_order')->get(),
+            'wagesBoardCategories' => \App\Models\WagesBoardCategory::where('is_active', true)->orderBy('name')->get(),
         ]);
     }
 
@@ -130,6 +132,8 @@ final class EmployeeController extends Controller
                 'value' => $mode->value,
                 'label' => $mode->label(),
             ]),
+            'jobGrades' => \App\Models\JobGrade::where('is_active', true)->orderBy('rank_order')->get(),
+            'wagesBoardCategories' => \App\Models\WagesBoardCategory::where('is_active', true)->orderBy('name')->get(),
         ]);
     }
 

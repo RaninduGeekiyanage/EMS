@@ -116,17 +116,64 @@ final class LeaveService
 
         $joinDate = $employee->date_of_joining ? Carbon::parse($employee->date_of_joining) : null;
 
-        // If no joining date or joined before the calculation year, full standard entitlement
+        // If joined in a future year
+        if ($joinDate !== null && $joinDate->year > $year) {
+            return 0.0;
+        }
+
+        // Check if employee falls under Wages Board Ordinance (formula based on actual days worked)
+        if ($employee->employment_category === 'wages_board') {
+            $wagesBoard = $employee->wagesBoardCategory;
+
+            if ($leaveType->code === 'ANNUAL') {
+                if ($wagesBoard !== null) {
+                    $startDay = $wagesBoard->entitle_start_day ?? 216;
+                    $divisor = $wagesBoard->devided_days_by ?? 4;
+                    $maxAnnual = $wagesBoard->max_annual_leave ?? 14;
+
+                    // Compute actual days worked in previous year from attendance ledger
+                    $previousYear = $year - 1;
+                    $workedDays = AttendanceDaily::where('tenant_id', $employee->tenant_id)
+                        ->where('employee_id', $employee->id)
+                        ->whereYear('attendance_date', $previousYear)
+                        ->whereIn('status', ['present', 'half_day'])
+                        ->count();
+
+                    if ($workedDays === 0) {
+                        // If no historical records and joined in calculation year, pro-rate by remainder of year
+                        if ($joinDate !== null && $joinDate->year === $year) {
+                            $remainingDays = max(0, 365 - $joinDate->dayOfYear);
+                            $estimatedWorked = (int) round(($remainingDays / 365.0) * $startDay);
+                            $excessDays = max(0, $estimatedWorked - $startDay);
+                            $calculated = $divisor > 0 ? floor($excessDays / $divisor) : 0;
+
+                            return (float) min($maxAnnual, max(0, $calculated));
+                        }
+
+                        return 0.0;
+                    }
+
+                    $excessDays = max(0, $workedDays - $startDay);
+                    $calculated = $divisor > 0 ? floor($excessDays / $divisor) : 0;
+
+                    return (float) min($maxAnnual, max(0, $calculated));
+                }
+
+                return 0.0;
+            }
+
+            if ($leaveType->code === 'CASUAL') {
+                // Wages Board standard typically does not mandate 7-day casual leave unless specified in category
+                return (float) ($wagesBoard->casual_leave_days ?? 0.0);
+            }
+        }
+
+        // If no joining date or joined before the calculation year under Shop & Office, full standard entitlement
         if ($joinDate === null || $joinDate->year < $year) {
             return (float) $leaveType->days_per_year;
         }
 
-        // If joined in a future year
-        if ($joinDate->year > $year) {
-            return 0.0;
-        }
-
-        // Employee joined mid-year in $year:
+        // Employee joined mid-year in $year under Shop & Office Act:
         if ($leaveType->code === 'ANNUAL') {
             // Under Sri Lankan Shop & Office Employees Act:
             // Quarter 1 (Jan 1 - Mar 31): 14 days
@@ -176,7 +223,8 @@ final class LeaveService
             }
 
             $employeesQuery = Employee::where('tenant_id', $tenantId)
-                ->where('employment_status', 'active');
+                ->where('employment_status', 'active')
+                ->with('wagesBoardCategory');
 
             if ($employeeId !== null) {
                 $employeesQuery->where('id', $employeeId);

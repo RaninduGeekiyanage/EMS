@@ -68,4 +68,24 @@ final class Department extends Model
     {
         return $this->hasMany(self::class, 'parent_id');
     }
+
+    /**
+     * Get the designated Department Head (HOD).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne<DepartmentHead, $this>
+     */
+    public function head(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(DepartmentHead::class, 'department_id');
+    }
+
+    /**
+     * Get all employees belonging to this department.
+     *
+     * @return HasMany<Employee, $this>
+     */
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class, 'department_id');
+    }
 }

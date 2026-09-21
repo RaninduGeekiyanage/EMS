@@ -41,8 +41,8 @@ final class ShiftService
      */
     public function createShift(array $data): Shift
     {
-        return DB::transaction(static function () use ($data): Shift {
-            return Shift::create([
+        return DB::transaction(function () use ($data): Shift {
+            $shift = new Shift([
                 'name' => $data['name'],
                 'code' => strtoupper($data['code']),
                 'shift_type' => $data['shift_type'] ?? 'regular',
@@ -52,10 +52,27 @@ final class ShiftService
                 'grace_minutes' => (int) ($data['grace_minutes'] ?? 10),
                 'ot_threshold_minutes' => (int) ($data['ot_threshold_minutes'] ?? 480),
                 'is_night_shift' => (bool) ($data['is_night_shift'] ?? false),
+                'in_window_before_start' => (int) ($data['in_window_before_start'] ?? 60),
+                'in_window_after_start' => (int) ($data['in_window_after_start'] ?? 120),
+                'out_window_before_end' => (int) ($data['out_window_before_end'] ?? 120),
+                'out_window_after_end' => (int) ($data['out_window_after_end'] ?? 180),
+                'first_half_end_time' => $data['first_half_end_time'] ?? null,
+                'second_half_start_time' => $data['second_half_start_time'] ?? null,
+                'early_in_as_ot' => (bool) ($data['early_in_as_ot'] ?? false),
+                'early_in_as_att_in' => (bool) ($data['early_in_as_att_in'] ?? true),
+                'ot_start_time' => $data['ot_start_time'] ?? null,
                 'color' => $data['color'] ?? null,
                 'description' => $data['description'] ?? null,
                 'is_active' => (bool) ($data['is_active'] ?? true),
             ]);
+
+            $shift->working_minutes = isset($data['working_minutes']) && (int) $data['working_minutes'] > 0
+                ? (int) $data['working_minutes']
+                : $shift->calculateWorkingMinutes();
+
+            $shift->save();
+
+            return $shift;
         });
     }
 
@@ -66,8 +83,8 @@ final class ShiftService
      */
     public function updateShift(Shift $shift, array $data): Shift
     {
-        return DB::transaction(static function () use ($shift, $data): Shift {
-            $shift->update([
+        return DB::transaction(function () use ($shift, $data): Shift {
+            $shift->fill([
                 'name' => $data['name'],
                 'code' => strtoupper($data['code']),
                 'shift_type' => $data['shift_type'] ?? $shift->shift_type,
@@ -77,10 +94,25 @@ final class ShiftService
                 'grace_minutes' => (int) ($data['grace_minutes'] ?? $shift->grace_minutes),
                 'ot_threshold_minutes' => (int) ($data['ot_threshold_minutes'] ?? $shift->ot_threshold_minutes),
                 'is_night_shift' => (bool) ($data['is_night_shift'] ?? $shift->is_night_shift),
+                'in_window_before_start' => (int) ($data['in_window_before_start'] ?? $shift->in_window_before_start ?? 60),
+                'in_window_after_start' => (int) ($data['in_window_after_start'] ?? $shift->in_window_after_start ?? 120),
+                'out_window_before_end' => (int) ($data['out_window_before_end'] ?? $shift->out_window_before_end ?? 120),
+                'out_window_after_end' => (int) ($data['out_window_after_end'] ?? $shift->out_window_after_end ?? 180),
+                'first_half_end_time' => $data['first_half_end_time'] ?? $shift->first_half_end_time,
+                'second_half_start_time' => $data['second_half_start_time'] ?? $shift->second_half_start_time,
+                'early_in_as_ot' => (bool) ($data['early_in_as_ot'] ?? $shift->early_in_as_ot),
+                'early_in_as_att_in' => (bool) ($data['early_in_as_att_in'] ?? $shift->early_in_as_att_in),
+                'ot_start_time' => $data['ot_start_time'] ?? $shift->ot_start_time,
                 'color' => $data['color'] ?? $shift->color,
                 'description' => $data['description'] ?? $shift->description,
                 'is_active' => (bool) ($data['is_active'] ?? $shift->is_active),
             ]);
+
+            $shift->working_minutes = isset($data['working_minutes']) && (int) $data['working_minutes'] > 0
+                ? (int) $data['working_minutes']
+                : $shift->calculateWorkingMinutes();
+
+            $shift->save();
 
             return $shift;
         });

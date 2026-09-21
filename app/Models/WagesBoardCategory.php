@@ -32,6 +32,11 @@ final class WagesBoardCategory extends Model
         'name',
         'code',
         'minimum_wage',
+        'entitle_start_day',
+        'entitle_end_day',
+        'devided_days_by',
+        'max_annual_leave',
+        'casual_leave_days',
         'description',
         'is_active',
     ];
@@ -45,6 +50,11 @@ final class WagesBoardCategory extends Model
     {
         return [
             'minimum_wage' => 'decimal:2',
+            'entitle_start_day' => 'integer',
+            'entitle_end_day' => 'integer',
+            'devided_days_by' => 'integer',
+            'max_annual_leave' => 'integer',
+            'casual_leave_days' => 'float',
             'is_active' => 'boolean',
         ];
     }

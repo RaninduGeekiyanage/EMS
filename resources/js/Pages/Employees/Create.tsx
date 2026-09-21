@@ -18,13 +18,15 @@ import {
     User,
     Lock,
 } from 'lucide-react';
-import { DepartmentSummary, DesignationSummary, BranchSummary } from '../../Types/employee';
+import { DepartmentSummary, DesignationSummary, BranchSummary, JobGradeSummary, WagesBoardCategorySummary } from '../../Types/employee';
 
 interface Props {
     nextEmpNo: string;
     departments: DepartmentSummary[];
     designations: DesignationSummary[];
     branches: BranchSummary[];
+    jobGrades?: JobGradeSummary[];
+    wagesBoardCategories?: WagesBoardCategorySummary[];
     employmentTypes: Array<{ value: string; label: string }>;
     paymentModes: Array<{ value: string; label: string }>;
 }
@@ -34,23 +36,38 @@ export default function Create({
     departments,
     designations,
     branches,
+    jobGrades = [],
+    wagesBoardCategories = [],
     employmentTypes,
     paymentModes,
 }: Props) {
     const [activeSection, setActiveSection] = useState<'personal' | 'job' | 'compensation' | 'banking'>('personal');
 
     const form = useForm({
-        // Core
+        // Core & Personal
         emp_no: nextEmpNo,
         full_name: '',
         nic: '',
         email: '',
         phone: '',
+        landline: '',
+        gender: '',
+        date_of_birth: '',
+        marital_status: '',
+        permanent_address: '',
+        temporary_address: '',
+        city: '',
+
+        // Placement & Statutory
         department_id: '',
         designation_id: '',
         branch_id: '',
+        job_grade_id: '',
+        wages_board_category_id: '',
         employment_type: 'permanent',
         employment_status: 'active',
+        employment_category: 'shop_and_office',
+        attendance_mode: 'both',
         date_of_joining: new Date().toISOString().split('T')[0],
         biometric_device_id: '',
 
@@ -245,13 +262,110 @@ export default function Create({
 
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                                        Phone Number
+                                        Phone Number (Mobile)
                                     </label>
                                     <input
                                         type="text"
                                         value={form.data.phone}
                                         onChange={(e) => form.setData('phone', e.target.value)}
                                         placeholder="+94 77 123 4567"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Landline
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={form.data.landline}
+                                        onChange={(e) => form.setData('landline', e.target.value)}
+                                        placeholder="+94 11 234 5678"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Date of Birth
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={form.data.date_of_birth}
+                                        onChange={(e) => form.setData('date_of_birth', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Gender
+                                    </label>
+                                    <select
+                                        value={form.data.gender}
+                                        onChange={(e) => form.setData('gender', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="">Select Gender...</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Marital Status
+                                    </label>
+                                    <select
+                                        value={form.data.marital_status}
+                                        onChange={(e) => form.setData('marital_status', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="">Select Status...</option>
+                                        <option value="single">Single</option>
+                                        <option value="married">Married</option>
+                                        <option value="divorced">Divorced</option>
+                                        <option value="widowed">Widowed</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        City
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={form.data.city}
+                                        onChange={(e) => form.setData('city', e.target.value)}
+                                        placeholder="e.g. Colombo"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Permanent Address
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={form.data.permanent_address}
+                                        onChange={(e) => form.setData('permanent_address', e.target.value)}
+                                        placeholder="Permanent residential address..."
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Temporary / Current Address
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={form.data.temporary_address}
+                                        onChange={(e) => form.setData('temporary_address', e.target.value)}
+                                        placeholder="Current contact address (if different)..."
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                                     />
                                 </div>
@@ -367,10 +481,78 @@ export default function Create({
                                     >
                                         <option value="">Select Branch...</option>
                                         {branches.map((b) => (
-                                            <option key={b.id} value={b.id}>
-                                                {b.name}
+                                             <option key={b.id} value={b.id}>
+                                                 {b.name}
+                                             </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Corporate Job Grade
+                                    </label>
+                                    <select
+                                        value={form.data.job_grade_id}
+                                        onChange={(e) => form.setData('job_grade_id', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="">Select Job Grade...</option>
+                                        {jobGrades.map((g) => (
+                                            <option key={g.id} value={g.id}>
+                                                {g.grade_name} ({g.grade_code})
                                             </option>
                                         ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Statutory Labor Category *
+                                    </label>
+                                    <select
+                                        value={form.data.employment_category}
+                                        onChange={(e) => form.setData('employment_category', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="shop_and_office">Shop & Office Act (White Collar / Standard)</option>
+                                        <option value="wages_board">Wages Board Ordinance (Blue Collar / Industry)</option>
+                                    </select>
+                                </div>
+
+                                {form.data.employment_category === 'wages_board' && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                                            Wages Board Category *
+                                        </label>
+                                        <select
+                                            value={form.data.wages_board_category_id}
+                                            onChange={(e) => form.setData('wages_board_category_id', e.target.value)}
+                                            required={form.data.employment_category === 'wages_board'}
+                                            className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                                        >
+                                            <option value="">Select Board Category...</option>
+                                            {wagesBoardCategories.map((wb) => (
+                                                <option key={wb.id} value={wb.id}>
+                                                    {wb.category_name} ({wb.category_code})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                                        Attendance Tracking Mode *
+                                    </label>
+                                    <select
+                                        value={form.data.attendance_mode}
+                                        onChange={(e) => form.setData('attendance_mode', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="both">Both (Biometric & Manual Attendance)</option>
+                                        <option value="biometric">Biometric Only</option>
+                                        <option value="manual">Manual Register Only</option>
                                     </select>
                                 </div>
 
@@ -386,7 +568,7 @@ export default function Create({
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
                                     />
                                     <p className="text-[11px] text-slate-500 mt-1">
-                                        Mapped against fingerprint / facial recognition attendance punches in Module 2.
+                                        Mapped against biometric device terminal punches for 4-window sliding contracts.
                                     </p>
                                 </div>
                             </div>

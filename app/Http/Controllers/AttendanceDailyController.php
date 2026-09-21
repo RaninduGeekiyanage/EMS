@@ -123,13 +123,15 @@ final class AttendanceDailyController extends Controller
             $startDate = Carbon::parse($validated['start_date']);
             $endDate = Carbon::parse($validated['end_date']);
 
-            $result = $this->processingService->processRange(
+            $result = $this->processingService->reprocessDateRange(
                 $startDate,
                 $endDate,
-                $validated['employee_id'] ?? null
+                $validated['employee_id'] ?? null,
+                $validated['department_id'] ?? null,
+                (bool) ($validated['overwrite_manual'] ?? false)
             );
 
-            return redirect()->back()->with('success', "Processed {$result['total_processed']} attendance records across date range.");
+            return redirect()->back()->with('success', "Reprocessed {$result['total_processed']} attendance records across date range ({$result['present']} present, {$result['absent']} absent, {$result['late']} late, {$result['missing_punch']} missing punches).");
         }
 
         $date = Carbon::parse($validated['date'] ?? Carbon::today()->toDateString());

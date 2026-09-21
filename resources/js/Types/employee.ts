@@ -49,6 +49,18 @@ export interface BranchSummary {
     code: string | null;
 }
 
+export interface JobGradeSummary {
+    id: string;
+    grade_name: string;
+    grade_code: string;
+}
+
+export interface WagesBoardCategorySummary {
+    id: string;
+    category_name: string;
+    category_code: string;
+}
+
 export interface Employee {
     id: string;
     tenant_id: string;
@@ -62,11 +74,24 @@ export interface Employee {
     branch_id: string | null;
     employment_type: EmploymentType;
     employment_status: EmploymentStatus;
+    employment_category?: 'shop_and_office' | 'wages_board';
+    attendance_mode?: 'biometric' | 'manual' | 'both';
+    gender?: 'male' | 'female' | 'other' | null;
+    date_of_birth?: string | null;
+    marital_status?: 'single' | 'married' | 'divorced' | 'widowed' | null;
+    permanent_address?: string | null;
+    temporary_address?: string | null;
+    city?: string | null;
+    landline?: string | null;
+    job_grade_id?: string | null;
+    wages_board_category_id?: string | null;
     date_of_joining: string | null;
     biometric_device_id: string | null;
     department?: DepartmentSummary | null;
     designation?: DesignationSummary | null;
     branch?: BranchSummary | null;
+    job_grade?: JobGradeSummary | null;
+    wages_board_category?: WagesBoardCategorySummary | null;
     payment_info?: EmployeePaymentInfo | null;
     bank_info?: EmployeeBankInfo | null;
     epf_info?: EmployeeEpfInfo | null;

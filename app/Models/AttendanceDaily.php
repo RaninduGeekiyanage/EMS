@@ -44,6 +44,7 @@ final class AttendanceDaily extends Model
         'manual_reason',
         'manual_edited_by',
         'calculation_breakdown',
+        'anomalies',
     ];
 
     /**
@@ -65,6 +66,7 @@ final class AttendanceDaily extends Model
             'double_ot_hours' => 'float',
             'is_manual' => 'boolean',
             'calculation_breakdown' => 'array',
+            'anomalies' => 'array',
         ];
     }
 

@@ -88,6 +88,21 @@ final class CompanyService
     }
 
     /**
+     * Ensure only one head office exists per company by demoting any current ones.
+     */
+    private function demoteExistingHeadOffices(string $companyId, ?string $exceptBranchId = null): void
+    {
+        $query = Branch::where('company_id', $companyId)
+            ->where('is_head_office', true);
+
+        if ($exceptBranchId !== null) {
+            $query->where('id', '!=', $exceptBranchId);
+        }
+
+        $query->update(['is_head_office' => false]);
+    }
+
+    /**
      * Delete a branch.
      */
     public function deleteBranch(string $branchId): bool
@@ -148,15 +163,45 @@ final class CompanyService
     }
 
     /**
-     * Ensure only one head office exists per company.
+     * Assign or replace the Department Head (HOD) for a department.
      */
-    private function demoteExistingHeadOffices(string $companyId, ?string $exceptBranchId = null): void
+    public function assignDepartmentHead(string $departmentId, string $employeeId): \App\Models\DepartmentHead
     {
-        $branches = $this->branchRepository->findByCompany($companyId);
-        foreach ($branches as $branch) {
-            if ($branch->is_head_office && ($exceptBranchId === null || $branch->id !== $exceptBranchId)) {
-                $this->branchRepository->update((string) $branch->id, ['is_head_office' => false]);
+        $department = Department::findOrFail($departmentId);
+        $employee = \App\Models\Employee::findOrFail($employeeId);
+
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($department, $employee): \App\Models\DepartmentHead {
+            $existing = \App\Models\DepartmentHead::where('employee_id', $employee->id)
+                ->where('department_id', '!=', $department->id)
+                ->first();
+
+            if ($existing !== null) {
+                $otherDeptName = $existing->department?->name ?? 'another department';
+                throw new InvalidArgumentException("Employee {$employee->full_name} is already appointed as Head of {$otherDeptName}.");
             }
+
+            return \App\Models\DepartmentHead::updateOrCreate(
+                ['department_id' => $department->id],
+                [
+                    'employee_id' => $employee->id,
+                    'branch_id' => $employee->branch_id,
+                    'company_id' => $employee->company_id ?? null,
+                    'appointed_at' => now(),
+                ]
+            );
+        });
+    }
+
+    /**
+     * Remove the Department Head (HOD) from a department.
+     */
+    public function removeDepartmentHead(string $departmentId): bool
+    {
+        $head = \App\Models\DepartmentHead::where('department_id', $departmentId)->first();
+        if ($head !== null) {
+            return (bool) $head->delete();
         }
+
+        return false;
     }
 }

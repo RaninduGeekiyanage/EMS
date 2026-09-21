@@ -54,6 +54,14 @@ interface Shift {
     grace_minutes: number;
 }
 
+export interface AttendanceAnomaly {
+    type: string;
+    label: string;
+    minutes?: number;
+    color: string;
+    severity: 'high' | 'medium' | 'low';
+}
+
 interface AttendanceDailyRecord {
     id: string;
     tenant_id: string;
@@ -73,6 +81,7 @@ interface AttendanceDailyRecord {
     manual_reason?: string | null;
     manual_edited_by?: number | null;
     calculation_breakdown?: any;
+    anomalies?: AttendanceAnomaly[] | null;
     employee: Employee;
     shift?: Shift | null;
     editor?: { id: number; name: string } | null;
@@ -157,6 +166,7 @@ export default function Daily({
     const [adjustModalRecord, setAdjustModalRecord] = useState<AttendanceDailyRecord | null>(null);
     const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
     const [viewAuditRecord, setViewAuditRecord] = useState<AttendanceDailyRecord | null>(null);
+    const [isReprocessModalOpen, setIsReprocessModalOpen] = useState(false);
 
     // Form: Manual Adjustment
     const adjustForm = useForm({
@@ -164,6 +174,14 @@ export default function Daily({
         check_out: '',
         status: 'present',
         manual_reason: '',
+    });
+
+    // Form: Reprocess Date Range
+    const reprocessForm = useForm({
+        start_date: selectedDate,
+        end_date: selectedDate,
+        department_id: '',
+        overwrite_manual: false,
     });
 
     // Form: Management Rule Setup
@@ -229,6 +247,14 @@ export default function Daily({
                 onFinish: () => setIsProcessing(false),
             }
         );
+    };
+
+    const handleReprocessSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        reprocessForm.post('/attendance/daily/process', {
+            preserveScroll: true,
+            onSuccess: () => setIsReprocessModalOpen(false),
+        });
     };
 
     // Open Adjustment Modal
@@ -451,6 +477,23 @@ export default function Daily({
                     </div>
 
                     <div className="flex items-center gap-3 w-full md:w-auto">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                reprocessForm.setData({
+                                    start_date: selectedDate,
+                                    end_date: selectedDate,
+                                    department_id: selectedDept,
+                                    overwrite_manual: false,
+                                });
+                                setIsReprocessModalOpen(true);
+                            }}
+                            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-2 transition"
+                            title="Retroactively reprocess attendance from immutable biometric punch logs"
+                        >
+                            <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                            Reprocess Raw Logs
+                        </button>
                         <button
                             type="button"
                             onClick={handleRunEngine}
@@ -738,10 +781,28 @@ export default function Daily({
                                                 )}
                                             </td>
 
-                                            {/* Status Badge */}
+                                            {/* Status Badge & Anomalies */}
                                             <td className="py-3 px-4 text-center">
-                                                <div className="flex justify-center">
+                                                <div className="flex flex-col items-center gap-1">
                                                     {getStatusBadge(rec.status)}
+                                                    {rec.anomalies && rec.anomalies.length > 0 && (
+                                                        <div className="flex flex-wrap items-center justify-center gap-1 mt-1 max-w-[140px]">
+                                                            {rec.anomalies.map((anomaly, idx) => (
+                                                                <span
+                                                                    key={idx}
+                                                                    className="px-1.5 py-0.5 rounded text-[10px] font-bold border tracking-tight"
+                                                                    style={{
+                                                                        backgroundColor: `${anomaly.color}18`,
+                                                                        color: anomaly.color,
+                                                                        borderColor: `${anomaly.color}40`,
+                                                                    }}
+                                                                    title={`${anomaly.label} ${anomaly.minutes ? `(${anomaly.minutes}m)` : ''}`}
+                                                                >
+                                                                    {anomaly.label} {anomaly.minutes ? `+${anomaly.minutes}m` : ''}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
 
@@ -1145,6 +1206,113 @@ export default function Daily({
                                 Close
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Reprocess Date Range Modal */}
+            {isReprocessModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-6">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                            <div>
+                                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                    <RefreshCw className="w-4 h-4 text-cyan-400" />
+                                    Reprocess Attendance from Raw Biometric Logs
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    Raw punch logs are immutable. Re-evaluate punches through 4-window sliding contracts.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsReprocessModalOpen(false)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleReprocessSubmit} className="space-y-4 text-xs">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Start Date *
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={reprocessForm.data.start_date}
+                                        onChange={(e) => reprocessForm.setData('start_date', e.target.value)}
+                                        required
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyan-500 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        End Date *
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={reprocessForm.data.end_date}
+                                        onChange={(e) => reprocessForm.setData('end_date', e.target.value)}
+                                        required
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyan-500 font-mono"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Department Scope
+                                </label>
+                                <select
+                                    value={reprocessForm.data.department_id}
+                                    onChange={(e) => reprocessForm.setData('department_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                                >
+                                    <option value="">All Departments (Entire Company)</option>
+                                    {departments.map((d) => (
+                                        <option key={d.id} value={d.id}>
+                                            {d.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-3">
+                                <input
+                                    type="checkbox"
+                                    id="overwrite_manual"
+                                    checked={reprocessForm.data.overwrite_manual}
+                                    onChange={(e) => reprocessForm.setData('overwrite_manual', e.target.checked)}
+                                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-600 focus:ring-cyan-500"
+                                />
+                                <label htmlFor="overwrite_manual" className="cursor-pointer text-slate-300 leading-snug">
+                                    <span className="font-semibold text-white block">Overwrite Manual Manager Adjustments</span>
+                                    <span className="text-[11px] text-slate-500">
+                                        If unchecked, records manually modified by managers will be safely preserved.
+                                    </span>
+                                </label>
+                            </div>
+
+                            <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsReprocessModalOpen(false)}
+                                    className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={reprocessForm.processing}
+                                    className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/20 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    <RefreshCw className={`w-4 h-4 ${reprocessForm.processing ? 'animate-spin' : ''}`} />
+                                    {reprocessForm.processing ? 'Reprocessing Ledger...' : 'Start Reprocessing'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

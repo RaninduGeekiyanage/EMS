@@ -20,7 +20,7 @@ final class DepartmentRepository implements DepartmentRepositoryInterface
      */
     public function all(): Collection
     {
-        return Department::with('parent')->orderBy('name')->get();
+        return Department::with(['parent', 'head.employee:id,emp_no,full_name,email'])->orderBy('name')->get();
     }
 
     /**
@@ -29,7 +29,11 @@ final class DepartmentRepository implements DepartmentRepositoryInterface
     public function getTree(): Collection
     {
         return Department::whereNull('parent_id')
-            ->with(['children.children'])
+            ->with([
+                'head.employee:id,emp_no,full_name,email',
+                'children.head.employee:id,emp_no,full_name,email',
+                'children.children',
+            ])
             ->orderBy('name')
             ->get();
     }

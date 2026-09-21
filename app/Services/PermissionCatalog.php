@@ -274,6 +274,30 @@ final class PermissionCatalog
             'description' => 'Purge and clear draft roster entries for a department or month',
             'is_critical' => true,
         ],
+        'shift_swap.view' => [
+            'domain' => 'ams',
+            'name' => 'View Shift Swap Requests',
+            'description' => 'View employee shift swap proposals and departmental requests',
+            'is_critical' => false,
+        ],
+        'shift_swap.request' => [
+            'domain' => 'ams',
+            'name' => 'Request Shift Swap',
+            'description' => 'Propose a shift exchange with a peer in the same department',
+            'is_critical' => false,
+        ],
+        'shift_swap.approve_department' => [
+            'domain' => 'ams',
+            'name' => 'Approve Department Shift Swaps (HOD / Authorized)',
+            'description' => 'Approve or reject shift swap proposals for staff within assigned department',
+            'is_critical' => true,
+        ],
+        'shift_swap.approve_all' => [
+            'domain' => 'ams',
+            'name' => 'Company-Wide Shift Swap Override (Admin)',
+            'description' => 'Approve or override shift swap requests across any department',
+            'is_critical' => true,
+        ],
         'work-calendar.view' => [
             'domain' => 'ams',
             'name' => 'View Work Calendar',

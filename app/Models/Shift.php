@@ -39,6 +39,16 @@ final class Shift extends Model
         'grace_minutes',
         'ot_threshold_minutes',
         'is_night_shift',
+        'in_window_before_start',
+        'in_window_after_start',
+        'out_window_before_end',
+        'out_window_after_end',
+        'first_half_end_time',
+        'second_half_start_time',
+        'early_in_as_ot',
+        'early_in_as_att_in',
+        'ot_start_time',
+        'working_minutes',
         'color',
         'description',
         'is_active',
@@ -56,7 +66,75 @@ final class Shift extends Model
             'grace_minutes' => 'integer',
             'ot_threshold_minutes' => 'integer',
             'is_night_shift' => 'boolean',
+            'in_window_before_start' => 'integer',
+            'in_window_after_start' => 'integer',
+            'out_window_before_end' => 'integer',
+            'out_window_after_end' => 'integer',
+            'early_in_as_ot' => 'boolean',
+            'early_in_as_att_in' => 'boolean',
+            'working_minutes' => 'integer',
             'is_active' => 'boolean',
+        ];
+    }
+
+    /**
+     * Calculate net expected working duration in minutes based on start, end, and break.
+     */
+    public function calculateWorkingMinutes(): int
+    {
+        if (empty($this->start_time) || empty($this->end_time)) {
+            return 0;
+        }
+
+        $startTimeStr = substr((string) $this->start_time, 0, 5);
+        $endTimeStr = substr((string) $this->end_time, 0, 5);
+
+        $start = \Carbon\Carbon::createFromFormat('H:i', $startTimeStr);
+        $end = \Carbon\Carbon::createFromFormat('H:i', $endTimeStr);
+
+        if ($this->is_night_shift || $end->lte($start)) {
+            $end->addDay();
+        }
+
+        $gross = (int) abs($end->diffInMinutes($start));
+        return max(0, $gross - (int) ($this->break_minutes ?? 0));
+    }
+
+    /**
+     * Get the sliding punch window for check-in on a given shift date.
+     *
+     * @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon}
+     */
+    public function getInWindow(\Carbon\CarbonInterface $date): array
+    {
+        $shiftStart = \Carbon\Carbon::parse($date->toDateString() . ' ' . $this->start_time);
+        $before = $this->in_window_before_start ?? 60;
+        $after = $this->in_window_after_start ?? 120;
+
+        return [
+            $shiftStart->copy()->subMinutes($before),
+            $shiftStart->copy()->addMinutes($after),
+        ];
+    }
+
+    /**
+     * Get the sliding punch window for check-out on a given shift date.
+     *
+     * @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon}
+     */
+    public function getOutWindow(\Carbon\CarbonInterface $date): array
+    {
+        $shiftEnd = \Carbon\Carbon::parse($date->toDateString() . ' ' . $this->end_time);
+        if ($this->is_night_shift || $shiftEnd->lt(\Carbon\Carbon::parse($date->toDateString() . ' ' . $this->start_time))) {
+            $shiftEnd->addDay();
+        }
+
+        $before = $this->out_window_before_end ?? 120;
+        $after = $this->out_window_after_end ?? 180;
+
+        return [
+            $shiftEnd->copy()->subMinutes($before),
+            $shiftEnd->copy()->addMinutes($after),
         ];
     }
 

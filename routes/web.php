@@ -11,6 +11,7 @@ use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\BankExportController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\CompanyController;
+use App\Http\Controllers\CustomReportController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\RosterController;
 use App\Http\Controllers\RosterExportController;
 use App\Http\Controllers\RosterPatternController;
 use App\Http\Controllers\ShiftController;
+use App\Http\Controllers\ShiftSwapController;
 use App\Http\Controllers\SuperAdmin\AccessControlController as SuperAdminAccessControlController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
 use App\Http\Controllers\UserAccountController;
@@ -93,11 +95,13 @@ Route::middleware(['tenant'])->group(function (): void {
     Route::put('/branches/{branch}', [BranchController::class, 'update'])->name('branches.update');
     Route::delete('/branches/{branch}', [BranchController::class, 'destroy'])->name('branches.destroy');
 
-    // M01 Departments
+    // M01 Departments & Leadership (HOD)
     Route::get('/departments', [DepartmentController::class, 'index'])->name('departments.index');
     Route::post('/departments', [DepartmentController::class, 'store'])->name('departments.store');
     Route::put('/departments/{department}', [DepartmentController::class, 'update'])->name('departments.update');
     Route::delete('/departments/{department}', [DepartmentController::class, 'destroy'])->name('departments.destroy');
+    Route::post('/departments/{department}/hod', [DepartmentController::class, 'assignHod'])->name('departments.hod.assign');
+    Route::delete('/departments/{department}/hod', [DepartmentController::class, 'removeHod'])->name('departments.hod.remove');
 
     // M01 Employees
     Route::get('/employees', [EmployeeController::class, 'index'])->name('employees.index');
@@ -126,6 +130,12 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/roster/swap', [RosterController::class, 'swap'])->middleware('can:roster.update')->name('roster.swap');
         Route::post('/roster/publish', [RosterController::class, 'publish'])->middleware('can:roster.publish')->name('roster.publish');
         Route::delete('/roster/clear', [RosterController::class, 'clear'])->middleware('can:roster.delete')->name('roster.clear');
+
+        // Departmentalized Shift Swap Requests
+        Route::get('/roster/shift-swaps', [ShiftSwapController::class, 'index'])->middleware('can:shift_swap.view')->name('roster.shift-swaps.index');
+        Route::post('/roster/shift-swaps', [ShiftSwapController::class, 'store'])->middleware('can:shift_swap.request')->name('roster.shift-swaps.store');
+        Route::post('/roster/shift-swaps/{swap}/approve', [ShiftSwapController::class, 'approve'])->name('roster.shift-swaps.approve');
+        Route::post('/roster/shift-swaps/{swap}/reject', [ShiftSwapController::class, 'reject'])->name('roster.shift-swaps.reject');
 
         // Roster Patterns & Templates Library
         Route::get('/roster/patterns', [RosterPatternController::class, 'index'])->middleware('can:roster.view')->name('roster.patterns.index');
@@ -164,6 +174,11 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/leave/types', [LeaveRequestController::class, 'storeType'])->name('leave.types.store');
         Route::post('/leave/types/seed-statutory', [LeaveRequestController::class, 'seedStatutoryTypes'])->name('leave.types.seed-statutory');
         Route::post('/leave/entitlements/allocate', [LeaveRequestController::class, 'allocateEntitlements'])->name('leave.entitlements.allocate');
+
+        // Dynamic Custom HR Report Builder
+        Route::get('/reports/custom', [CustomReportController::class, 'index'])->name('reports.custom.index');
+        Route::get('/reports/custom/csv', [CustomReportController::class, 'exportCsv'])->name('reports.custom.csv');
+        Route::get('/reports/custom/pdf', [CustomReportController::class, 'exportPdf'])->name('reports.custom.pdf');
     });
 
     // M03 Payroll & Statutory Compliance (Protected by module:payroll)

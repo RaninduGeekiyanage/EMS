@@ -137,6 +137,15 @@ final class AttendanceProcessingService
                     ]));
                 }
 
+                // Flag matched logs as processed without mutating or deleting raw logs
+                if ($punches->isNotEmpty()) {
+                    AttendanceLog::whereIn('id', $punches->pluck('id'))
+                        ->update([
+                            'is_processed' => true,
+                            'processed_at' => Carbon::now(),
+                        ]);
+                }
+
                 $savedRecords->push($record);
                 $processedCount++;
 
@@ -188,6 +197,54 @@ final class AttendanceProcessingService
             'start_date' => $startDate->toDateString(),
             'end_date' => $endDate->toDateString(),
             'total_processed' => $totalProcessed,
+        ];
+    }
+
+    /**
+     * Retroactively reprocess attendance from raw biometric logs for a date range.
+     * Preserves raw logs, safely recalculates daily ledgers, and updates processing status.
+     *
+     * @return array<string, mixed>
+     */
+    public function reprocessDateRange(
+        CarbonInterface $startDate,
+        CarbonInterface $endDate,
+        ?string $employeeId = null,
+        ?string $departmentId = null,
+        bool $overwriteManual = false
+    ): array {
+        $current = $startDate->copy();
+        $totalProcessed = 0;
+        $totalPresent = 0;
+        $totalAbsent = 0;
+        $totalLate = 0;
+        $totalMissingPunch = 0;
+
+        while ($current->lte($endDate)) {
+            $result = $this->processDate(
+                $current,
+                $employeeId,
+                $departmentId,
+                $overwriteManual
+            );
+
+            $totalProcessed += $result['processed'];
+            $totalPresent += $result['present'];
+            $totalAbsent += $result['absent'];
+            $totalLate += $result['late'];
+            $totalMissingPunch += $result['missing_punch'];
+
+            $current->addDay();
+        }
+
+        return [
+            'start_date' => $startDate->toDateString(),
+            'end_date' => $endDate->toDateString(),
+            'total_processed' => $totalProcessed,
+            'present' => $totalPresent,
+            'absent' => $totalAbsent,
+            'late' => $totalLate,
+            'missing_punch' => $totalMissingPunch,
         ];
     }
 
@@ -284,10 +341,34 @@ final class AttendanceProcessingService
         }
 
         // Pair Check-in and Check-out
-        [$checkIn, $checkOut, $isSinglePunch] = $this->pairPunches($punches);
+        [$checkIn, $checkOut, $isSinglePunch] = $this->pairPunches($punches, $shift, $date);
 
         // Case B: Incomplete Single Punch (Missing punch policy)
         if ($isSinglePunch || $checkIn === null || $checkOut === null) {
+            $missingAnomalies = [];
+            if ($checkIn === null && $checkOut !== null) {
+                $missingAnomalies[] = [
+                    'type' => 'MISSING_IN',
+                    'label' => 'Missing In-Punch',
+                    'color' => '#F87171',
+                    'severity' => 'high',
+                ];
+            } elseif ($checkIn !== null && $checkOut === null) {
+                $missingAnomalies[] = [
+                    'type' => 'MISSING_OUT',
+                    'label' => 'Missing Out-Punch',
+                    'color' => '#F87171',
+                    'severity' => 'high',
+                ];
+            } else {
+                $missingAnomalies[] = [
+                    'type' => 'INCOMPLETE_PUNCH',
+                    'label' => 'Incomplete Punch',
+                    'color' => '#F87171',
+                    'severity' => 'high',
+                ];
+            }
+
             return [
                 'check_in' => $checkIn?->toDateTimeString(),
                 'check_out' => $checkOut?->toDateTimeString(),
@@ -298,6 +379,7 @@ final class AttendanceProcessingService
                 'ot_hours' => 0.00,
                 'double_ot_hours' => 0.00,
                 'status' => 'missing_punch',
+                'anomalies' => $missingAnomalies,
                 'calculation_breakdown' => [
                     'rule' => $rule->rule_name,
                     'punches_count' => $punches->count(),
@@ -346,7 +428,28 @@ final class AttendanceProcessingService
         // 5. Overtime Calculation via Engine
         $otResult = $this->overtimeService->calculate($rule, $shift, $date, $workedHours, $holiday);
 
-        // 6. Determine final status
+        // 6. Collect Structured Anomalies
+        $anomalies = [];
+        if ($lateMinutes > 0) {
+            $anomalies[] = [
+                'type' => 'LATE_ARRIVAL',
+                'label' => 'Late Arrival',
+                'minutes' => $lateMinutes,
+                'color' => '#FB923C', // orange-400
+                'severity' => $lateMinutes > 30 ? 'high' : 'medium',
+            ];
+        }
+        if ($earlyDepartureMinutes > 0) {
+            $anomalies[] = [
+                'type' => 'EARLY_DEPARTURE',
+                'label' => 'Early Departure',
+                'minutes' => $earlyDepartureMinutes,
+                'color' => '#F87171', // red-400
+                'severity' => $earlyDepartureMinutes > 30 ? 'high' : 'medium',
+            ];
+        }
+
+        // 7. Determine final status
         $status = 'present';
         if ($isHoliday) {
             $status = 'present';
@@ -370,6 +473,7 @@ final class AttendanceProcessingService
             'ot_hours' => $otResult['ot_hours'],
             'double_ot_hours' => $otResult['double_ot_hours'],
             'status' => $status,
+            'anomalies' => $anomalies,
             'calculation_breakdown' => [
                 'rule' => $rule->rule_name,
                 'break_minutes_deducted' => $breakMinutes,
@@ -382,18 +486,18 @@ final class AttendanceProcessingService
     }
 
     /**
-     * Pair raw punches into check-in and check-out timestamps.
+     * Pair raw punches into check-in and check-out timestamps, utilizing shift sliding windows when defined.
      *
      * @param  Collection<int, AttendanceLog>  $punches
      * @return array{0: ?Carbon, 1: ?Carbon, 2: bool}
      */
-    private function pairPunches(Collection $punches): array
+    private function pairPunches(Collection $punches, ?Shift $shift = null, ?CarbonInterface $date = null): array
     {
         if ($punches->isEmpty()) {
             return [null, null, false];
         }
 
-        // If explicit 'in' and 'out' types exist
+        // Check if explicit 'in' and 'out' types exist
         $inPunch = $punches->firstWhere('punch_type', 'in');
         $outPunch = $punches->reverse()->firstWhere('punch_type', 'out');
 
@@ -406,7 +510,45 @@ final class AttendanceProcessingService
             }
         }
 
-        // Chronological pairing for auto or mixed types
+        // Sliding 4-Window punch contract matching if shift & date provided
+        if ($shift !== null && $date !== null) {
+            [$inStart, $inEnd] = $shift->getInWindow($date);
+            [$outStart, $outEnd] = $shift->getOutWindow($date);
+
+            // Add +/- 5 minute operational grace margin
+            $inStartGrace = $inStart->copy()->subMinutes(5);
+            $inEndGrace = $inEnd->copy()->addMinutes(5);
+            $outStartGrace = $outStart->copy()->subMinutes(5);
+            $outEndGrace = $outEnd->copy()->addMinutes(5);
+
+            $inCandidates = $punches->filter(function (AttendanceLog $log) use ($inStartGrace, $inEndGrace) {
+                $time = Carbon::parse($log->punch_datetime);
+                return $time->gte($inStartGrace) && $time->lte($inEndGrace);
+            })->sortBy('punch_datetime');
+
+            $outCandidates = $punches->filter(function (AttendanceLog $log) use ($outStartGrace, $outEndGrace) {
+                $time = Carbon::parse($log->punch_datetime);
+                return $time->gte($outStartGrace) && $time->lte($outEndGrace);
+            })->sortByDesc('punch_datetime');
+
+            $matchedIn = $inCandidates->first();
+            $matchedOut = $outCandidates->first();
+
+            if ($matchedIn && $matchedOut && $matchedIn->id !== $matchedOut->id) {
+                $inTime = Carbon::parse($matchedIn->punch_datetime);
+                $outTime = Carbon::parse($matchedOut->punch_datetime);
+
+                if ($outTime->gt($inTime)) {
+                    return [$inTime, $outTime, false];
+                }
+            } elseif ($matchedIn && ! $matchedOut) {
+                return [Carbon::parse($matchedIn->punch_datetime), null, true];
+            } elseif (! $matchedIn && $matchedOut) {
+                return [null, Carbon::parse($matchedOut->punch_datetime), true];
+            }
+        }
+
+        // Fallback chronological pairing for auto or mixed types
         $sorted = $punches->sortBy('punch_datetime')->values();
 
         if ($sorted->count() === 1) {

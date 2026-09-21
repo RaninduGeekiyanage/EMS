@@ -35,6 +35,8 @@ final class AttendanceLog extends Model
         'raw_biometric_id',
         'import_id',
         'source',
+        'is_processed',
+        'processed_at',
     ];
 
     /**
@@ -46,6 +48,8 @@ final class AttendanceLog extends Model
     {
         return [
             'punch_datetime' => 'datetime',
+            'is_processed' => 'boolean',
+            'processed_at' => 'datetime',
         ];
     }
 

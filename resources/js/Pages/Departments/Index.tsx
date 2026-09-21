@@ -14,6 +14,9 @@ import {
     X,
     Tag,
     DollarSign,
+    UserCheck,
+    Crown,
+    UserMinus,
 } from 'lucide-react';
 
 interface Department {
@@ -26,16 +29,67 @@ interface Department {
     is_active: boolean;
     parent?: Department | null;
     children?: Department[];
+    head?: {
+        id: string;
+        employee?: {
+            id: string;
+            emp_no: string;
+            full_name: string;
+            email: string;
+        } | null;
+    } | null;
+}
+
+interface EmployeeOption {
+    id: string;
+    emp_no: string;
+    full_name: string;
+    department_id: string | null;
 }
 
 interface Props {
     departmentTree: Department[];
     departments: Department[];
+    employees?: EmployeeOption[];
 }
 
-export default function Index({ departmentTree, departments }: Props) {
+export default function Index({ departmentTree, departments, employees = [] }: Props) {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
+
+    // HOD Modal State
+    const [isHodModalOpen, setIsHodModalOpen] = useState(false);
+    const [selectedDeptForHod, setSelectedDeptForHod] = useState<Department | null>(null);
+    const hodForm = useForm({
+        employee_id: '',
+    });
+
+    const openHodModal = (dept: Department) => {
+        setSelectedDeptForHod(dept);
+        hodForm.setData({
+            employee_id: dept.head?.employee?.id || '',
+        });
+        setIsHodModalOpen(true);
+    };
+
+    const handleHodSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedDeptForHod) return;
+
+        hodForm.post(`/departments/${selectedDeptForHod.id}/hod`, {
+            preserveScroll: true,
+            onSuccess: () => setIsHodModalOpen(false),
+        });
+    };
+
+    const handleRemoveHod = (deptId: string) => {
+        if (confirm('Are you sure you want to remove the Department Head?')) {
+            router.delete(`/departments/${deptId}/hod`, {
+                preserveScroll: true,
+                onSuccess: () => setIsHodModalOpen(false),
+            });
+        }
+    };
 
     const form = useForm({
         name: '',
@@ -145,6 +199,34 @@ export default function Index({ departmentTree, departments }: Props) {
                                     <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
                                     Cost Center: <span className="text-slate-300 font-mono">{dept.cost_center}</span>
                                 </p>
+                            )}
+
+                            {/* HOD Indicator Badge */}
+                            {dept.head?.employee ? (
+                                <div className="mt-2 flex items-center gap-2">
+                                    <span className="text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                        <Crown className="w-3 h-3 text-amber-400" />
+                                        HOD: {dept.head.employee.full_name} <span className="font-mono text-[10px] text-amber-400/80">({dept.head.employee.emp_no})</span>
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => openHodModal(dept)}
+                                        className="text-[10px] text-slate-400 hover:text-white underline transition"
+                                    >
+                                        Change
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="mt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => openHodModal(dept)}
+                                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 px-2 py-0.5 rounded-lg transition"
+                                    >
+                                        <UserCheck className="w-3 h-3" />
+                                        Assign HOD
+                                    </button>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -385,6 +467,90 @@ export default function Index({ departmentTree, departments }: Props) {
                                 >
                                     {form.processing ? 'Saving...' : editingDepartment ? 'Update Department' : 'Create Department'}
                                 </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Department Head (HOD) Assignment Modal */}
+            {isHodModalOpen && selectedDeptForHod && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+                    <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl relative">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                <Crown className="w-5 h-5 text-amber-400" />
+                                Department Head (HOD)
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setIsHodModalOpen(false)}
+                                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-300">
+                            Department: <span className="font-bold text-white">{selectedDeptForHod.name}</span>
+                            {selectedDeptForHod.head?.employee && (
+                                <p className="mt-1 text-slate-400">
+                                    Current HOD: <span className="text-amber-300 font-semibold">{selectedDeptForHod.head.employee.full_name}</span>
+                                </p>
+                            )}
+                        </div>
+
+                        <form onSubmit={handleHodSubmit} className="mt-5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                    Select Authorized Department Head
+                                </label>
+                                <select
+                                    value={hodForm.data.employee_id}
+                                    onChange={(e) => hodForm.setData('employee_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    required
+                                >
+                                    <option value="">-- Choose Employee --</option>
+                                    {employees.map((emp) => (
+                                        <option key={emp.id} value={emp.id}>
+                                            {emp.full_name} ({emp.emp_no}) {emp.department_id === selectedDeptForHod.id ? '★ In Dept' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                {hodForm.errors.employee_id && (
+                                    <p className="text-xs text-rose-400 mt-1">{hodForm.errors.employee_id}</p>
+                                )}
+                            </div>
+
+                            <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+                                {selectedDeptForHod.head?.employee ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleRemoveHod(selectedDeptForHod.id)}
+                                        className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold border border-rose-500/20 flex items-center gap-1.5 transition"
+                                    >
+                                        <UserMinus className="w-3.5 h-3.5" />
+                                        Remove HOD
+                                    </button>
+                                ) : <div />}
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsHodModalOpen(false)}
+                                        className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={hodForm.processing}
+                                        className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-lg shadow-amber-600/20 disabled:opacity-50"
+                                    >
+                                        {hodForm.processing ? 'Saving...' : 'Save HOD'}
+                                    </button>
+                                </div>
                             </div>
                         </form>
                     </div>

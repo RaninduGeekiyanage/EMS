@@ -77,7 +77,16 @@ final class EmployeeService
                 $employee->epfInfo()->create($epfData);
             }
 
-            return $employee->fresh(['department', 'designation', 'branch', 'paymentInfo', 'bankInfo', 'epfInfo']);
+            // 4. Auto-initialize statutory leave balances for employee joining year
+            try {
+                $joiningYear = $employee->date_of_joining ? \Carbon\Carbon::parse($employee->date_of_joining)->year : (int) date('Y');
+                app(LeaveService::class)->allocateEntitlements((string) $employee->tenant_id, $joiningYear, (string) $employee->id);
+            } catch (\Throwable $e) {
+                // Log and gracefully continue without failing employee creation
+                \Illuminate\Support\Facades\Log::warning("Auto-allocation of leave entitlements failed for employee {$employee->id}: " . $e->getMessage());
+            }
+
+            return $employee->fresh(['department', 'designation', 'branch', 'jobGrade', 'wagesBoardCategory', 'paymentInfo', 'bankInfo', 'epfInfo']);
         });
     }
 

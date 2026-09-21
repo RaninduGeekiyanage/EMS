@@ -528,6 +528,15 @@ export default function Index({
                             </Link>
 
                             <Link
+                                href="/roster/shift-swaps"
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition shadow-sm"
+                                title="Departmentalized Shift Swaps & HOD Approvals"
+                            >
+                                <ArrowLeftRight className="w-4 h-4 text-cyan-400" />
+                                Shift Swaps
+                            </Link>
+
+                            <Link
                                 href="/shifts"
                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
                                 title="Configure Shift Hours & Baseline Assignments"

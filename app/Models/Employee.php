@@ -34,13 +34,24 @@ final class Employee extends Model
         'emp_no',
         'nic',
         'full_name',
+        'gender',
+        'date_of_birth',
+        'marital_status',
         'email',
         'phone',
+        'permanent_address',
+        'temporary_address',
+        'city',
+        'landline',
         'department_id',
         'designation_id',
         'branch_id',
+        'job_grade_id',
+        'wages_board_category_id',
         'employment_type',
+        'employment_category',
         'employment_status',
+        'attendance_mode',
         'date_of_joining',
         'biometric_device_id',
     ];
@@ -55,6 +66,7 @@ final class Employee extends Model
         return [
             'nic' => 'encrypted',
             'employment_type' => EmploymentType::class,
+            'date_of_birth' => 'date',
             'date_of_joining' => 'date',
         ];
     }
@@ -179,6 +191,26 @@ final class Employee extends Model
     public function rosterEntries(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(RosterEntry::class, 'employee_id');
+    }
+
+    /**
+     * Get the organizational Job Grade (OC Grade) of the employee.
+     *
+     * @return BelongsTo<JobGrade, $this>
+     */
+    public function jobGrade(): BelongsTo
+    {
+        return $this->belongsTo(JobGrade::class, 'job_grade_id');
+    }
+
+    /**
+     * Get the Wages Board category if governed by Wages Board Ordinance.
+     *
+     * @return BelongsTo<WagesBoardCategory, $this>
+     */
+    public function wagesBoardCategory(): BelongsTo
+    {
+        return $this->belongsTo(WagesBoardCategory::class, 'wages_board_category_id');
     }
 }
 
