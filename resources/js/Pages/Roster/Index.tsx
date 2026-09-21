@@ -152,6 +152,28 @@ export default function Index({
         cell: MatrixCell;
     } | null>(null);
 
+    // Enhanced Roster Generation States
+    const [generationSource, setGenerationSource] = useState<'template' | 'custom'>(patterns.length > 0 ? 'template' : 'custom');
+    const [selectedPatternId, setSelectedPatternId] = useState<string>(patterns[0]?.id || '');
+    const [staffScope, setStaffScope] = useState<'all' | 'department' | 'specific'>('all');
+    const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
+    const [staffSearchQuery, setStaffSearchQuery] = useState<string>('');
+
+    const staffList = useMemo(() => {
+        return matrix.map((r) => r.employee);
+    }, [matrix]);
+
+    const filteredStaffList = useMemo(() => {
+        return staffList.filter((s) => {
+            const q = staffSearchQuery.toLowerCase();
+            return (
+                s.full_name.toLowerCase().includes(q) ||
+                s.emp_no.toLowerCase().includes(q) ||
+                (s.department?.name && s.department.name.toLowerCase().includes(q))
+            );
+        });
+    }, [staffList, staffSearchQuery]);
+
     // Filter rows by search
     const filteredMatrix = useMemo(() => {
         return matrix.filter((row) => {
@@ -358,9 +380,49 @@ export default function Index({
 
     const handleGenerateSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        generateForm.post('/roster/generate', {
+        const payload: any = {
+            start_date: generateForm.data.start_date,
+            end_date: generateForm.data.end_date,
+            conflict_mode: generateForm.data.conflict_mode,
+            status: generateForm.data.status,
+            preserve_leaves: generateForm.data.preserve_leaves,
+        };
+
+        if (generationSource === 'template') {
+            if (!selectedPatternId) {
+                alert('Please select a roster template.');
+                return;
+            }
+            payload.pattern_id = selectedPatternId;
+        } else {
+            payload.pattern_mode = generateForm.data.pattern_mode;
+            if (generateForm.data.pattern_mode === 'weekly') {
+                payload.weekly_config = generateForm.data.weekly_config;
+            } else if (generateForm.data.pattern_mode === 'cyclical') {
+                payload.cyclical_config = generateForm.data.cyclical_config;
+            } else if (generateForm.data.pattern_mode === 'daily') {
+                payload.daily_config = generateForm.data.daily_config;
+            } else if (generateForm.data.pattern_mode === 'copy_month') {
+                payload.copy_config = generateForm.data.copy_config;
+            }
+        }
+
+        if (staffScope === 'specific') {
+            if (selectedStaffIds.length === 0) {
+                alert('Please select at least one employee.');
+                return;
+            }
+            payload.employee_ids = selectedStaffIds;
+        } else if (staffScope === 'department') {
+            payload.department_id = generateForm.data.department_id;
+        }
+
+        router.post('/roster/generate', payload, {
             preserveScroll: true,
-            onSuccess: () => setIsGenerateModalOpen(false),
+            onSuccess: () => {
+                setIsGenerateModalOpen(false);
+                setSelectedStaffIds([]);
+            },
         });
     };
 
@@ -456,6 +518,15 @@ export default function Index({
 
                         {/* Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                                href="/roster/patterns"
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition shadow-sm"
+                                title="Manage Reusable Roster Patterns & Templates"
+                            >
+                                <Sparkles className="w-4 h-4 text-indigo-400" />
+                                Roster Patterns
+                            </Link>
+
                             <Link
                                 href="/shifts"
                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
@@ -1138,86 +1209,513 @@ export default function Index({
                         </div>
 
                         <form onSubmit={handleGenerateSubmit} className="space-y-5">
-                            {/* Pattern Mode Tabs */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-2">
-                                    Select Generation Pattern
-                                </label>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => generateForm.setData('pattern_mode', 'weekly')}
-                                        className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                            generateForm.data.pattern_mode === 'weekly'
-                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                        }`}
-                                    >
-                                        <CalendarIcon className="w-4 h-4" />
-                                        <span>7-Day Weekly</span>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => generateForm.setData('pattern_mode', 'cyclical')}
-                                        className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                            generateForm.data.pattern_mode === 'cyclical'
-                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                        }`}
-                                    >
-                                        <RefreshCw className="w-4 h-4" />
-                                        <span>Rolling N-Day</span>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => generateForm.setData('pattern_mode', 'daily')}
-                                        className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                            generateForm.data.pattern_mode === 'daily'
-                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                        }`}
-                                    >
-                                        <Clock className="w-4 h-4" />
-                                        <span>Daily Single</span>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => generateForm.setData('pattern_mode', 'copy_month')}
-                                        className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
-                                            generateForm.data.pattern_mode === 'copy_month'
-                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
-                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                                        }`}
-                                    >
-                                        <Copy className="w-4 h-4" />
-                                        <span>Clone Month</span>
-                                    </button>
-                                </div>
+                            {/* Generation Source: Saved Template vs Custom */}
+                            <div className="flex items-center justify-between p-1 bg-slate-950 rounded-xl border border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setGenerationSource('template')}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition ${
+                                        generationSource === 'template'
+                                            ? 'bg-indigo-600 text-white shadow-md'
+                                            : 'text-slate-400 hover:text-white'
+                                    }`}
+                                >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <span>Apply Saved Template ({patterns.length})</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setGenerationSource('custom')}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition ${
+                                        generationSource === 'custom'
+                                            ? 'bg-indigo-600 text-white shadow-md'
+                                            : 'text-slate-400 hover:text-white'
+                                    }`}
+                                >
+                                    <CalendarIcon className="w-3.5 h-3.5" />
+                                    <span>Custom On-The-Fly Pattern</span>
+                                </button>
                             </div>
 
-                            {/* Scope & Date Range */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Department Scope
-                                    </label>
-                                    <select
-                                        value={generateForm.data.department_id}
-                                        onChange={(e) => generateForm.setData('department_id', e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                            {/* If Saved Template: Pattern Picker & Preview */}
+                            {generationSource === 'template' && (
+                                <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-semibold text-slate-300">
+                                            Select Roster Template
+                                        </label>
+                                        <a
+                                            href="/roster/patterns"
+                                            className="text-[11px] text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                        >
+                                            Manage Templates &rarr;
+                                        </a>
+                                    </div>
+                                    {patterns.length === 0 ? (
+                                        <div className="text-center py-4 text-xs text-slate-500">
+                                            No roster templates configured yet.{' '}
+                                            <a href="/roster/patterns" className="text-indigo-400 underline">
+                                                Create your first template
+                                            </a>{' '}
+                                            or switch to "Custom On-The-Fly".
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <select
+                                                value={selectedPatternId}
+                                                onChange={(e) => setSelectedPatternId(e.target.value)}
+                                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-indigo-500"
+                                            >
+                                                {patterns.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.name} ({p.code}) — {p.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Rolling Cyclical'}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {/* Preview selected pattern sequence */}
+                                            {(() => {
+                                                const sel = patterns.find((p) => p.id === selectedPatternId);
+                                                if (!sel) return null;
+                                                return (
+                                                    <div className="pt-1">
+                                                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5">
+                                                            Sequence Preview ({sel.pattern_type === 'weekly' ? 'Weekly 7-Day' : 'Rolling Cyclical'}):
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {sel.pattern_type === 'weekly' && Array.isArray(sel.pattern_data) &&
+                                                                sel.pattern_data.map((day: any, idx: number) => {
+                                                                    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                                                                    const shift = shifts.find((s) => s.id === day.shift_id);
+                                                                    return (
+                                                                        <span
+                                                                            key={idx}
+                                                                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
+                                                                                day.is_rest_day
+                                                                                    ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                                                                                    : 'bg-indigo-950/60 text-indigo-300 border border-indigo-800/60'
+                                                                            }`}
+                                                                        >
+                                                                            {dayNames[idx]}: {day.is_rest_day ? 'OFF' : (shift?.code || 'Shift')}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                            {sel.pattern_type === 'cyclical' &&
+                                                                (Array.isArray(sel.pattern_data?.steps) ? sel.pattern_data.steps : Array.isArray(sel.pattern_data) ? sel.pattern_data : []).map((step: any, idx: number) => {
+                                                                    const shift = shifts.find((s) => s.id === step.shift_id);
+                                                                    return (
+                                                                        <span
+                                                                            key={idx}
+                                                                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
+                                                                                step.is_rest_day
+                                                                                    ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                                                                                    : 'bg-teal-950/60 text-teal-300 border border-teal-800/60'
+                                                                            }`}
+                                                                        >
+                                                                            Step {idx + 1}: {step.is_rest_day ? 'OFF' : (shift?.code || 'Shift')}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* If Custom: Mode Tabs and Configurations */}
+                            {generationSource === 'custom' && (
+                                <>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-2">
+                                            Select Generation Pattern
+                                        </label>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => generateForm.setData('pattern_mode', 'weekly')}
+                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
+                                                    generateForm.data.pattern_mode === 'weekly'
+                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                }`}
+                                            >
+                                                <CalendarIcon className="w-4 h-4" />
+                                                <span>7-Day Weekly</span>
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => generateForm.setData('pattern_mode', 'cyclical')}
+                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
+                                                    generateForm.data.pattern_mode === 'cyclical'
+                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                }`}
+                                            >
+                                                <RefreshCw className="w-4 h-4" />
+                                                <span>Rolling N-Day</span>
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => generateForm.setData('pattern_mode', 'daily')}
+                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
+                                                    generateForm.data.pattern_mode === 'daily'
+                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                }`}
+                                            >
+                                                <Clock className="w-4 h-4" />
+                                                <span>Daily Single</span>
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => generateForm.setData('pattern_mode', 'copy_month')}
+                                                className={`p-3 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1.5 transition ${
+                                                    generateForm.data.pattern_mode === 'copy_month'
+                                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                }`}
+                                            >
+                                                <Copy className="w-4 h-4" />
+                                                <span>Clone Month</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Custom Weekly Matrix */}
+                                    {generateForm.data.pattern_mode === 'weekly' && (
+                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                                            <div className="text-xs font-bold text-indigo-400">Weekly 7-Day Schedule Matrix</div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
+                                                    (dayName, idx) => {
+                                                        const dayCfg = generateForm.data.weekly_config[idx] || {
+                                                            shift_id: shifts[0]?.id || '',
+                                                            is_rest_day: idx === 6,
+                                                        };
+
+                                                        return (
+                                                            <div
+                                                                key={dayName}
+                                                                className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800"
+                                                            >
+                                                                <span className="w-12 text-xs font-bold text-slate-300">{dayName.substring(0, 3)}</span>
+                                                                <select
+                                                                    disabled={dayCfg.is_rest_day}
+                                                                    value={dayCfg.shift_id}
+                                                                    onChange={(e) => {
+                                                                        const updated = [...generateForm.data.weekly_config];
+                                                                        updated[idx] = { ...dayCfg, shift_id: e.target.value };
+                                                                        generateForm.setData('weekly_config', updated);
+                                                                    }}
+                                                                    className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 disabled:opacity-30"
+                                                                >
+                                                                    {shifts.map((s) => (
+                                                                        <option key={s.id} value={s.id}>
+                                                                            {s.name} ({s.code})
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                                <label className="flex items-center gap-1 text-[11px] text-amber-400 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={dayCfg.is_rest_day}
+                                                                        onChange={(e) => {
+                                                                            const updated = [...generateForm.data.weekly_config];
+                                                                            updated[idx] = {
+                                                                                ...dayCfg,
+                                                                                is_rest_day: e.target.checked,
+                                                                            };
+                                                                            generateForm.setData('weekly_config', updated);
+                                                                        }}
+                                                                        className="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-400"
+                                                                    />
+                                                                    <span>Off</span>
+                                                                </label>
+                                                            </div>
+                                                        );
+                                                    }
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Custom Cyclical Matrix */}
+                                    {generateForm.data.pattern_mode === 'cyclical' && (
+                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-xs font-bold text-indigo-400">
+                                                    Rolling Rotation Cycle ({generateForm.data.cyclical_config.steps.length} Steps)
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const steps = [...generateForm.data.cyclical_config.steps];
+                                                        steps.push({
+                                                            shift_id: shifts[0]?.id || '',
+                                                            is_rest_day: false,
+                                                            notes: `Day ${steps.length + 1}`,
+                                                        });
+                                                        generateForm.setData('cyclical_config', {
+                                                            ...generateForm.data.cyclical_config,
+                                                            steps,
+                                                        });
+                                                    }}
+                                                    className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                                                >
+                                                    + Add Step
+                                                </button>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                                                {generateForm.data.cyclical_config.steps.map((step, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs"
+                                                    >
+                                                        <span className="w-14 text-slate-400 font-bold">Step {idx + 1}</span>
+                                                        <select
+                                                            disabled={step.is_rest_day}
+                                                            value={step.shift_id}
+                                                            onChange={(e) => {
+                                                                const steps = [...generateForm.data.cyclical_config.steps];
+                                                                steps[idx] = { ...step, shift_id: e.target.value };
+                                                                generateForm.setData('cyclical_config', {
+                                                                    ...generateForm.data.cyclical_config,
+                                                                    steps,
+                                                                });
+                                                            }}
+                                                            className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 disabled:opacity-30"
+                                                        >
+                                                            {shifts.map((s) => (
+                                                                <option key={s.id} value={s.id}>
+                                                                    {s.code}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <label className="flex items-center gap-1 text-[11px] text-amber-400">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={step.is_rest_day}
+                                                                onChange={(e) => {
+                                                                    const steps = [...generateForm.data.cyclical_config.steps];
+                                                                    steps[idx] = { ...step, is_rest_day: e.target.checked };
+                                                                    generateForm.setData('cyclical_config', {
+                                                                        ...generateForm.data.cyclical_config,
+                                                                        steps,
+                                                                    });
+                                                                }}
+                                                                className="rounded bg-slate-800 border-slate-700 text-amber-500"
+                                                            />
+                                                            <span>Off</span>
+                                                        </label>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Custom Daily Matrix */}
+                                    {generateForm.data.pattern_mode === 'daily' && (
+                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Working Shift
+                                                </label>
+                                                <select
+                                                    value={generateForm.data.daily_config.shift_id}
+                                                    onChange={(e) =>
+                                                        generateForm.setData('daily_config', {
+                                                            ...generateForm.data.daily_config,
+                                                            shift_id: e.target.value,
+                                                        })
+                                                    }
+                                                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
+                                                >
+                                                    {shifts.map((s) => (
+                                                        <option key={s.id} value={s.id}>
+                                                            {s.name} ({s.code}) [{s.start_time.substring(0, 5)} - {s.end_time.substring(0, 5)}]
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Custom Copy Month Matrix */}
+                                    {generateForm.data.pattern_mode === 'copy_month' && (
+                                        <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                        Source Year
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        value={generateForm.data.copy_config.source_year}
+                                                        onChange={(e) =>
+                                                            generateForm.setData('copy_config', {
+                                                                ...generateForm.data.copy_config,
+                                                                source_year: parseInt(e.target.value) || year,
+                                                            })
+                                                        }
+                                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                        Source Month
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        max={12}
+                                                        value={generateForm.data.copy_config.source_month}
+                                                        onChange={(e) =>
+                                                            generateForm.setData('copy_config', {
+                                                                ...generateForm.data.copy_config,
+                                                                source_month: parseInt(e.target.value) || 1,
+                                                            })
+                                                        }
+                                                        className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {/* Personnel Assignment Target Scope */}
+                            <div className="space-y-3">
+                                <label className="block text-xs font-semibold text-slate-300">
+                                    Target Personnel Scope
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setStaffScope('all')}
+                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
+                                            staffScope === 'all'
+                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
+                                        }`}
                                     >
-                                        <option value="">All Personnel</option>
-                                        {departments.map((d) => (
-                                            <option key={d.id} value={d.id}>
-                                                {d.name}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        All Personnel ({staffList.length})
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setStaffScope('department')}
+                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
+                                            staffScope === 'department'
+                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
+                                        }`}
+                                    >
+                                        By Department
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setStaffScope('specific')}
+                                        className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
+                                            staffScope === 'specific'
+                                                ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                                                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:bg-slate-800'
+                                        }`}
+                                    >
+                                        Specific Staff ({selectedStaffIds.length})
+                                    </button>
                                 </div>
 
+                                {staffScope === 'department' && (
+                                    <div>
+                                        <select
+                                            value={generateForm.data.department_id}
+                                            onChange={(e) => generateForm.setData('department_id', e.target.value)}
+                                            className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="">Select a Department</option>
+                                            {departments.map((d) => (
+                                                <option key={d.id} value={d.id}>
+                                                    {d.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {staffScope === 'specific' && (
+                                    <div className="space-y-2.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="relative flex-1">
+                                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search personnel by name or ID..."
+                                                    value={staffSearchQuery}
+                                                    onChange={(e) => setStaffSearchQuery(e.target.value)}
+                                                    className="w-full bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-lg pl-8 pr-3 py-1.5 focus:ring-1 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const allVisibleIds = filteredStaffList.map((s) => s.id);
+                                                    const isAllSelected = allVisibleIds.every((id) => selectedStaffIds.includes(id));
+                                                    if (isAllSelected) {
+                                                        setSelectedStaffIds(selectedStaffIds.filter((id) => !allVisibleIds.includes(id)));
+                                                    } else {
+                                                        setSelectedStaffIds(Array.from(new Set([...selectedStaffIds, ...allVisibleIds])));
+                                                    }
+                                                }}
+                                                className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-800 border border-slate-700 whitespace-nowrap"
+                                            >
+                                                Select Visible
+                                            </button>
+                                        </div>
+
+                                        <div className="max-h-40 overflow-y-auto space-y-1 divide-y divide-slate-800/50">
+                                            {filteredStaffList.map((st) => {
+                                                const isChecked = selectedStaffIds.includes(st.id);
+                                                return (
+                                                    <label
+                                                        key={st.id}
+                                                        className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer text-xs"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    setSelectedStaffIds([...selectedStaffIds, st.id]);
+                                                                } else {
+                                                                    setSelectedStaffIds(selectedStaffIds.filter((id) => id !== st.id));
+                                                                }
+                                                            }}
+                                                            className="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                                                        />
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-slate-200 font-medium truncate">{st.full_name}</div>
+                                                            <div className="text-[10px] text-slate-500 truncate">
+                                                                {st.emp_no} {st.department ? `· ${st.department.name}` : ''}
+                                                            </div>
+                                                        </div>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Date Range */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
                                         Start Date
@@ -1260,205 +1758,6 @@ export default function Index({
                                     className="rounded bg-slate-800 border-slate-700 text-teal-500 focus:ring-teal-400 w-4 h-4 cursor-pointer"
                                 />
                             </div>
-
-                            {/* Pattern Details Config */}
-                            {generateForm.data.pattern_mode === 'weekly' && (
-                                <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                    <div className="text-xs font-bold text-indigo-400">Weekly 7-Day Schedule Matrix</div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
-                                            (dayName, idx) => {
-                                                const dayCfg = generateForm.data.weekly_config[idx] || {
-                                                    shift_id: shifts[0]?.id || '',
-                                                    is_rest_day: idx === 6,
-                                                };
-
-                                                return (
-                                                    <div
-                                                        key={dayName}
-                                                        className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800"
-                                                    >
-                                                        <span className="w-12 text-xs font-bold text-slate-300">{dayName.substring(0, 3)}</span>
-                                                        <select
-                                                            disabled={dayCfg.is_rest_day}
-                                                            value={dayCfg.shift_id}
-                                                            onChange={(e) => {
-                                                                const updated = [...generateForm.data.weekly_config];
-                                                                updated[idx] = { ...dayCfg, shift_id: e.target.value };
-                                                                generateForm.setData('weekly_config', updated);
-                                                            }}
-                                                            className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 disabled:opacity-30"
-                                                        >
-                                                            {shifts.map((s) => (
-                                                                <option key={s.id} value={s.id}>
-                                                                    {s.name} ({s.code})
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        <label className="flex items-center gap-1 text-[11px] text-amber-400 cursor-pointer">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={dayCfg.is_rest_day}
-                                                                onChange={(e) => {
-                                                                    const updated = [...generateForm.data.weekly_config];
-                                                                    updated[idx] = {
-                                                                        ...dayCfg,
-                                                                        is_rest_day: e.target.checked,
-                                                                    };
-                                                                    generateForm.setData('weekly_config', updated);
-                                                                }}
-                                                                className="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-400"
-                                                            />
-                                                            <span>Off</span>
-                                                        </label>
-                                                    </div>
-                                                );
-                                            }
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {generateForm.data.pattern_mode === 'cyclical' && (
-                                <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                    <div className="flex items-center justify-between">
-                                        <div className="text-xs font-bold text-indigo-400">
-                                            Rolling Rotation Cycle ({generateForm.data.cyclical_config.steps.length} Steps)
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const steps = [...generateForm.data.cyclical_config.steps];
-                                                steps.push({
-                                                    shift_id: shifts[0]?.id || '',
-                                                    is_rest_day: false,
-                                                    notes: `Day ${steps.length + 1}`,
-                                                });
-                                                generateForm.setData('cyclical_config', {
-                                                    ...generateForm.data.cyclical_config,
-                                                    steps,
-                                                });
-                                            }}
-                                            className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
-                                        >
-                                            + Add Step
-                                        </button>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                                        {generateForm.data.cyclical_config.steps.map((step, idx) => (
-                                            <div
-                                                key={idx}
-                                                className="flex items-center gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs"
-                                            >
-                                                <span className="w-14 text-slate-400 font-bold">Step {idx + 1}</span>
-                                                <select
-                                                    disabled={step.is_rest_day}
-                                                    value={step.shift_id}
-                                                    onChange={(e) => {
-                                                        const steps = [...generateForm.data.cyclical_config.steps];
-                                                        steps[idx] = { ...step, shift_id: e.target.value };
-                                                        generateForm.setData('cyclical_config', {
-                                                            ...generateForm.data.cyclical_config,
-                                                            steps,
-                                                        });
-                                                    }}
-                                                    className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1 disabled:opacity-30"
-                                                >
-                                                    {shifts.map((s) => (
-                                                        <option key={s.id} value={s.id}>
-                                                            {s.code}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <label className="flex items-center gap-1 text-[11px] text-amber-400">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={step.is_rest_day}
-                                                        onChange={(e) => {
-                                                            const steps = [...generateForm.data.cyclical_config.steps];
-                                                            steps[idx] = { ...step, is_rest_day: e.target.checked };
-                                                            generateForm.setData('cyclical_config', {
-                                                                ...generateForm.data.cyclical_config,
-                                                                steps,
-                                                            });
-                                                        }}
-                                                        className="rounded bg-slate-800 border-slate-700 text-amber-500"
-                                                    />
-                                                    <span>Off</span>
-                                                </label>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {generateForm.data.pattern_mode === 'daily' && (
-                                <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                            Working Shift
-                                        </label>
-                                        <select
-                                            value={generateForm.data.daily_config.shift_id}
-                                            onChange={(e) =>
-                                                generateForm.setData('daily_config', {
-                                                    ...generateForm.data.daily_config,
-                                                    shift_id: e.target.value,
-                                                })
-                                            }
-                                            className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                        >
-                                            {shifts.map((s) => (
-                                                <option key={s.id} value={s.id}>
-                                                    {s.name} ({s.code}) [{s.start_time.substring(0, 5)} - {s.end_time.substring(0, 5)}]
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-                            )}
-
-                            {generateForm.data.pattern_mode === 'copy_month' && (
-                                <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                Source Year
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={generateForm.data.copy_config.source_year}
-                                                onChange={(e) =>
-                                                    generateForm.setData('copy_config', {
-                                                        ...generateForm.data.copy_config,
-                                                        source_year: parseInt(e.target.value) || year,
-                                                    })
-                                                }
-                                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                Source Month
-                                            </label>
-                                            <input
-                                                type="number"
-                                                min={1}
-                                                max={12}
-                                                value={generateForm.data.copy_config.source_month}
-                                                onChange={(e) =>
-                                                    generateForm.setData('copy_config', {
-                                                        ...generateForm.data.copy_config,
-                                                        source_month: parseInt(e.target.value) || 1,
-                                                    })
-                                                }
-                                                className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* Conflict & State options */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">

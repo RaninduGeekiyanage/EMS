@@ -19,7 +19,9 @@ final class AssignShiftRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'employee_id' => ['required', 'string'],
+            'employee_id' => ['required_without:employee_ids', 'nullable', 'string'],
+            'employee_ids' => ['required_without:employee_id', 'nullable', 'array'],
+            'employee_ids.*' => ['string'],
             'shift_id' => ['required', 'string'],
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],

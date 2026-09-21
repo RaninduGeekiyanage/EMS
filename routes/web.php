@@ -19,6 +19,7 @@ use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\RosterController;
 use App\Http\Controllers\RosterExportController;
+use App\Http\Controllers\RosterPatternController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\SuperAdmin\AccessControlController as SuperAdminAccessControlController;
 use App\Http\Controllers\SuperAdmin\CompanyController as SuperAdminCompanyController;
@@ -125,6 +126,13 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/roster/swap', [RosterController::class, 'swap'])->middleware('can:roster.update')->name('roster.swap');
         Route::post('/roster/publish', [RosterController::class, 'publish'])->middleware('can:roster.publish')->name('roster.publish');
         Route::delete('/roster/clear', [RosterController::class, 'clear'])->middleware('can:roster.delete')->name('roster.clear');
+
+        // Roster Patterns & Templates Library
+        Route::get('/roster/patterns', [RosterPatternController::class, 'index'])->middleware('can:roster.view')->name('roster.patterns.index');
+        Route::post('/roster/patterns', [RosterPatternController::class, 'store'])->middleware('can:roster.create')->name('roster.patterns.store');
+        Route::put('/roster/patterns/{pattern}', [RosterPatternController::class, 'update'])->middleware('can:roster.update')->name('roster.patterns.update');
+        Route::delete('/roster/patterns/{pattern}', [RosterPatternController::class, 'destroy'])->middleware('can:roster.delete')->name('roster.patterns.destroy');
+        Route::post('/roster/patterns/assign', [RosterPatternController::class, 'assign'])->middleware('can:roster.create')->name('roster.patterns.assign');
 
         // Work Calendar & Public Holidays
         Route::get('/work-calendar', [WorkCalendarController::class, 'index'])->name('work-calendar.index');

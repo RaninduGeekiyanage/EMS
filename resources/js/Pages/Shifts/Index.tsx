@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Head, useForm, router, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
@@ -70,12 +70,20 @@ interface Props {
 }
 
 export default function Index({ shifts, employees, stats }: Props) {
+    const [activeTab, setActiveTab] = useState<'shifts' | 'assignments'>('shifts');
     const [filterType, setFilterType] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const [assignmentSearch, setAssignmentSearch] = useState('');
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
     const [editingShift, setEditingShift] = useState<Shift | null>(null);
     const [selectedShiftForAssign, setSelectedShiftForAssign] = useState<Shift | null>(null);
+
+    // Bulk Assignment States
+    const [assignMode, setAssignMode] = useState<'single' | 'bulk'>('single');
+    const [selectedBulkEmpIds, setSelectedBulkEmpIds] = useState<string[]>([]);
+    const [bulkEmpSearch, setBulkEmpSearch] = useState('');
+    const [bulkDeptFilter, setBulkDeptFilter] = useState('all');
 
     // Form for Shift create/edit
     const shiftForm = useForm({
@@ -172,6 +180,8 @@ export default function Index({ shifts, employees, stats }: Props) {
 
     const openAssignModal = (shift?: Shift) => {
         setSelectedShiftForAssign(shift || null);
+        setSelectedBulkEmpIds([]);
+        setAssignMode('single');
         assignForm.setData({
             employee_id: employees.length > 0 ? employees[0].id : '',
             shift_id: shift ? shift.id : shifts.length > 0 ? shifts[0].id : '',
@@ -183,10 +193,29 @@ export default function Index({ shifts, employees, stats }: Props) {
 
     const handleAssignSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        assignForm.post('/shifts/assign', {
-            preserveScroll: true,
-            onSuccess: () => setIsAssignModalOpen(false),
-        });
+        if (assignMode === 'bulk') {
+            if (selectedBulkEmpIds.length === 0) {
+                alert('Please select at least one employee for bulk assignment.');
+                return;
+            }
+            router.post('/shifts/assign', {
+                employee_ids: selectedBulkEmpIds,
+                shift_id: assignForm.data.shift_id,
+                effective_from: assignForm.data.effective_from,
+                effective_to: assignForm.data.effective_to || null,
+            }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setIsAssignModalOpen(false);
+                    setSelectedBulkEmpIds([]);
+                },
+            });
+        } else {
+            assignForm.post('/shifts/assign', {
+                preserveScroll: true,
+                onSuccess: () => setIsAssignModalOpen(false),
+            });
+        }
     };
 
     const handleRemoveAssignment = (assignmentId: string) => {
@@ -196,6 +225,26 @@ export default function Index({ shifts, employees, stats }: Props) {
             });
         }
     };
+
+    const uniqueDepartments = useMemo(() => {
+        const depts = new Map<string, { id: string; name: string }>();
+        employees.forEach((emp) => {
+            if (emp.department) {
+                depts.set(emp.department.id, emp.department);
+            }
+        });
+        return Array.from(depts.values());
+    }, [employees]);
+
+    const filteredBulkEmployees = useMemo(() => {
+        return employees.filter((emp) => {
+            const matchesSearch =
+                emp.full_name.toLowerCase().includes(bulkEmpSearch.toLowerCase()) ||
+                emp.emp_no.toLowerCase().includes(bulkEmpSearch.toLowerCase());
+            const matchesDept = bulkDeptFilter === 'all' || emp.department?.id === bulkDeptFilter;
+            return matchesSearch && matchesDept;
+        });
+    }, [employees, bulkEmpSearch, bulkDeptFilter]);
 
     const filteredShifts = shifts.filter((shift) => {
         const matchesType = filterType === 'all' || shift.shift_type === filterType;
@@ -272,7 +321,15 @@ export default function Index({ shifts, employees, stats }: Props) {
                             title="Open interactive monthly Duty Roster planner"
                         >
                             <CalendarRange className="w-4 h-4" />
-                            Open Duty Roster Planner
+                            Duty Roster
+                        </Link>
+                        <Link
+                            href="/roster/patterns"
+                            className="text-xs font-semibold text-indigo-300 px-3.5 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-500/30 transition flex items-center gap-1.5 shadow-sm"
+                            title="Manage reusable Roster Patterns & Templates"
+                        >
+                            <Sparkles className="w-4 h-4 text-indigo-400" />
+                            Roster Patterns
                         </Link>
                         <Link
                             href="/work-calendar"
@@ -358,8 +415,36 @@ export default function Index({ shifts, employees, stats }: Props) {
                     </div>
                 </div>
 
-                {/* Filter and Action Bar */}
-                <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                {/* Module View Tabs */}
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <button
+                        onClick={() => setActiveTab('shifts')}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                            activeTab === 'shifts'
+                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                    >
+                        <Clock className="w-4 h-4" />
+                        <span>Shift Master Catalog ({shifts.length})</span>
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('assignments')}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                            activeTab === 'assignments'
+                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                    >
+                        <Users className="w-4 h-4" />
+                        <span>Permanent Baseline Assignments ({stats.total_assignments})</span>
+                    </button>
+                </div>
+
+                {activeTab === 'shifts' && (
+                    <>
+                        {/* Filter and Action Bar */}
+                        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-2 w-full md:w-auto">
                         <div className="relative flex-1 md:w-64">
                             <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
@@ -529,23 +614,38 @@ export default function Index({ shifts, employees, stats }: Props) {
                         </div>
                     )}
                 </div>
+                </>
+            )}
 
-                {/* Assigned Staff Preview Table */}
-                <div className="mt-12 p-6 rounded-3xl bg-slate-900/60 border border-slate-800/80">
-                    <div className="flex items-center justify-between mb-6">
+            {activeTab === 'assignments' && (
+                <div className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800/80 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
-                            <h3 className="text-base font-bold text-white">Current Employee Shift Roster</h3>
+                            <h3 className="text-base font-bold text-white">Permanent Contractual Baseline Assignments</h3>
                             <p className="text-xs text-slate-400 mt-0.5">
-                                Active assignments mapping employees to operational shifts.
+                                Permanent default shifts assigned to fixed-schedule personnel (e.g. 9–5 office staff).
                             </p>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => openAssignModal()}
-                            className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition"
-                        >
-                            + New Assignment
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <div className="relative w-64">
+                                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    placeholder="Filter staff or department..."
+                                    value={assignmentSearch}
+                                    onChange={(e) => setAssignmentSearch(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openAssignModal()}
+                                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/20 transition flex items-center gap-1.5 whitespace-nowrap"
+                            >
+                                <Plus className="w-4 h-4" />
+                                <span>Assign Baseline Shift</span>
+                            </button>
+                        </div>
                     </div>
 
                     <div className="overflow-x-auto">
@@ -563,6 +663,15 @@ export default function Index({ shifts, employees, stats }: Props) {
                             <tbody className="divide-y divide-slate-800/60">
                                 {employees
                                     .filter((e) => e.shift_assignments && e.shift_assignments.length > 0)
+                                    .filter((e) => {
+                                        if (!assignmentSearch) return true;
+                                        const q = assignmentSearch.toLowerCase();
+                                        return (
+                                            e.full_name.toLowerCase().includes(q) ||
+                                            e.emp_no.toLowerCase().includes(q) ||
+                                            (e.department?.name && e.department.name.toLowerCase().includes(q))
+                                        );
+                                    })
                                     .map((emp) =>
                                         emp.shift_assignments?.map((assignment) => (
                                             <tr key={assignment.id} className="hover:bg-slate-800/30 transition">
@@ -596,7 +705,7 @@ export default function Index({ shifts, employees, stats }: Props) {
                                                         title="Remove Shift Assignment"
                                                         className="p-1 rounded text-slate-400 hover:text-rose-400 transition"
                                                     >
-                                                        <UserMinus className="w-4 h-4" />
+                                                        <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 </td>
                                             </tr>
@@ -606,7 +715,7 @@ export default function Index({ shifts, employees, stats }: Props) {
                                 {employees.filter((e) => e.shift_assignments && e.shift_assignments.length > 0).length === 0 && (
                                     <tr>
                                         <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                                            No employee shift assignments registered yet. Click "Assign Roster" to map staff.
+                                            No employee shift assignments registered yet. Click "Assign Baseline Shift" to map staff.
                                         </td>
                                     </tr>
                                 )}
@@ -614,6 +723,7 @@ export default function Index({ shifts, employees, stats }: Props) {
                         </table>
                     </div>
                 </div>
+            )}
 
             {/* Shift Definition Modal */}
             {isShiftModalOpen && (
@@ -824,11 +934,11 @@ export default function Index({ shifts, employees, stats }: Props) {
             {/* Employee Shift Assignment Modal */}
             {isAssignModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-                    <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl relative">
+                    <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
                         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                             <h3 className="text-base font-bold text-white flex items-center gap-2">
                                 <UserCheck className="w-5 h-5 text-indigo-400" />
-                                Assign Shift Roster
+                                Assign Permanent Baseline Shift
                             </h3>
                             <button
                                 type="button"
@@ -840,26 +950,147 @@ export default function Index({ shifts, employees, stats }: Props) {
                         </div>
 
                         <form onSubmit={handleAssignSubmit} className="mt-6 space-y-4">
+                            {/* Mode Selector */}
                             <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Select Employee *
-                                </label>
-                                <select
-                                    value={assignForm.data.employee_id}
-                                    onChange={(e) => assignForm.setData('employee_id', e.target.value)}
-                                    required
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                                >
-                                    {employees.map((emp) => (
-                                        <option key={emp.id} value={emp.id}>
-                                            {emp.emp_no} — {emp.full_name} ({emp.department?.name || 'No Dept'})
-                                        </option>
-                                    ))}
-                                    {employees.length === 0 && (
-                                        <option value="" disabled>No registered employees found</option>
-                                    )}
-                                </select>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Assignment Mode</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssignMode('single')}
+                                        className={`py-2 px-3 rounded-xl text-xs font-semibold border transition flex items-center justify-center gap-1.5 ${
+                                            assignMode === 'single'
+                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-sm'
+                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                        }`}
+                                    >
+                                        <UserCheck className="w-3.5 h-3.5" />
+                                        <span>Single Employee</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssignMode('bulk')}
+                                        className={`py-2 px-3 rounded-xl text-xs font-semibold border transition flex items-center justify-center gap-1.5 ${
+                                            assignMode === 'bulk'
+                                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-sm'
+                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                        }`}
+                                    >
+                                        <Users className="w-3.5 h-3.5" />
+                                        <span>Multiple Staff (Bulk)</span>
+                                    </button>
+                                </div>
                             </div>
+
+                            {assignMode === 'single' ? (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Select Employee *
+                                    </label>
+                                    <select
+                                        value={assignForm.data.employee_id}
+                                        onChange={(e) => assignForm.setData('employee_id', e.target.value)}
+                                        required
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        {employees.map((emp) => (
+                                            <option key={emp.id} value={emp.id}>
+                                                {emp.emp_no} — {emp.full_name} ({emp.department?.name || 'No Dept'})
+                                            </option>
+                                        ))}
+                                        {employees.length === 0 && (
+                                            <option value="" disabled>No registered employees found</option>
+                                        )}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div className="space-y-2.5">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-semibold text-slate-300">
+                                            Select Target Staff ({selectedBulkEmpIds.length} Selected)
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const visibleIds = filteredBulkEmployees.map((e) => e.id);
+                                                const allSelected = visibleIds.every((id) => selectedBulkEmpIds.includes(id));
+                                                if (allSelected) {
+                                                    setSelectedBulkEmpIds(selectedBulkEmpIds.filter((id) => !visibleIds.includes(id)));
+                                                } else {
+                                                    setSelectedBulkEmpIds(Array.from(new Set([...selectedBulkEmpIds, ...visibleIds])));
+                                                }
+                                            }}
+                                            className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+                                        >
+                                            {filteredBulkEmployees.length > 0 &&
+                                            filteredBulkEmployees.every((e) => selectedBulkEmpIds.includes(e.id))
+                                                ? 'Deselect All Visible'
+                                                : 'Select All Visible'}
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name / emp no..."
+                                            value={bulkEmpSearch}
+                                            onChange={(e) => setBulkEmpSearch(e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white"
+                                        />
+                                        <select
+                                            value={bulkDeptFilter}
+                                            onChange={(e) => setBulkDeptFilter(e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white"
+                                        >
+                                            <option value="all">All Departments</option>
+                                            {uniqueDepartments.map((d) => (
+                                                <option key={d.id} value={d.id}>
+                                                    {d.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950/60 divide-y divide-slate-800/60">
+                                        {filteredBulkEmployees.length === 0 ? (
+                                            <div className="p-3 text-center text-xs text-slate-500">
+                                                No employees match filter.
+                                            </div>
+                                        ) : (
+                                            filteredBulkEmployees.map((emp) => {
+                                                const isChecked = selectedBulkEmpIds.includes(emp.id);
+                                                return (
+                                                    <label
+                                                        key={emp.id}
+                                                        className="flex items-center justify-between p-2 hover:bg-slate-800/40 cursor-pointer text-xs"
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                onChange={() => {
+                                                                    if (isChecked) {
+                                                                        setSelectedBulkEmpIds(selectedBulkEmpIds.filter((id) => id !== emp.id));
+                                                                    } else {
+                                                                        setSelectedBulkEmpIds([...selectedBulkEmpIds, emp.id]);
+                                                                    }
+                                                                }}
+                                                                className="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <span className="font-semibold text-white">{emp.full_name}</span>
+                                                            <span className="text-slate-500 text-[11px]">({emp.emp_no})</span>
+                                                        </div>
+                                                        {emp.department && (
+                                                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                                                                {emp.department.name}
+                                                            </span>
+                                                        )}
+                                                    </label>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             <div>
                                 <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -922,10 +1153,22 @@ export default function Index({ shifts, employees, stats }: Props) {
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={assignForm.processing || employees.length === 0 || shifts.length === 0}
-                                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                                    disabled={
+                                        assignForm.processing ||
+                                        (assignMode === 'single' && !assignForm.data.employee_id) ||
+                                        (assignMode === 'bulk' && selectedBulkEmpIds.length === 0) ||
+                                        shifts.length === 0
+                                    }
+                                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/20 disabled:opacity-50 flex items-center gap-2"
                                 >
-                                    {assignForm.processing ? 'Assigning...' : 'Confirm Assignment'}
+                                    <UserCheck className="w-4 h-4" />
+                                    <span>
+                                        {assignForm.processing
+                                            ? 'Assigning...'
+                                            : assignMode === 'bulk'
+                                            ? `Assign to ${selectedBulkEmpIds.length} Staff`
+                                            : 'Confirm Assignment'}
+                                    </span>
                                 </button>
                             </div>
                         </form>

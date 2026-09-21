@@ -201,19 +201,29 @@ final class ShiftService
     }
 
     /**
-     * Assign a shift to an employee.
+     * Assign a shift to an employee or multiple employees in bulk.
      *
      * @param  array<string, mixed>  $data
+     * @return array<int, ShiftAssignment>|ShiftAssignment
      */
-    public function assignShift(array $data): ShiftAssignment
+    public function assignShift(array $data): array|ShiftAssignment
     {
-        return DB::transaction(static function () use ($data): ShiftAssignment {
-            return ShiftAssignment::create([
-                'employee_id' => $data['employee_id'],
-                'shift_id' => $data['shift_id'],
-                'effective_from' => $data['effective_from'],
-                'effective_to' => $data['effective_to'] ?? null,
-            ]);
+        return DB::transaction(static function () use ($data): array|ShiftAssignment {
+            $employeeIds = ! empty($data['employee_ids'])
+                ? (array) $data['employee_ids']
+                : [$data['employee_id']];
+
+            $created = [];
+            foreach ($employeeIds as $empId) {
+                $created[] = ShiftAssignment::create([
+                    'employee_id' => $empId,
+                    'shift_id' => $data['shift_id'],
+                    'effective_from' => $data['effective_from'],
+                    'effective_to' => $data['effective_to'] ?? null,
+                ]);
+            }
+
+            return count($created) === 1 ? $created[0] : $created;
         });
     }
 

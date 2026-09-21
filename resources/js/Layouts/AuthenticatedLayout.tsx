@@ -21,10 +21,11 @@ import {
     User as UserIcon,
     UserCheck,
     ArrowLeftRight,
-    ArrowLeft,
     CheckCircle2,
     AlertCircle,
     ShieldCheck,
+    Sparkles,
+    ArrowLeft,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -237,6 +238,10 @@ export default function AuthenticatedLayout({
                                 <Link href="/roster" className={navItemClass('/roster')} title="Duty Roster">
                                     <CalendarRange className="w-5 h-5 flex-shrink-0" />
                                     {!collapsed && <span>Duty Roster</span>}
+                                </Link>
+                                <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} title="Roster Patterns">
+                                    <Sparkles className="w-5 h-5 flex-shrink-0" />
+                                    {!collapsed && <span>Roster Patterns</span>}
                                 </Link>
                                 <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions">
                                     <Clock className="w-5 h-5 flex-shrink-0" />

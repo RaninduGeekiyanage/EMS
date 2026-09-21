@@ -325,8 +325,25 @@ final class RosterService
         // Validate that target date range is not locked by M03 Payroll
         $this->ensureNotLockedInRange($startDate, $endDate);
 
-        return DB::transaction(function () use ($data, $startDate, $endDate): array {
-            $patternMode = $data['pattern_mode'] ?? 'weekly'; // daily, weekly, cyclical, copy_month
+        return DB::transaction(function () use ($startDate, $endDate, $data) {
+            // If pattern_id is provided, load the pattern
+            if (! empty($data['pattern_id'])) {
+                $pattern = RosterPattern::findOrFail($data['pattern_id']);
+                $patternMode = $pattern->pattern_type;
+                if ($patternMode === 'weekly') {
+                    $data['weekly_config'] = $pattern->pattern_data;
+                } elseif ($patternMode === 'cyclical') {
+                    $data['cyclical_config'] = [
+                        'anchor_date' => $data['start_date'],
+                        'steps' => $pattern->pattern_data['steps'] ?? $pattern->pattern_data,
+                    ];
+                } elseif ($patternMode === 'daily') {
+                    $data['daily_config'] = $pattern->pattern_data;
+                }
+            } else {
+                $patternMode = $data['pattern_mode'] ?? 'weekly'; // daily, weekly, cyclical, copy_month
+            }
+
             $conflictMode = $data['conflict_mode'] ?? 'overwrite'; // overwrite, preserve
             $status = $data['status'] ?? 'published';
             $preserveLeaves = (bool) ($data['preserve_leaves'] ?? true);
@@ -781,6 +798,70 @@ final class RosterService
 
             return $query->delete();
         });
+    }
+
+    /**
+     * List all roster patterns for tenant.
+     *
+     * @return Collection<int, RosterPattern>
+     */
+    public function listPatterns(bool $onlyActive = false): Collection
+    {
+        $query = RosterPattern::query()->orderBy('name');
+
+        if ($onlyActive) {
+            $query->active();
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * Create a new roster pattern.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function createPattern(array $data): RosterPattern
+    {
+        return DB::transaction(static function () use ($data): RosterPattern {
+            return RosterPattern::create([
+                'name' => $data['name'],
+                'code' => strtoupper($data['code']),
+                'pattern_type' => $data['pattern_type'],
+                'cycle_length_days' => (int) ($data['cycle_length_days'] ?? 7),
+                'pattern_data' => $data['pattern_data'],
+                'is_active' => (bool) ($data['is_active'] ?? true),
+            ]);
+        });
+    }
+
+    /**
+     * Update an existing roster pattern.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function updatePattern(RosterPattern $pattern, array $data): RosterPattern
+    {
+        return DB::transaction(static function () use ($pattern, $data): RosterPattern {
+            $pattern->update([
+                'name' => $data['name'],
+                'code' => strtoupper($data['code']),
+                'pattern_type' => $data['pattern_type'] ?? $pattern->pattern_type,
+                'cycle_length_days' => (int) ($data['cycle_length_days'] ?? $pattern->cycle_length_days),
+                'pattern_data' => $data['pattern_data'] ?? $pattern->pattern_data,
+                'is_active' => (bool) ($data['is_active'] ?? $pattern->is_active),
+            ]);
+
+            return $pattern;
+        });
+    }
+
+    /**
+     * Delete a roster pattern.
+     */
+    public function deletePattern(RosterPattern $pattern): bool
+    {
+        return (bool) $pattern->delete();
     }
 
     /**

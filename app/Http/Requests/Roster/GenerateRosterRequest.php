@@ -21,7 +21,8 @@ final class GenerateRosterRequest extends FormRequest
         return [
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
-            'pattern_mode' => ['required', 'string', 'in:daily,weekly,cyclical,copy_month'],
+            'pattern_id' => ['nullable', 'string'],
+            'pattern_mode' => ['required_without:pattern_id', 'nullable', 'string', 'in:daily,weekly,cyclical,copy_month'],
             'employee_ids' => ['nullable', 'array'],
             'employee_ids.*' => ['string'],
             'department_id' => ['nullable', 'string'],
