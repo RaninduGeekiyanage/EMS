@@ -40,7 +40,7 @@ final class StoreEmployeeRequest extends FormRequest
             'temporary_address' => ['nullable', 'string', 'max:500'],
             'city' => ['nullable', 'string', 'max:100'],
             'landline' => ['nullable', 'string', 'max:50'],
-            'attendance_mode' => ['nullable', 'string', 'in:general,shift'],
+            'attendance_mode' => ['nullable', 'string', 'in:both,biometric,manual,general,shift'],
             'job_grade_id' => ['nullable', 'string'],
             'wages_board_category_id' => ['nullable', 'string'],
             'employment_status' => ['required', 'string', 'in:active,resigned,terminated,suspended'],
@@ -95,7 +95,7 @@ final class StoreEmployeeRequest extends FormRequest
             'employment_type' => $this->validated('employment_type'),
             'employment_category' => $this->validated('employment_category') ?? 'shop_and_office',
             'employment_status' => $this->validated('employment_status'),
-            'attendance_mode' => $this->validated('attendance_mode') ?? 'shift',
+            'attendance_mode' => $this->validated('attendance_mode') ?? 'both',
             'date_of_joining' => $this->validated('date_of_joining'),
             'biometric_device_id' => $this->validated('biometric_device_id'),
         ];

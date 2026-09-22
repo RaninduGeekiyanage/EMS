@@ -372,6 +372,13 @@ final class RosterService
             $activeRoster?->id
         );
 
+        $allActiveEmployees = Employee::query()
+            ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id')
+            ->with(['department:id,name,code', 'designation:id,title'])
+            ->where('employment_status', 'active')
+            ->orderBy('emp_no')
+            ->get();
+
         return [
             'year' => $year,
             'month' => $month,
@@ -381,6 +388,7 @@ final class RosterService
             'shifts' => $shifts,
             'patterns' => $patterns,
             'departments' => $departments,
+            'all_employees' => $allActiveEmployees,
             'selected_department' => $departmentId,
             'rosters' => $allRosters,
             'active_roster' => $activeRoster,
@@ -919,16 +927,76 @@ final class RosterService
             ? strtoupper(trim($data['code']))
             : 'RST-' . $startDate->format('Y-m') . '-' . strtoupper(Str::random(4));
 
-        return Roster::create([
-            'name' => trim($data['name']),
-            'code' => $code,
-            'department_id' => ! empty($data['department_id']) && $data['department_id'] !== 'all' ? $data['department_id'] : null,
-            'start_date' => $startDate->toDateString(),
-            'end_date' => $endDate->toDateString(),
-            'status' => $data['status'] ?? 'draft',
-            'notes' => $data['notes'] ?? null,
-            'created_by' => Auth::id(),
-        ]);
+        return DB::transaction(function () use ($data, $startDate, $endDate, $code): Roster {
+            $roster = Roster::create([
+                'name' => trim($data['name']),
+                'code' => $code,
+                'department_id' => ! empty($data['department_id']) && $data['department_id'] !== 'all' ? $data['department_id'] : null,
+                'start_date' => $startDate->toDateString(),
+                'end_date' => $endDate->toDateString(),
+                'status' => $data['status'] ?? 'draft',
+                'notes' => $data['notes'] ?? null,
+                'created_by' => Auth::id(),
+            ]);
+
+            $generationMode = $data['generation_mode'] ?? 'blank';
+
+            if ($generationMode === 'direct_pattern' && ! empty($data['pattern_id'])) {
+                $empIds = $data['employee_ids'] ?? [];
+                if (empty($empIds) && ! empty($data['department_id']) && $data['department_id'] !== 'all') {
+                    $empIds = Employee::where('department_id', $data['department_id'])
+                        ->where('employment_status', 'active')
+                        ->pluck('id')
+                        ->all();
+                }
+
+                if (! empty($empIds)) {
+                    $this->generateRoster([
+                        'pattern_id' => $data['pattern_id'],
+                        'start_date' => $startDate->toDateString(),
+                        'end_date' => $endDate->toDateString(),
+                        'employee_ids' => $empIds,
+                        'conflict_mode' => 'overwrite',
+                        'status' => $roster->status === 'published' ? 'published' : 'draft',
+                        'preserve_leaves' => true,
+                        'roster_id' => $roster->id,
+                    ]);
+                }
+            } elseif ($generationMode === 'group_set' && ! empty($data['group_set_preset'])) {
+                $groupSetData = [
+                    'preset_type' => $data['group_set_preset'],
+                    'name_prefix' => $roster->name,
+                    'code_prefix' => $roster->code,
+                    'start_date' => $startDate->toDateString(),
+                    'end_date' => $endDate->toDateString(),
+                    'shift_1_id' => $data['shift_1_id'] ?? null,
+                    'shift_2_id' => $data['shift_2_id'] ?? null,
+                    'shift_3_id' => $data['shift_3_id'] ?? null,
+                ];
+
+                $patterns = $this->createGroupSet($groupSetData);
+                $colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+
+                foreach ($patterns as $index => $pat) {
+                    $squad = RosterGroup::create([
+                        'roster_id' => $roster->id,
+                        'roster_pattern_id' => $pat->id,
+                        'name' => $pat->name,
+                        'code' => $pat->code,
+                        'color' => $colors[$index % count($colors)],
+                        'description' => "Rotating squad card generated for {$roster->name}",
+                    ]);
+
+                    if (! empty($data['squad_assignments'][$index])) {
+                        $this->enrollEmployees($squad, (array) $data['squad_assignments'][$index]);
+                    }
+                }
+
+                $this->syncRosterDates($roster);
+            }
+
+            return $roster;
+        });
     }
 
     /**
@@ -1072,14 +1140,31 @@ final class RosterService
      */
     public function createSquad(Roster $roster, array $data): RosterGroup
     {
-        return RosterGroup::create([
-            'roster_id' => $roster->id,
-            'roster_pattern_id' => ! empty($data['roster_pattern_id']) ? $data['roster_pattern_id'] : null,
-            'name' => trim($data['name']),
-            'code' => strtoupper(trim($data['code'] ?? Str::slug($data['name']))),
-            'color' => $data['color'] ?? '#3b82f6',
-            'description' => $data['description'] ?? null,
-        ]);
+        if ($roster->status === 'locked') {
+            throw new DomainException("Roster '{$roster->name}' is locked and cannot be modified.");
+        }
+
+        return DB::transaction(function () use ($roster, $data): RosterGroup {
+            $code = strtoupper(trim($data['code'] ?? 'SQD-' . strtoupper(Str::random(4))));
+
+            $squad = RosterGroup::create([
+                'roster_id' => $roster->id,
+                'roster_pattern_id' => ! empty($data['roster_pattern_id']) ? $data['roster_pattern_id'] : null,
+                'name' => trim($data['name']),
+                'code' => $code,
+                'color' => $data['color'] ?? '#3b82f6',
+                'description' => $data['description'] ?? null,
+            ]);
+
+            if (! empty($data['employee_ids'])) {
+                $this->enrollEmployees($squad, (array) $data['employee_ids']);
+                if ($squad->roster_pattern_id) {
+                    $this->syncRosterDates($roster);
+                }
+            }
+
+            return $squad->load(['pattern', 'employees']);
+        });
     }
 
     /**

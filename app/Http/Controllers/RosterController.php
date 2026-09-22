@@ -54,6 +54,15 @@ final class RosterController extends Controller
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'status' => ['nullable', 'string', 'in:draft,published'],
             'notes' => ['nullable', 'string'],
+            'generation_mode' => ['nullable', 'string', 'in:direct_pattern,group_set,blank'],
+            'pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
+            'employee_ids' => ['nullable', 'array'],
+            'employee_ids.*' => ['string', 'exists:employees,id'],
+            'group_set_preset' => ['nullable', 'string', 'in:three_shift_247,two_shift,general_weekly'],
+            'shift_1_id' => ['nullable', 'string', 'exists:shifts,id'],
+            'shift_2_id' => ['nullable', 'string', 'exists:shifts,id'],
+            'shift_3_id' => ['nullable', 'string', 'exists:shifts,id'],
+            'squad_assignments' => ['nullable', 'array'],
         ]);
 
         $roster = $this->rosterService->createRoster($validated);
@@ -152,6 +161,8 @@ final class RosterController extends Controller
             'color' => ['nullable', 'string', 'max:20'],
             'roster_pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
             'description' => ['nullable', 'string'],
+            'employee_ids' => ['nullable', 'array'],
+            'employee_ids.*' => ['string', 'exists:employees,id'],
         ]);
 
         $this->rosterService->createSquad($roster, $validated);

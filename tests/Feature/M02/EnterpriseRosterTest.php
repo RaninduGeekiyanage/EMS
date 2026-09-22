@@ -225,4 +225,99 @@ final class EnterpriseRosterTest extends TestCase
         $this->expectException(DomainException::class);
         $shiftService->deleteShift($this->morningShift);
     }
+
+    public function test_can_create_named_roster_with_immediate_direct_pattern_and_employees(): void
+    {
+        $this->actingAs($this->admin);
+
+        // Create weekly pattern
+        $pattern = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'General Mon-Fri',
+            'code' => 'GEN-5D',
+            'pattern_type' => 'weekly',
+            'cycle_length_days' => 7,
+            'pattern_data' => [
+                'mon' => ['shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                'tue' => ['shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                'wed' => ['shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                'thu' => ['shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                'fri' => ['shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                'sat' => ['shift_id' => null, 'is_rest_day' => true],
+                'sun' => ['shift_id' => null, 'is_rest_day' => true],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->post(route('roster.rosters.store'), [
+            'name' => 'November 2026 Direct Plan',
+            'code' => 'RST-2026-11-DIR',
+            'department_id' => $this->dept->id,
+            'start_date' => '2026-11-01',
+            'end_date' => '2026-11-30',
+            'generation_mode' => 'direct_pattern',
+            'pattern_id' => $pattern->id,
+            'employee_ids' => [$this->emp1->id, $this->emp2->id],
+        ]);
+
+        $response->assertRedirect();
+
+        $roster = Roster::where('code', 'RST-2026-11-DIR')->first();
+        $this->assertNotNull($roster);
+
+        // Verify that entries were generated for both employees and tagged with roster_id
+        $entriesCount = RosterEntry::where('roster_id', $roster->id)->count();
+        $this->assertEquals(60, $entriesCount); // 30 days * 2 employees
+    }
+
+    public function test_can_create_squad_with_direct_enrollment_and_sync(): void
+    {
+        $this->actingAs($this->admin);
+
+        $roster = Roster::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'December 2026 Ops',
+            'code' => 'RST-2026-12-OPS',
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-31',
+            'status' => 'draft',
+        ]);
+
+        $pattern = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Morning All Days',
+            'code' => 'MORN-ALL',
+            'pattern_type' => 'daily',
+            'cycle_length_days' => 1,
+            'pattern_data' => [
+                'shift_id' => $this->morningShift->id,
+                'rest_days' => ['sun'],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->post(route('roster.squads.store', $roster), [
+            'name' => 'Alpha Team',
+            'code' => 'SQD-ALPHA',
+            'color' => '#10b981',
+            'roster_pattern_id' => $pattern->id,
+            'employee_ids' => [$this->emp1->id],
+        ]);
+
+        $response->assertRedirect();
+
+        $squad = RosterGroup::where('roster_id', $roster->id)->first();
+        $this->assertNotNull($squad);
+        $this->assertEquals('Alpha Team', $squad->name);
+
+        // Verify member is enrolled
+        $this->assertDatabaseHas('roster_group_members', [
+            'roster_group_id' => $squad->id,
+            'employee_id' => $this->emp1->id,
+        ]);
+
+        // Verify roster entries were generated
+        $entriesCount = RosterEntry::where('roster_group_id', $squad->id)->count();
+        $this->assertEquals(31, $entriesCount); // 31 days in December
+    }
 }

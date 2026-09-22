@@ -40,7 +40,7 @@ final class UpdateEmployeeRequest extends FormRequest
             'temporary_address' => ['nullable', 'string', 'max:500'],
             'city' => ['nullable', 'string', 'max:100'],
             'landline' => ['nullable', 'string', 'max:50'],
-            'attendance_mode' => ['nullable', 'string', 'in:general,shift'],
+            'attendance_mode' => ['nullable', 'string', 'in:both,biometric,manual,general,shift'],
             'job_grade_id' => ['nullable', 'string'],
             'wages_board_category_id' => ['nullable', 'string'],
             'employment_status' => ['sometimes', 'required', 'string', 'in:active,resigned,terminated,suspended'],

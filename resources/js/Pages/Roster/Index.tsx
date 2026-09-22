@@ -178,6 +178,15 @@ interface Props {
     shifts: Shift[];
     patterns: RosterPattern[];
     departments: Department[];
+    all_employees?: {
+        id: string;
+        emp_no: string;
+        full_name: string;
+        department_id: string;
+        designation_id?: string;
+        department?: { id: string; name: string };
+        designation?: { id: string; title: string };
+    }[];
     selected_department: string | null;
     rosters: RosterHeader[];
     active_roster: RosterHeader | null;
@@ -209,6 +218,7 @@ export default function Index({
     shifts,
     patterns,
     departments,
+    all_employees = [],
     selected_department,
     rosters,
     active_roster,
@@ -225,6 +235,16 @@ export default function Index({
 
     // Modals & Drawers
     const [isNewRosterModalOpen, setIsNewRosterModalOpen] = useState(false);
+    const [rosterWizardStep, setRosterWizardStep] = useState<1 | 2 | 3>(1);
+    const [wizardEmpSearch, setWizardEmpSearch] = useState('');
+    const [wizardDeptFilter, setWizardDeptFilter] = useState('all');
+
+    const [isNewSquadModalOpen, setIsNewSquadModalOpen] = useState(false);
+    const [squadEmpSearch, setSquadEmpSearch] = useState('');
+
+    const [isQuickPatternModalOpen, setIsQuickPatternModalOpen] = useState(false);
+    const [quickPatternEmpSearch, setQuickPatternEmpSearch] = useState('');
+
     const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
     const [isManageMembersModalOpen, setIsManageMembersModalOpen] = useState(false);
     const [targetSquadForEnroll, setTargetSquadForEnroll] = useState<RosterGroup | null>(null);
@@ -252,7 +272,7 @@ export default function Index({
 
     // Group rows by Squad for Squad View
     const groupedBySquad = useMemo(() => {
-        const groups: Record<string, { squad: RosterGroup | { id: string; name: string; color: string; pattern_name?: string }; rows: MatrixRow[] }> = {};
+        const groups: Record<string, { squad: RosterGroup | { id: string; name: string; color: string | null; pattern_name?: string | null }; rows: MatrixRow[] }> = {};
 
         // Prepopulate all squads belonging to active roster
         squads.forEach((sq) => {
@@ -283,6 +303,28 @@ export default function Index({
 
         return groups;
     }, [filteredMatrix, squads]);
+
+    // Unified employee pool for creation wizards
+    const wizardEmployeePool = useMemo(() => {
+        if (all_employees && all_employees.length > 0) {
+            return all_employees.map((e) => ({
+                id: e.id,
+                emp_no: e.emp_no,
+                full_name: e.full_name,
+                department_id: e.department_id,
+                department_name: e.department?.name || 'General',
+                designation_title: e.designation?.title || 'Staff',
+            }));
+        }
+        return matrix.map((r) => ({
+            id: r.employee.id,
+            emp_no: r.employee.emp_no,
+            full_name: r.employee.full_name,
+            department_id: r.employee.department?.id || null,
+            department_name: r.employee.department?.name || 'General',
+            designation_title: 'Staff',
+        }));
+    }, [all_employees, matrix]);
 
     // Navigation & Switchers
     const handleRosterChange = (rosterId: string) => {
@@ -359,24 +401,129 @@ export default function Index({
         });
     };
 
-    // 2. New Roster Form
+    // 2. New Roster Form (Unified Wizard)
     const newRosterForm = useForm({
         name: `${month_name} - Operations Roster`,
         code: `RST-${year}-${String(month).padStart(2, '0')}-OPS`,
-        department_id: departments[0]?.id || '',
+        department_id: '',
         start_date: `${year}-${String(month).padStart(2, '0')}-01`,
         end_date: (() => {
             const lastDay = new Date(year, month, 0).getDate();
             return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
         })(),
-        status: 'draft',
+        status: 'published',
         notes: '',
+        generation_mode: 'direct_pattern' as 'direct_pattern' | 'group_set' | 'blank',
+        pattern_id: patterns[0]?.id || '',
+        employee_ids: [] as string[],
+        group_set_preset: 'three_shift_247' as 'three_shift_247' | 'two_shift' | 'general_weekly',
+        shift_1_id: shifts[0]?.id || '',
+        shift_2_id: shifts[1]?.id || shifts[0]?.id || '',
+        shift_3_id: shifts[2]?.id || shifts[0]?.id || '',
     });
+
+    const openNewRosterModal = () => {
+        setRosterWizardStep(1);
+        setWizardEmpSearch('');
+        setWizardDeptFilter('all');
+        const defaultEmpIds = wizardEmployeePool.map((e) => e.id);
+        newRosterForm.setData({
+            name: `${month_name} - Operations Roster`,
+            code: `RST-${year}-${String(month).padStart(2, '0')}-OPS`,
+            department_id: '',
+            start_date: `${year}-${String(month).padStart(2, '0')}-01`,
+            end_date: (() => {
+                const lastDay = new Date(year, month, 0).getDate();
+                return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+            })(),
+            status: 'published',
+            notes: '',
+            generation_mode: 'direct_pattern',
+            pattern_id: patterns[0]?.id || '',
+            employee_ids: defaultEmpIds,
+            group_set_preset: 'three_shift_247',
+            shift_1_id: shifts[0]?.id || '',
+            shift_2_id: shifts[1]?.id || shifts[0]?.id || '',
+            shift_3_id: shifts[2]?.id || shifts[0]?.id || '',
+        });
+        setIsNewRosterModalOpen(true);
+    };
 
     const handleNewRosterSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         newRosterForm.post('/roster/rosters', {
             onSuccess: () => setIsNewRosterModalOpen(false),
+        });
+    };
+
+    // 2b. New Squad Form
+    const newSquadForm = useForm({
+        name: '',
+        code: '',
+        color: '#3b82f6',
+        roster_pattern_id: patterns[0]?.id || '',
+        description: '',
+        employee_ids: [] as string[],
+    });
+
+    const openNewSquadModal = () => {
+        setSquadEmpSearch('');
+        newSquadForm.setData({
+            name: '',
+            code: '',
+            color: '#3b82f6',
+            roster_pattern_id: patterns[0]?.id || '',
+            description: '',
+            employee_ids: [],
+        });
+        setIsNewSquadModalOpen(true);
+    };
+
+    const handleNewSquadSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!active_roster) return;
+        newSquadForm.post(`/roster/rosters/${active_roster.id}/squads`, {
+            preserveScroll: true,
+            onSuccess: () => setIsNewSquadModalOpen(false),
+        });
+    };
+
+    // 2c. Quick Pattern / Bulk Fill Form
+    const quickPatternForm = useForm({
+        pattern_id: patterns[0]?.id || '',
+        start_date: active_roster?.start_date || `${year}-${String(month).padStart(2, '0')}-01`,
+        end_date: active_roster?.end_date || (() => {
+            const lastDay = new Date(year, month, 0).getDate();
+            return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        })(),
+        employee_ids: matrix.map((r) => r.employee.id),
+        preserve_leaves: true,
+        status: 'published',
+        roster_id: active_roster?.id || '',
+    });
+
+    const openQuickPatternModal = () => {
+        setQuickPatternEmpSearch('');
+        quickPatternForm.setData({
+            pattern_id: patterns[0]?.id || '',
+            start_date: active_roster?.start_date || `${year}-${String(month).padStart(2, '0')}-01`,
+            end_date: active_roster?.end_date || (() => {
+                const lastDay = new Date(year, month, 0).getDate();
+                return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+            })(),
+            employee_ids: matrix.map((r) => r.employee.id),
+            preserve_leaves: true,
+            status: 'published',
+            roster_id: active_roster?.id || '',
+        });
+        setIsQuickPatternModalOpen(true);
+    };
+
+    const handleQuickPatternSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        quickPatternForm.post('/roster/generate', {
+            preserveScroll: true,
+            onSuccess: () => setIsQuickPatternModalOpen(false),
         });
     };
 
@@ -491,6 +638,8 @@ export default function Index({
     const isGlobalProcessing =
         cellForm.processing ||
         newRosterForm.processing ||
+        newSquadForm.processing ||
+        quickPatternForm.processing ||
         cloneForm.processing ||
         swapForm.processing;
 
@@ -663,7 +812,7 @@ export default function Index({
                                 </div>
 
                                 <button
-                                    onClick={() => setIsNewRosterModalOpen(true)}
+                                    onClick={openNewRosterModal}
                                     className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
                                     title="Create a new Named Roster"
                                 >
@@ -700,6 +849,15 @@ export default function Index({
                         <div className="flex flex-wrap items-center gap-2">
                             {active_roster && (
                                 <>
+                                    <button
+                                        onClick={openQuickPatternModal}
+                                        className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                        title="Quick fill shifts using a pattern"
+                                    >
+                                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                        <span>Apply Pattern</span>
+                                    </button>
+
                                     <button
                                         onClick={handleSyncRoster}
                                         className="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
@@ -802,6 +960,17 @@ export default function Index({
                                 ))}
                             </select>
                         </div>
+
+                        {viewMode === 'squad' && active_roster && (
+                            <button
+                                onClick={openNewSquadModal}
+                                className="px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-400 hover:text-indigo-300 text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                                title="Create a new squad under this roster"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add Squad</span>
+                            </button>
+                        )}
 
                         {/* Search Input */}
                         <div className="relative flex-1 sm:w-60">
@@ -1343,132 +1512,500 @@ export default function Index({
                 </div>
             )}
 
-            {/* MODAL 3: Create New Named Roster */}
+            {/* MODAL 3: Unified Roster Creation Wizard */}
             {isNewRosterModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
                         <button
                             onClick={() => setIsNewRosterModalOpen(false)}
-                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
                         >
                             <X className="w-5 h-5" />
                         </button>
 
                         <div>
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                Setup Workforce Schedule
+                                Unified Scheduling Wizard
                             </span>
-                            <h3 className="text-base font-bold text-white mt-1">
-                                Create Named Roster
+                            <h3 className="text-lg font-bold text-white mt-1">
+                                Create Operational Roster
                             </h3>
                             <p className="text-xs text-slate-400">
-                                Defines the master schedule header for a department or team over a date range.
+                                Setup monthly schedule, assign shift rotation patterns, and populate staff rosters in one unified flow.
                             </p>
                         </div>
 
-                        <form onSubmit={handleNewRosterSubmit} className="space-y-3.5">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Roster Name
-                                </label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={newRosterForm.data.name}
-                                    onChange={(e) => newRosterForm.setData('name', e.target.value)}
-                                    placeholder="e.g. November 2026 - Operations Roster"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Roster Code
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={newRosterForm.data.code}
-                                        onChange={(e) => newRosterForm.setData('code', e.target.value)}
-                                        placeholder="e.g. RST-NOV-OPS"
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Department
-                                    </label>
-                                    <select
-                                        value={newRosterForm.data.department_id}
-                                        onChange={(e) => newRosterForm.setData('department_id', e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                    >
-                                        <option value="">All Company</option>
-                                        {departments.map((d) => (
-                                            <option key={d.id} value={d.id}>
-                                                {d.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Start Date
-                                    </label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newRosterForm.data.start_date}
-                                        onChange={(e) => newRosterForm.setData('start_date', e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        End Date
-                                    </label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newRosterForm.data.end_date}
-                                        onChange={(e) => newRosterForm.setData('end_date', e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Notes
-                                </label>
-                                <textarea
-                                    rows={2}
-                                    value={newRosterForm.data.notes}
-                                    onChange={(e) => newRosterForm.setData('notes', e.target.value)}
-                                    placeholder="Operational goals or staffing notes..."
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600"
-                                />
-                            </div>
-
-                            <div className="pt-2 flex items-center justify-end gap-2">
+                        {/* Wizard Step Indicator */}
+                        <div className="flex items-center gap-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800">
+                            <button
+                                type="button"
+                                onClick={() => setRosterWizardStep(1)}
+                                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                    rosterWizardStep === 1
+                                        ? 'bg-indigo-600 text-white shadow-md'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">1</span>
+                                <span>Period &amp; Horizon</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setRosterWizardStep(2)}
+                                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                    rosterWizardStep === 2
+                                        ? 'bg-indigo-600 text-white shadow-md'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">2</span>
+                                <span>Scheduling Strategy</span>
+                            </button>
+                            {newRosterForm.data.generation_mode === 'direct_pattern' && (
                                 <button
                                     type="button"
-                                    onClick={() => setIsNewRosterModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                    onClick={() => setRosterWizardStep(3)}
+                                    className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                        rosterWizardStep === 3
+                                            ? 'bg-indigo-600 text-white shadow-md'
+                                            : 'text-slate-400 hover:text-white'
+                                    }`}
                                 >
-                                    Cancel
+                                    <span className="w-4 h-4 rounded-full bg-black/30 flex items-center justify-center text-[10px]">3</span>
+                                    <span>Target Staff ({newRosterForm.data.employee_ids.length})</span>
                                 </button>
-                                <button
-                                    type="submit"
-                                    disabled={newRosterForm.processing}
-                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
-                                >
-                                    {newRosterForm.processing ? 'Creating...' : 'Create Roster'}
-                                </button>
-                            </div>
+                            )}
+                        </div>
+
+                        <form onSubmit={handleNewRosterSubmit} className="space-y-4">
+                            {/* STEP 1: Roster Identity & Horizon */}
+                            {rosterWizardStep === 1 && (
+                                <div className="space-y-3.5">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                            Roster Name *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={newRosterForm.data.name}
+                                            onChange={(e) => newRosterForm.setData('name', e.target.value)}
+                                            placeholder="e.g. November 2026 - Operations Roster"
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Roster Code
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={newRosterForm.data.code}
+                                                onChange={(e) => newRosterForm.setData('code', e.target.value)}
+                                                placeholder="e.g. RST-NOV-OPS"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Department Scope
+                                            </label>
+                                            <select
+                                                value={newRosterForm.data.department_id}
+                                                onChange={(e) => newRosterForm.setData('department_id', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                            >
+                                                <option value="">All Company Personnel</option>
+                                                {departments.map((d) => (
+                                                    <option key={d.id} value={d.id}>
+                                                        {d.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Start Date *
+                                            </label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={newRosterForm.data.start_date}
+                                                onChange={(e) => newRosterForm.setData('start_date', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                End Date *
+                                            </label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={newRosterForm.data.end_date}
+                                                onChange={(e) => newRosterForm.setData('end_date', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                            Operational Notes
+                                        </label>
+                                        <textarea
+                                            rows={2}
+                                            value={newRosterForm.data.notes}
+                                            onChange={(e) => newRosterForm.setData('notes', e.target.value)}
+                                            placeholder="Staffing targets, seasonal remarks..."
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600"
+                                        />
+                                    </div>
+
+                                    <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-800">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsNewRosterModalOpen(false)}
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRosterWizardStep(2)}
+                                            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition flex items-center gap-1.5"
+                                        >
+                                            <span>Next: Scheduling Strategy</span>
+                                            <ChevronRight className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* STEP 2: Scheduling Strategy */}
+                            {rosterWizardStep === 2 && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {/* Option A: Direct Pattern */}
+                                        <div
+                                            onClick={() => newRosterForm.setData('generation_mode', 'direct_pattern')}
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                                newRosterForm.data.generation_mode === 'direct_pattern'
+                                                    ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500'
+                                                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Sparkles className="w-4 h-4 text-indigo-400" />
+                                                <span className="font-bold text-xs text-white">Direct Pattern</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                Apply a single weekly or cyclical pattern directly to your staff.
+                                            </p>
+                                        </div>
+
+                                        {/* Option B: Rotating Shift Groups */}
+                                        <div
+                                            onClick={() => newRosterForm.setData('generation_mode', 'group_set')}
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                                newRosterForm.data.generation_mode === 'group_set'
+                                                    ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500'
+                                                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Layers className="w-4 h-4 text-emerald-400" />
+                                                <span className="font-bold text-xs text-white">Rotating Squads</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                24/7 or 2-Shift multi-squad rotation (Groups A, B, C, D).
+                                            </p>
+                                        </div>
+
+                                        {/* Option C: Blank Schedule */}
+                                        <div
+                                            onClick={() => newRosterForm.setData('generation_mode', 'blank')}
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                                newRosterForm.data.generation_mode === 'blank'
+                                                    ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500'
+                                                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <CalendarDays className="w-4 h-4 text-amber-400" />
+                                                <span className="font-bold text-xs text-white">Blank Roster</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                Create empty shell to schedule cell-by-cell or add squads later.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Strategy Configuration */}
+                                    {newRosterForm.data.generation_mode === 'direct_pattern' && (
+                                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                            <label className="block text-xs font-semibold text-slate-300">
+                                                Select Roster Pattern to Apply *
+                                            </label>
+                                            <select
+                                                value={newRosterForm.data.pattern_id}
+                                                onChange={(e) => newRosterForm.setData('pattern_id', e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                            >
+                                                {patterns.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.name} ({p.pattern_type.toUpperCase()}, {p.cycle_length_days}d cycle)
+                                                    </option>
+                                                ))}
+                                                {patterns.length === 0 && (
+                                                    <option value="">No patterns found. Please seed or create a pattern first.</option>
+                                                )}
+                                            </select>
+                                            <p className="text-[11px] text-slate-400">
+                                                In the next step, you will select which employees should receive this schedule.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {newRosterForm.data.generation_mode === 'group_set' && (
+                                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Industry Squad Preset *
+                                                </label>
+                                                <select
+                                                    value={newRosterForm.data.group_set_preset}
+                                                    onChange={(e) => newRosterForm.setData('group_set_preset', e.target.value as any)}
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                                >
+                                                    <option value="three_shift_247">3 Shifts + 1 OFF (24/7 Operations &bull; 4 Groups A, B, C, D)</option>
+                                                    <option value="two_shift">2 Shifts + 1 OFF (Two-Shift Coverage &bull; 3 Groups A, B, C)</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                                                <div>
+                                                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                                        Shift 1 (Morning)
+                                                    </label>
+                                                    <select
+                                                        value={newRosterForm.data.shift_1_id}
+                                                        onChange={(e) => newRosterForm.setData('shift_1_id', e.target.value)}
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                                                    >
+                                                        {shifts.map((s) => (
+                                                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                                        Shift 2 (Evening)
+                                                    </label>
+                                                    <select
+                                                        value={newRosterForm.data.shift_2_id}
+                                                        onChange={(e) => newRosterForm.setData('shift_2_id', e.target.value)}
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                                                    >
+                                                        {shifts.map((s) => (
+                                                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                {newRosterForm.data.group_set_preset === 'three_shift_247' && (
+                                                    <div>
+                                                        <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                                            Shift 3 (Night)
+                                                        </label>
+                                                        <select
+                                                            value={newRosterForm.data.shift_3_id}
+                                                            onChange={(e) => newRosterForm.setData('shift_3_id', e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                                                        >
+                                                            {shifts.map((s) => (
+                                                                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <p className="text-[11px] text-slate-400">
+                                                This will automatically generate rotating squads attached to this roster. You can enroll team members into squads after creation.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {newRosterForm.data.generation_mode === 'blank' && (
+                                        <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-400">
+                                            A blank roster will be initialized. You can add squads or schedule shifts using the matrix planner anytime.
+                                        </div>
+                                    )}
+
+                                    <div className="pt-3 flex items-center justify-between border-t border-slate-800">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRosterWizardStep(1)}
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                                        >
+                                            <ChevronLeft className="w-3.5 h-3.5" />
+                                            <span>Back</span>
+                                        </button>
+
+                                        {newRosterForm.data.generation_mode === 'direct_pattern' ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setRosterWizardStep(3)}
+                                                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition flex items-center gap-1.5"
+                                            >
+                                                <span>Next: Select Personnel</span>
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="submit"
+                                                disabled={newRosterForm.processing}
+                                                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                            >
+                                                {newRosterForm.processing ? 'Creating Roster...' : 'Create Roster Now'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* STEP 3: Target Personnel (Only for Direct Pattern) */}
+                            {rosterWizardStep === 3 && (
+                                <div className="space-y-3">
+                                    <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                            <div className="relative flex-1 sm:w-56">
+                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                                <input
+                                                    type="text"
+                                                    value={wizardEmpSearch}
+                                                    onChange={(e) => setWizardEmpSearch(e.target.value)}
+                                                    placeholder="Search staff..."
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500"
+                                                />
+                                            </div>
+                                            <select
+                                                value={wizardDeptFilter}
+                                                onChange={(e) => setWizardDeptFilter(e.target.value)}
+                                                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300"
+                                            >
+                                                <option value="all">All Departments</option>
+                                                {departments.map((d) => (
+                                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const pool = wizardEmployeePool
+                                                        .filter((e) => {
+                                                            const matchesSearch = e.full_name.toLowerCase().includes(wizardEmpSearch.toLowerCase()) ||
+                                                                e.emp_no.toLowerCase().includes(wizardEmpSearch.toLowerCase());
+                                                            const matchesDept = wizardDeptFilter === 'all' || e.department_id === wizardDeptFilter;
+                                                            return matchesSearch && matchesDept;
+                                                        })
+                                                        .map((e) => e.id);
+                                                    newRosterForm.setData('employee_ids', Array.from(new Set([...newRosterForm.data.employee_ids, ...pool])));
+                                                }}
+                                                className="text-indigo-400 hover:text-indigo-300 font-medium"
+                                            >
+                                                Select Visible
+                                            </button>
+                                            <span className="text-slate-600">|</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => newRosterForm.setData('employee_ids', [])}
+                                                className="text-slate-400 hover:text-white"
+                                            >
+                                                Clear All
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Staff Checkbox List */}
+                                    <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-60 overflow-y-auto divide-y divide-slate-900 p-1">
+                                        {wizardEmployeePool
+                                            .filter((emp) => {
+                                                const matchesSearch =
+                                                    emp.full_name.toLowerCase().includes(wizardEmpSearch.toLowerCase()) ||
+                                                    emp.emp_no.toLowerCase().includes(wizardEmpSearch.toLowerCase());
+                                                const matchesDept =
+                                                    wizardDeptFilter === 'all' || emp.department_id === wizardDeptFilter;
+                                                return matchesSearch && matchesDept;
+                                            })
+                                            .map((emp) => {
+                                                const isSelected = newRosterForm.data.employee_ids.includes(emp.id);
+                                                return (
+                                                    <div
+                                                        key={emp.id}
+                                                        onClick={() => {
+                                                            const next = isSelected
+                                                                ? newRosterForm.data.employee_ids.filter((id) => id !== emp.id)
+                                                                : [...newRosterForm.data.employee_ids, emp.id];
+                                                            newRosterForm.setData('employee_ids', next);
+                                                        }}
+                                                        className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                            isSelected ? 'bg-indigo-600/15' : 'hover:bg-slate-900/60'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5">
+                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition ${
+                                                                isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                            }`}>
+                                                                {isSelected && <Check className="w-3 h-3" />}
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-xs text-white block">
+                                                                    {emp.full_name}
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                                    {emp.emp_no} &bull; {emp.department_name}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        {emp.designation_title && (
+                                                            <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                                                {emp.designation_title}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+
+                                    <div className="pt-3 flex items-center justify-between border-t border-slate-800">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRosterWizardStep(2)}
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                                        >
+                                            <ChevronLeft className="w-3.5 h-3.5" />
+                                            <span>Back</span>
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={newRosterForm.processing || newRosterForm.data.employee_ids.length === 0}
+                                            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-40"
+                                        >
+                                            {newRosterForm.processing
+                                                ? 'Generating Shifts...'
+                                                : `Create & Generate (${newRosterForm.data.employee_ids.length} Staff)`}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </form>
                     </div>
                 </div>
@@ -1657,6 +2194,360 @@ export default function Index({
                                     className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
                                 >
                                     {swapForm.processing ? 'Swapping...' : 'Execute Shift Swap'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 6: Create New Squad */}
+            {isNewSquadModalOpen && active_roster && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto">
+                        <button
+                            onClick={() => setIsNewSquadModalOpen(false)}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Team Group Management
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Add Squad to {active_roster.name}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Create a rotating workforce squad, link its rotation pattern, and enroll members.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleNewSquadSubmit} className="space-y-3.5">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Squad Name *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        required
+                                        value={newSquadForm.data.name}
+                                        onChange={(e) => newSquadForm.setData('name', e.target.value)}
+                                        placeholder="e.g. Group Alpha / Morning"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Squad Code
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newSquadForm.data.code}
+                                        onChange={(e) => newSquadForm.setData('code', e.target.value)}
+                                        placeholder="e.g. SQD-A"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Squad Color Badge
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'].map((color) => (
+                                        <button
+                                            key={color}
+                                            type="button"
+                                            onClick={() => newSquadForm.setData('color', color)}
+                                            className={`w-6 h-6 rounded-full border-2 transition ${
+                                                newSquadForm.data.color === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+                                            }`}
+                                            style={{ backgroundColor: color }}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Assigned Rotation Pattern
+                                </label>
+                                <select
+                                    value={newSquadForm.data.roster_pattern_id}
+                                    onChange={(e) => newSquadForm.setData('roster_pattern_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                >
+                                    <option value="">-- No Rotation Pattern (Manual Assign) --</option>
+                                    {patterns.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name} ({p.cycle_length_days}d cycle)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Description / Responsibilities
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newSquadForm.data.description}
+                                    onChange={(e) => newSquadForm.setData('description', e.target.value)}
+                                    placeholder="Operational notes, primary tasks..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                                />
+                            </div>
+
+                            {/* Member Enrollment Section */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="block text-xs font-semibold text-slate-300">
+                                        Enroll Members ({newSquadForm.data.employee_ids.length} Selected)
+                                    </label>
+                                    <span className="text-[10px] text-slate-400">Optional</span>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={squadEmpSearch}
+                                    onChange={(e) => setSquadEmpSearch(e.target.value)}
+                                    placeholder="Search staff to enroll..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 mb-2"
+                                />
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-40 overflow-y-auto divide-y divide-slate-900 p-1">
+                                    {available_employees
+                                        .filter((emp) =>
+                                            emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
+                                            emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase())
+                                        )
+                                        .map((emp) => {
+                                            const isSelected = newSquadForm.data.employee_ids.includes(emp.id);
+                                            return (
+                                                <div
+                                                    key={emp.id}
+                                                    onClick={() => {
+                                                        const next = isSelected
+                                                            ? newSquadForm.data.employee_ids.filter((id) => id !== emp.id)
+                                                            : [...newSquadForm.data.employee_ids, emp.id];
+                                                        newSquadForm.setData('employee_ids', next);
+                                                    }}
+                                                    className={`p-2 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                        isSelected ? 'bg-indigo-600/15' : 'hover:bg-slate-900/60'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
+                                                            isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                        }`}>
+                                                            {isSelected && <Check className="w-2.5 h-2.5" />}
+                                                        </div>
+                                                        <span className="font-medium text-xs text-white">
+                                                            {emp.full_name}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 font-mono">
+                                                            ({emp.emp_no})
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsNewSquadModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={newSquadForm.processing || !newSquadForm.data.name}
+                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                >
+                                    {newSquadForm.processing ? 'Creating...' : 'Create Squad'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 7: Quick Pattern / Bulk Fill Modal */}
+            {isQuickPatternModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto">
+                        <button
+                            onClick={() => setIsQuickPatternModalOpen(false)}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                Fast Schedule Ingestion
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Apply Shift Pattern to Personnel
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Choose a rotation pattern and apply it to target employees across the month.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleQuickPatternSubmit} className="space-y-3.5">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Pattern to Apply *
+                                </label>
+                                <select
+                                    required
+                                    value={quickPatternForm.data.pattern_id}
+                                    onChange={(e) => quickPatternForm.setData('pattern_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                >
+                                    {patterns.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name} ({p.pattern_type.toUpperCase()}, {p.cycle_length_days}d cycle)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Start Date *
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={quickPatternForm.data.start_date}
+                                        onChange={(e) => quickPatternForm.setData('start_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        End Date *
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={quickPatternForm.data.end_date}
+                                        onChange={(e) => quickPatternForm.setData('end_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-1">
+                                <input
+                                    type="checkbox"
+                                    id="preserveLeavesQuick"
+                                    checked={quickPatternForm.data.preserve_leaves}
+                                    onChange={(e) => quickPatternForm.setData('preserve_leaves', e.target.checked)}
+                                    className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                                />
+                                <label htmlFor="preserveLeavesQuick" className="text-xs text-slate-300 cursor-pointer">
+                                    Preserve approved leaves (never overwrite with shifts)
+                                </label>
+                            </div>
+
+                            {/* Target Staff Selector */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="block text-xs font-semibold text-slate-300">
+                                        Target Staff ({quickPatternForm.data.employee_ids.length} Selected)
+                                    </label>
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                        <button
+                                            type="button"
+                                            onClick={() => quickPatternForm.setData('employee_ids', matrix.map(r => r.employee.id))}
+                                            className="text-indigo-400 hover:text-indigo-300"
+                                        >
+                                            Select All Visible
+                                        </button>
+                                        <span className="text-slate-600">|</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => quickPatternForm.setData('employee_ids', [])}
+                                            className="text-slate-400 hover:text-white"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <input
+                                    type="text"
+                                    value={quickPatternEmpSearch}
+                                    onChange={(e) => setQuickPatternEmpSearch(e.target.value)}
+                                    placeholder="Search roster staff..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 mb-2"
+                                />
+
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-40 overflow-y-auto divide-y divide-slate-900 p-1">
+                                    {matrix
+                                        .filter((r) =>
+                                            r.employee.full_name.toLowerCase().includes(quickPatternEmpSearch.toLowerCase()) ||
+                                            r.employee.emp_no.toLowerCase().includes(quickPatternEmpSearch.toLowerCase())
+                                        )
+                                        .map((r) => {
+                                            const isSelected = quickPatternForm.data.employee_ids.includes(r.employee.id);
+                                            return (
+                                                <div
+                                                    key={r.employee.id}
+                                                    onClick={() => {
+                                                        const next = isSelected
+                                                            ? quickPatternForm.data.employee_ids.filter((id) => id !== r.employee.id)
+                                                            : [...quickPatternForm.data.employee_ids, r.employee.id];
+                                                        quickPatternForm.setData('employee_ids', next);
+                                                    }}
+                                                    className={`p-2 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                        isSelected ? 'bg-indigo-600/15' : 'hover:bg-slate-900/60'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
+                                                            isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                        }`}>
+                                                            {isSelected && <Check className="w-2.5 h-2.5" />}
+                                                        </div>
+                                                        <span className="font-medium text-xs text-white">
+                                                            {r.employee.full_name}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 font-mono">
+                                                            ({r.employee.emp_no})
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsQuickPatternModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={quickPatternForm.processing || quickPatternForm.data.employee_ids.length === 0}
+                                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                >
+                                    {quickPatternForm.processing ? 'Applying...' : `Apply Pattern (${quickPatternForm.data.employee_ids.length} Staff)`}
                                 </button>
                             </div>
                         </form>
