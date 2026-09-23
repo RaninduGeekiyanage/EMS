@@ -47,10 +47,11 @@ final class RosterService
             ->where('status', 'locked')
             ->exists();
 
-        // 0. Query all Rosters for the switcher
+        // 0. Query all active (non-archived) Rosters for the switcher
         $allRosters = Roster::query()
             ->with(['department:id,name,code', 'publisher:id,name'])
             ->withCount(['groups', 'entries'])
+            ->where('status', '!=', 'archived')
             ->orderBy('start_date', 'desc')
             ->get();
 
@@ -74,7 +75,7 @@ final class RosterService
                     $q->select('employees.id', 'emp_no', 'full_name', 'department_id')
                         ->with('department:id,name');
                 },
-            ])->forMonth($year, $month)->first() ?? $allRosters->first();
+            ])->where('status', '!=', 'archived')->forMonth($year, $month)->first() ?? $allRosters->first();
         }
 
         $squads = $activeRoster ? $activeRoster->groups : collect();
@@ -114,26 +115,26 @@ final class RosterService
             ];
         }
 
-        // 2. Query Employees and map squad membership
+        // 2. Query Employees and map squad membership without hiding non-squad employees
         $employees = collect();
         $employeeSquadMap = [];
 
         if ($activeRoster && $squads->isNotEmpty()) {
             foreach ($squads as $sq) {
-                if ($squadId !== null && $squadId !== '' && $squadId !== 'all' && $sq->id !== $squadId) {
-                    continue;
-                }
                 foreach ($sq->employees as $emp) {
-                    if (! isset($employeeSquadMap[$emp->id])) {
-                        $employeeSquadMap[$emp->id] = $sq;
-                        $employees->push($emp);
-                    }
+                    $employeeSquadMap[$emp->id] = $sq;
                 }
             }
         }
 
-        // Fall back to department or active employee list if active roster has no enrolled members yet
-        if ($employees->isEmpty()) {
+        // If explicitly filtering by a specific squad
+        if ($squadId !== null && $squadId !== '' && $squadId !== 'all') {
+            $targetSquad = $squads->firstWhere('id', $squadId);
+            if ($targetSquad) {
+                $employees = $targetSquad->employees;
+            }
+        } else {
+            // Load all department (or company) active employees so no one is hidden
             $employeeQuery = Employee::query()
                 ->select('id', 'emp_no', 'full_name', 'department_id')
                 ->with(['department:id,name'])
@@ -808,11 +809,13 @@ final class RosterService
         string $scheduleType,
         ?string $notes = null,
         string $status = 'published',
-        ?string $overrideReason = null
+        ?string $overrideReason = null,
+        ?string $rosterId = null,
+        ?string $rosterGroupId = null
     ): RosterEntry {
         $this->ensureNotLocked($date);
 
-        return DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason): RosterEntry {
+        return DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason, $rosterId, $rosterGroupId): RosterEntry {
             $entry = RosterEntry::where('employee_id', $employeeId)
                 ->whereDate('roster_date', $date)
                 ->first();
@@ -820,7 +823,19 @@ final class RosterService
             $originalShiftId = $entry ? ($entry->original_shift_id ?? $entry->shift_id) : null;
             $newShiftId = ($scheduleType === 'rest_day' || $scheduleType === 'off') ? null : $shiftId;
 
+            $targetRosterId = $rosterId ?? $entry?->roster_id;
+            $targetGroupId = $rosterGroupId ?? $entry?->roster_group_id;
+
+            if ($targetRosterId === null) {
+                $targetRosterId = Roster::where('start_date', '<=', $date)
+                    ->where('end_date', '>=', $date)
+                    ->where('status', '!=', 'archived')
+                    ->value('id');
+            }
+
             $attributes = [
+                'roster_id' => $targetRosterId,
+                'roster_group_id' => $targetGroupId,
                 'shift_id' => $newShiftId,
                 'schedule_type' => $scheduleType,
                 'status' => $status,
@@ -962,37 +977,6 @@ final class RosterService
                         'roster_id' => $roster->id,
                     ]);
                 }
-            } elseif ($generationMode === 'group_set' && ! empty($data['group_set_preset'])) {
-                $groupSetData = [
-                    'preset_type' => $data['group_set_preset'],
-                    'name_prefix' => $roster->name,
-                    'code_prefix' => $roster->code,
-                    'start_date' => $startDate->toDateString(),
-                    'end_date' => $endDate->toDateString(),
-                    'shift_1_id' => $data['shift_1_id'] ?? null,
-                    'shift_2_id' => $data['shift_2_id'] ?? null,
-                    'shift_3_id' => $data['shift_3_id'] ?? null,
-                ];
-
-                $patterns = $this->createGroupSet($groupSetData);
-                $colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
-
-                foreach ($patterns as $index => $pat) {
-                    $squad = RosterGroup::create([
-                        'roster_id' => $roster->id,
-                        'roster_pattern_id' => $pat->id,
-                        'name' => $pat->name,
-                        'code' => $pat->code,
-                        'color' => $colors[$index % count($colors)],
-                        'description' => "Rotating squad card generated for {$roster->name}",
-                    ]);
-
-                    if (! empty($data['squad_assignments'][$index])) {
-                        $this->enrollEmployees($squad, (array) $data['squad_assignments'][$index]);
-                    }
-                }
-
-                $this->syncRosterDates($roster);
             }
 
             return $roster;
@@ -1032,11 +1016,16 @@ final class RosterService
 
     /**
      * Delete a Named Roster and its associated draft entries.
+     * Guarded: Rosters that have been published at least once cannot be deleted to protect historical attendance.
      */
     public function deleteRoster(Roster $roster): bool
     {
         if ($roster->status === 'locked') {
             throw new DomainException("Roster '{$roster->name}' is locked and cannot be deleted.");
+        }
+
+        if ($roster->published_at !== null) {
+            throw new DomainException("Roster '{$roster->name}' has previously been published and cannot be deleted. Published rosters must be archived to protect historical attendance records and biometric integrity.");
         }
 
         $this->ensureNotLockedInRange($roster->start_date, $roster->end_date);
@@ -1050,7 +1039,27 @@ final class RosterService
     }
 
     /**
+     * Archive an official roster to withdraw from active planning while preserving historical biometric audit trails.
+     */
+    public function archiveRoster(Roster $roster): void
+    {
+        if ($roster->status === 'locked') {
+            throw new DomainException("Roster '{$roster->name}' is locked and cannot be archived.");
+        }
+
+        $this->ensureNotLockedInRange($roster->start_date, $roster->end_date);
+
+        DB::transaction(function () use ($roster): void {
+            $roster->update([
+                'status' => 'archived',
+                'updated_by' => Auth::id(),
+            ]);
+        });
+    }
+
+    /**
      * Publish or unpublish a Named Roster.
+     * When reverted to draft, published_at is intentionally preserved so the roster cannot be deleted.
      */
     public function publishNamedRoster(Roster $roster, bool $publish = true): void
     {
@@ -1065,8 +1074,8 @@ final class RosterService
 
             $roster->update([
                 'status' => $newStatus,
-                'published_at' => $publish ? now() : null,
-                'published_by' => $publish ? Auth::id() : null,
+                'published_at' => $publish ? ($roster->published_at ?? now()) : $roster->published_at,
+                'published_by' => $publish ? ($roster->published_by ?? Auth::id()) : $roster->published_by,
                 'updated_by' => Auth::id(),
             ]);
 
@@ -1215,7 +1224,7 @@ final class RosterService
         $end = Carbon::parse($endDate)->toDateString();
 
         // 1. Find all employee IDs already enrolled in another active roster during overlapping dates
-        $excludedEmpQuery = RosterGroupMember::query()
+        $squadEmpIds = RosterGroupMember::query()
             ->whereHas('group.roster', function ($q) use ($start, $end, $excludeRosterId) {
                 $q->where('start_date', '<=', $end)
                     ->where('end_date', '>=', $start)
@@ -1223,9 +1232,21 @@ final class RosterService
                 if ($excludeRosterId !== null) {
                     $q->where('id', '!=', $excludeRosterId);
                 }
-            });
+            })
+            ->pluck('employee_id');
 
-        $excludedEmpIds = $excludedEmpQuery->pluck('employee_id')->unique()->all();
+        $entryEmpIds = RosterEntry::query()
+            ->whereBetween('roster_date', [$start, $end])
+            ->whereNotNull('roster_id')
+            ->whereHas('roster', function ($q) use ($start, $end, $excludeRosterId) {
+                $q->where('status', '!=', 'archived');
+                if ($excludeRosterId !== null) {
+                    $q->where('id', '!=', $excludeRosterId);
+                }
+            })
+            ->pluck('employee_id');
+
+        $excludedEmpIds = $squadEmpIds->concat($entryEmpIds)->unique()->all();
 
         // 2. Query active employees
         $query = Employee::query()
@@ -1286,9 +1307,19 @@ final class RosterService
                     })
                     ->exists();
 
-                if ($inOtherRoster) {
+                $inOtherRosterEntries = RosterEntry::query()
+                    ->where('employee_id', $empId)
+                    ->whereBetween('roster_date', [$startDate, $endDate])
+                    ->whereNotNull('roster_id')
+                    ->where('roster_id', '!=', $roster->id)
+                    ->whereHas('roster', function ($q) {
+                        $q->where('status', '!=', 'archived');
+                    })
+                    ->exists();
+
+                if ($inOtherRoster || $inOtherRosterEntries) {
                     $emp = Employee::find($empId);
-                    throw new DomainException("Employee '{$emp?->full_name}' ({$emp?->emp_no}) is already enrolled in another active roster during this period.");
+                    throw new DomainException("Employee '{$emp?->full_name}' ({$emp?->emp_no}) is already assigned to another active roster during this period.");
                 }
 
                 RosterGroupMember::updateOrCreate(
@@ -1516,128 +1547,7 @@ final class RosterService
     }
 
     /**
-     * Create an entire Shift Group Set (Option 2 Industry Standard).
-     *
-     * @param  array<string, mixed>  $data
-     * @return array<int, RosterPattern>
-     */
-    public function createGroupSet(array $data): array
-    {
-        return DB::transaction(function () use ($data): array {
-            $presetType = $data['preset_type']; // 'three_shift_247', 'two_shift', 'general_weekly'
-            $namePrefix = trim($data['name_prefix']);
-            $codePrefix = strtoupper(trim($data['code_prefix']));
-            $startDate = $data['start_date'] ?? Carbon::now()->startOfMonth()->toDateString();
-            $endDate = $data['end_date'] ?? Carbon::now()->addYear()->endOfMonth()->toDateString();
-            $shift1Id = $data['shift_1_id'] ?? null;
-            $shift2Id = $data['shift_2_id'] ?? null;
-            $shift3Id = $data['shift_3_id'] ?? null;
 
-            $created = [];
-
-            if ($presetType === 'three_shift_247') {
-                // 4 Groups (A, B, C, D) - Cycle length 4
-                $letters = ['A', 'B', 'C', 'D'];
-                $baseCycle = [
-                    ['shift_id' => $shift1Id, 'is_rest_day' => false],
-                    ['shift_id' => $shift2Id, 'is_rest_day' => false],
-                    ['shift_id' => $shift3Id, 'is_rest_day' => false],
-                    ['shift_id' => '', 'is_rest_day' => true],
-                ];
-
-                for ($i = 0; $i < 4; $i++) {
-                    $letter = $letters[$i];
-                    $rotated = [];
-                    for ($stepIdx = 0; $stepIdx < 4; $stepIdx++) {
-                        $sourceItem = $baseCycle[($stepIdx + $i) % 4];
-                        $rotated[] = [
-                            'step' => $stepIdx + 1,
-                            'shift_id' => $sourceItem['shift_id'],
-                            'is_rest_day' => $sourceItem['is_rest_day'],
-                        ];
-                    }
-
-                    $startLabel = match ($i) {
-                        0 => 'Morn Start',
-                        1 => 'Eve Start',
-                        2 => 'Night Start',
-                        3 => 'Off Start',
-                    };
-
-                    $created[] = RosterPattern::create([
-                        'name' => "{$namePrefix} - Group {$letter} ({$startLabel})",
-                        'code' => "{$codePrefix}-GRP-{$letter}",
-                        'pattern_type' => 'cyclical',
-                        'start_date' => $startDate,
-                        'end_date' => $endDate,
-                        'cycle_length_days' => 4,
-                        'pattern_data' => ['steps' => $rotated],
-                        'is_active' => true,
-                    ]);
-                }
-            } elseif ($presetType === 'two_shift') {
-                // 3 Groups (A, B, C) - Cycle length 3
-                $letters = ['A', 'B', 'C'];
-                $baseCycle = [
-                    ['shift_id' => $shift1Id, 'is_rest_day' => false],
-                    ['shift_id' => $shift2Id, 'is_rest_day' => false],
-                    ['shift_id' => '', 'is_rest_day' => true],
-                ];
-
-                for ($i = 0; $i < 3; $i++) {
-                    $letter = $letters[$i];
-                    $rotated = [];
-                    for ($stepIdx = 0; $stepIdx < 3; $stepIdx++) {
-                        $sourceItem = $baseCycle[($stepIdx + $i) % 3];
-                        $rotated[] = [
-                            'step' => $stepIdx + 1,
-                            'shift_id' => $sourceItem['shift_id'],
-                            'is_rest_day' => $sourceItem['is_rest_day'],
-                        ];
-                    }
-
-                    $startLabel = match ($i) {
-                        0 => 'Shift 1 Start',
-                        1 => 'Shift 2 Start',
-                        2 => 'Off Start',
-                    };
-
-                    $created[] = RosterPattern::create([
-                        'name' => "{$namePrefix} - Group {$letter} ({$startLabel})",
-                        'code' => "{$codePrefix}-GRP-{$letter}",
-                        'pattern_type' => 'cyclical',
-                        'start_date' => $startDate,
-                        'end_date' => $endDate,
-                        'cycle_length_days' => 3,
-                        'pattern_data' => ['steps' => $rotated],
-                        'is_active' => true,
-                    ]);
-                }
-            } elseif ($presetType === 'general_weekly') {
-                // 1 Standard Mon-Fri General Shift template
-                $created[] = RosterPattern::create([
-                    'name' => "{$namePrefix} - General Day (Mon-Fri)",
-                    'code' => "{$codePrefix}-GEN",
-                    'pattern_type' => 'weekly',
-                    'start_date' => $startDate,
-                    'end_date' => $endDate,
-                    'cycle_length_days' => 7,
-                    'pattern_data' => [
-                        ['day' => 0, 'day_name' => 'Mon', 'shift_id' => $shift1Id, 'is_rest_day' => false],
-                        ['day' => 1, 'day_name' => 'Tue', 'shift_id' => $shift1Id, 'is_rest_day' => false],
-                        ['day' => 2, 'day_name' => 'Wed', 'shift_id' => $shift1Id, 'is_rest_day' => false],
-                        ['day' => 3, 'day_name' => 'Thu', 'shift_id' => $shift1Id, 'is_rest_day' => false],
-                        ['day' => 4, 'day_name' => 'Fri', 'shift_id' => $shift1Id, 'is_rest_day' => false],
-                        ['day' => 5, 'day_name' => 'Sat', 'shift_id' => '', 'is_rest_day' => true],
-                        ['day' => 6, 'day_name' => 'Sun', 'shift_id' => '', 'is_rest_day' => true],
-                    ],
-                    'is_active' => true,
-                ]);
-            }
-
-            return $created;
-        });
-    }
 
     /**
      * Automatically generate complementary rotated squad group cards from an existing cyclical pattern.

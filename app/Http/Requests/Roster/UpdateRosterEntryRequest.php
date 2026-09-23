@@ -26,6 +26,8 @@ final class UpdateRosterEntryRequest extends FormRequest
             'notes' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'in:draft,published'],
             'override_reason' => ['nullable', 'string', 'max:100'],
+            'roster_id' => ['nullable', 'string', 'exists:rosters,id'],
+            'roster_group_id' => ['nullable', 'string', 'exists:roster_groups,id'],
         ];
     }
 }

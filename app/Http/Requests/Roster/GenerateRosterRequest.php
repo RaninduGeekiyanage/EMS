@@ -44,6 +44,8 @@ final class GenerateRosterRequest extends FormRequest
             'conflict_mode' => ['nullable', 'string', 'in:overwrite,preserve'],
             'status' => ['nullable', 'string', 'in:draft,published'],
             'preserve_leaves' => ['nullable', 'boolean'],
+            'roster_id' => ['nullable', 'string', 'exists:rosters,id'],
+            'roster_group_id' => ['nullable', 'string', 'exists:roster_groups,id'],
 
             // Daily Mode Config
             'daily_config' => ['nullable', 'array'],

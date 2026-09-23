@@ -7,7 +7,6 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Roster\ClearRosterRequest;
 use App\Http\Requests\Roster\GenerateRosterRequest;
 use App\Http\Requests\Roster\PublishRosterRequest;
-use App\Http\Requests\Roster\SwapRosterRequest;
 use App\Http\Requests\Roster\UpdateRosterEntryRequest;
 use App\Models\Roster;
 use App\Models\RosterGroup;
@@ -98,9 +97,27 @@ final class RosterController extends Controller
      */
     public function destroyRoster(Roster $roster): RedirectResponse
     {
-        $this->rosterService->deleteRoster($roster);
+        try {
+            $this->rosterService->deleteRoster($roster);
 
-        return redirect()->route('roster.index')->with('success', "Roster deleted successfully.");
+            return redirect()->route('roster.index')->with('success', "Roster deleted successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Archive an existing Named Roster.
+     */
+    public function archiveRoster(Roster $roster): RedirectResponse
+    {
+        try {
+            $this->rosterService->archiveRoster($roster);
+
+            return redirect()->route('roster.index')->with('success', "Roster '{$roster->name}' archived successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -108,12 +125,16 @@ final class RosterController extends Controller
      */
     public function publishNamedRoster(Request $request, Roster $roster): RedirectResponse
     {
-        $publish = (bool) $request->input('publish', true);
-        $this->rosterService->publishNamedRoster($roster, $publish);
+        try {
+            $publish = (bool) $request->input('publish', true);
+            $this->rosterService->publishNamedRoster($roster, $publish);
 
-        $action = $publish ? 'published' : 'reverted to draft';
+            $action = $publish ? 'published' : 'reverted to draft';
 
-        return redirect()->back()->with('success', "Roster '{$roster->name}' {$action} successfully.");
+            return redirect()->back()->with('success', "Roster '{$roster->name}' {$action} successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -255,7 +276,9 @@ final class RosterController extends Controller
             $validated['schedule_type'],
             $validated['notes'] ?? null,
             $validated['status'] ?? 'published',
-            $validated['override_reason'] ?? null
+            $validated['override_reason'] ?? null,
+            $validated['roster_id'] ?? null,
+            $validated['roster_group_id'] ?? null
         );
 
         if ($request->wantsJson()) {
@@ -288,23 +311,6 @@ final class RosterController extends Controller
         );
 
         return redirect()->back()->with('success', 'Extended operational duty scheduled successfully.');
-    }
-
-    /**
-     * Atomic shift swap between two employees on a given date.
-     */
-    public function swap(SwapRosterRequest $request): RedirectResponse
-    {
-        $validated = $request->validated();
-
-        $this->rosterService->swapShift(
-            $validated['employee_a_id'],
-            $validated['employee_b_id'],
-            $validated['date'],
-            $request->input('reason')
-        );
-
-        return redirect()->back()->with('success', 'Shifts swapped successfully.');
     }
 
     /**

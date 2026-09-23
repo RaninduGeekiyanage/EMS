@@ -67,33 +67,18 @@ In alignment with world-class Workforce Management (WFM) platforms (e.g. **Deput
 
 ---
 
-### 2.2 Workflow 2: Shift Groups & Rotation Templates (`/roster/patterns`)
+### 2.2 Workflow 2: Shift Patterns & Rotation Templates Library (`/roster/patterns`)
 **Navigation:** `Attendance` $\rightarrow$ `Shift Groups & Patterns` (`/roster/patterns`)
 
-In alignment with Sri Lankan industrial standard (Option 2: Shift Group / Squad Cards):
-Instead of complex mathematical modulo indexing, workforce rotation is managed via **Shift Group Cards** (Group A, Group B, Group C, Group D):
-
-#### Shift Group Planning Formulas:
-$$\text{Number of Rotating Group Cards} = \text{Shifts Per Day} + \text{Number of Daily Offs}$$
-
-1. **3 Shifts + 1 OFF (Continuous 24/7 Operations)**:
-   - Requires **4 Group Cards**: Group A, Group B, Group C, Group D.
-   - Every calendar day guarantees exactly 3 working shifts (Morn, Eve, Night) and 1 resting manager.
-2. **2 Shifts + 1 OFF (Two-Shift Coverage)**:
-   - Requires **3 Group Cards**: Group A, Group B, Group C.
-   - Guarantees 2 active shifts and 1 resting staff member daily.
-3. **General Day Shift (Fixed Office Hours)**:
-   - Requires **1 Weekly Template** (Mon–Fri Day Shift, Sat/Sun OFF), or zero templates via **Permanent Baseline Shift** in `/shifts`.
-
-#### 1-Click Shift Group Set Generator:
-- Click **"⚡ 1-Click Group Set"** in the header.
-- Select the preset model: `3 Shifts + 1 OFF (24/7)`, `2 Shifts + 1 OFF`, or `General Day Shift`.
-- Enter Name Prefix (e.g. "Security Ops") and Code Prefix (e.g. "SEC").
-- Select Shift 1, Shift 2, Shift 3.
-- Click **"Generate Shift Group Set"**: The system creates all 4 complementary rotated squad group cards atomically.
-
-#### Auto-Generate Shifted Groups from Any Card:
-- On any cyclical pattern card, clicking the **"Auto-Generate Shifted Groups"** button automatically derives the remaining $N-1$ complementary rotated groups without human calculation.
+The Patterns page serves strictly as a **reusable template and rotation library**:
+1. **7-Day Weekly Shift Patterns**:
+   - For regular office or plant shifts (e.g., Monday–Friday Day Shift, Saturday Half-Day, Sunday Rest Day).
+2. **Rolling N-Day Cyclical Schemes**:
+   - For continuous industrial rotations (e.g. 4-Days On / 2-Days Off, or Morning $\rightarrow$ Evening $\rightarrow$ Night $\rightarrow$ Rest).
+3. **Auto-Generate Complementary Squad Templates**:
+   - From any base cyclical card (e.g. 4-day rotation), clicking **"Generate Complementary Squad Templates"** automatically derives the remaining $N-1$ phase-shifted rotation patterns (Squad B, C, D) without manual entry.
+4. **Single Source of Assignment**:
+   - Roster assignment functions are intentionally excluded from the template library to prevent duplication. All staff enrollment and roster generation occur natively in the Duty Roster Cockpit (`/roster`).
 
 ---
 
@@ -101,22 +86,27 @@ $$\text{Number of Rotating Group Cards} = \text{Shifts Per Day} + \text{Number o
 
 The system supports two complementary assignment models depending on operational intent:
 
-#### Model A: Assign Shift Group to Employees (Bulk or Individual)
-**Executed from:**
-- **Shift Groups & Patterns Screen (`/roster/patterns`)**:
-  1. Click **"Assign Group Staff"** on any Group card (e.g., `Group A`).
-  2. Select target date range (`Start Date` and `End Date`).
-  3. Filter employees by Department or Designation, or use the real-time search box.
-  4. Use the **"Select All Visible"** button or individual checkboxes to choose staff members in bulk.
-  5. Toggle **"Preserve Approved Leaves"** (defaults to active).
-  6. Click **"Assign Roster to X Personnel"**. The backend invokes `RosterService::generateRoster` with a 250-row chunked database `upsert`.
-- **Duty Roster Planner (`/roster`)**:
-  1. Click **"Generate Roster"**.
-  2. Choose **"Apply Saved Template"** and select the Shift Group from the dropdown.
-  3. Under **Target Personnel Scope**, select **"All Personnel"**, **"By Department"**, or **"Specific Staff"** (with search, "Select Visible", and individual check selections).
-  4. Click **"Generate Roster"**.
+#### Model A: Operational Duty Roster Cockpit (`/roster`)
+All operational roster scheduling is performed through the unified Master Cockpit:
+1. **Roster Creation Wizard**:
+   - Click **"+ New Roster"**.
+   - **Step 1: Header Definition**: Set Name, Code, Target Department, and Month/Date range.
+   - **Step 2: Strategy**:
+     - *Direct Pattern*: Apply a pattern template directly to selected department staff.
+     - *Blank Roster Shell*: Initialize an empty container for manual drag-and-drop or squad attachment.
+   - **Step 3: Staff Enrollment**: Filter by department, search by name, or select personnel (with single-active-roster exclusivity enforced).
+2. **Squad Attachment & 1-Click Date Sync**:
+   - Within an active roster, click **"+ Add Squad"** to attach a squad and pattern.
+   - Click **"Sync Dates"** to re-evaluate rotation rules over the month while preserving supervisor overrides.
+3. **Quick Apply Pattern to Existing Roster**:
+   - Click **"Apply Pattern"** to mass-assign a rotation formula to any subset of visible personnel on the fly.
+4. **Lifecycle & Biometric Safeguards**:
+   - **Discard Draft**: Remove pure draft rosters that were never published.
+   - **Archive Roster**: Retire published rosters once the period concludes (preserving immutable biometric and payroll historical records).
+5. **Shift Swaps Governance**:
+   - Centralized at `/roster/shift-swaps` with formal multi-step approval, turnaround safety checks, and audit logging.
 
-#### Model B: Assign Permanent Baseline Shift to Employees (Bulk or Individual)
+#### Model B: Permanent Baseline Shift Assignments (`/shifts`)
 **Executed from:** `Attendance` $\rightarrow$ `Shifts & Schedules` (`/shifts`) $\rightarrow$ **"Permanent Baseline Assignments"** tab.
 
 1. Click **"+ Assign Baseline Shift"**.

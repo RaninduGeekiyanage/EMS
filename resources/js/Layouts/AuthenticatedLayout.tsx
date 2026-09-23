@@ -99,16 +99,22 @@ export default function AuthenticatedLayout({
         router.post('/admin/impersonate/exit');
     };
 
-    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    const { url } = usePage();
+    const currentPath = (url || (typeof window !== 'undefined' ? window.location.pathname : '')).split('?')[0];
 
     const isLinkActive = (path: string) => {
-        if (path === '/dashboard') {
-            return currentPath === '/dashboard';
+        if (path === '/dashboard' || path === '/admin/dashboard') {
+            return currentPath === path;
         }
-        if (path === '/admin/dashboard') {
-            return currentPath === '/admin/dashboard';
+        if (path === '/roster') {
+            return (
+                currentPath === '/roster' ||
+                (currentPath.startsWith('/roster/') &&
+                    !currentPath.startsWith('/roster/patterns') &&
+                    !currentPath.startsWith('/roster/shift-swaps'))
+            );
         }
-        return currentPath.startsWith(path);
+        return currentPath === path || currentPath.startsWith(`${path}/`);
     };
 
     const navItemClass = (path: string) => `

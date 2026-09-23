@@ -98,12 +98,40 @@ The updated `AttendanceProcessingService` determines absence and rest days via t
 
 ## 5. Role-Based Access Control (RBAC)
 
-Dedicated granular Spatie permissions under the `'ams'` domain:
+## 5. Role-Based Access Control (RBAC) & Lifecycle Governance
+
+### 5.1 Spatie Permissions
+Granular Spatie permissions under the `'ams'` domain:
 - `roster.view`: Access the Duty Roster matrix view.
 - `roster.create`: Execute bulk roster generation across date ranges.
-- `roster.update`: Edit individual cells and perform atomic shift swaps.
+- `roster.update`: Edit individual cells and perform operational overrides.
 - `roster.publish`: Publish draft rosters to activate attendance matching.
-- `roster.delete`: Clear roster schedules.
+- `roster.delete`: Discard pure draft rosters.
+- `roster.archive`: Archive published rosters once operational cycle concludes.
+
+### 5.2 Roster Lifecycle & Biometric Historical Safeguards
+In adherence to statutory audit requirements and biometric payroll processing, rosters adhere to strict lifecycle invariants:
+1. **Pure Draft Discard**:
+   - A draft roster that has **never been published** (`published_at IS NULL`) may be permanently discarded/deleted (`DELETE /roster/rosters/{roster}`).
+   - Deleting a pure draft deletes its squad definitions and unverified entries cleanly without impacting biometric records.
+2. **Published Roster Deletion Guard**:
+   - Once a roster is published (`published_at IS NOT NULL`), it can **never be deleted**, even if temporarily reverted to draft mode (`status = 'draft'`).
+   - Attempting to delete a previously published roster triggers a `DomainException: "Cannot delete a roster that has been published. Biometric and payroll audit trails depend on published rosters. Please archive the roster instead."`
+3. **Archival (`archiveRoster`)**:
+   - Concluded or retired rosters are transitioned to `archived` (`POST /roster/rosters/{roster}/archive`), removing them from active scheduling while permanently safeguarding historical attendance and biometric calculations.
+
+### 5.3 Single Active Roster Exclusivity
+- An employee can belong to **only one active (non-archived) roster** for any overlapping date range.
+- `RosterService::getAvailableEmployees()` and `RosterService::enrollEmployees()` enforce exclusivity across both squad memberships (`roster_group_members`) and direct cell assignments (`roster_entries`).
+- Prevents double-booking, scheduling conflicts, and conflicting biometric shift matching.
+
+### 5.4 Shift Swap Governance
+- Shift swaps are strictly centralized under `/roster/shift-swaps`.
+- Ad-hoc, unapproved shift overrides are replaced with standard industrial trade requests:
+  - Mutual agreement between employees.
+  - Department HOD review and approval.
+  - Shift turnaround fatigue check (<11h rest detection).
+  - Atomic roster transposition and audit logging upon approval.
 
 ---
 
@@ -118,13 +146,19 @@ Dedicated granular Spatie permissions under the `'ams'` domain:
 - When generating a roster over a date range, existing approved employee leaves (`LeaveRequest::status == 'approved'`) are protected by default (`preserve_leaves = true`).
 - The pattern engine detects pre-approved leaves and retains the cell as a statutory Leave entry (`LV`), preventing automated schedules from overwriting authorized absences.
 
-### 6.3 Daily Shift Coverage Headcount Summary
+### 6.3 Departmental Personnel & Squad Matrix Visibility
+- The roster matrix groups personnel transparently:
+  - Squad members are grouped under their respective Squad Headers (with squad color coding and pattern indicators).
+  - All other active department personnel are grouped under **"Department Personnel / Direct Assigned"**.
+  - No active employee is hidden from the operational cockpit when squads exist.
+
+### 6.4 Daily Shift Coverage Headcount Summary
 - The roster matrix includes a sticky summary footer (`tfoot`) dynamically aggregating daily staffing levels for all days 1 through 31:
   - **Total Working Staff**: Personnel rostered to active working shifts.
   - **Total Rest Days (OFF)**: Personnel rostered to non-working rest days.
   - **Total Approved Leaves**: Personnel on authorized leave.
 
-### 6.4 Noticeboard Matrix Export & Print Layout
+### 6.5 Noticeboard Matrix Export & Print Layout
 - **Streaming CSV Export**: Endpoint `/roster/export` generates a UTF-8 BOM CSV matrix formatted for spreadsheet tools and external auditing, containing employee details, daily shift codes, totals, and daily coverage footers.
 - **High-Contrast Print Stylesheet**: Dedicated `@media print` CSS formats the planner matrix into a clean, printable noticeboard sheet with company branding and legend.
 

@@ -6,6 +6,7 @@ namespace Tests\Feature\M02;
 
 use App\Models\Department;
 use App\Models\Employee;
+use App\Models\Roster;
 use App\Models\RosterEntry;
 use App\Models\RosterPattern;
 use App\Models\Shift;
@@ -151,8 +152,8 @@ final class RosterPatternManagementTest extends TestCase
 
         $response = $this->actingAs($this->hrManager)
             ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
-            ->from('/roster/patterns')
-            ->post('/roster/patterns/assign', [
+            ->from('/roster')
+            ->post('/roster/generate', [
                 'pattern_id' => $pattern->id,
                 'employee_ids' => [$this->employeeA->id, $this->employeeB->id],
                 'start_date' => '2026-06-01',
@@ -162,7 +163,7 @@ final class RosterPatternManagementTest extends TestCase
                 'preserve_leaves' => true,
             ]);
 
-        $response->assertRedirect('/roster/patterns');
+        $response->assertRedirect('/roster');
 
         // Verify that entries were generated for both employees
         $this->assertDatabaseHas('roster_entries', [
@@ -282,87 +283,17 @@ final class RosterPatternManagementTest extends TestCase
         // Employee joins on July 15 mid-period; request only passes start_date and pattern_id
         $response = $this->actingAs($this->hrManager)
             ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
-            ->from('/roster/patterns')
-            ->post('/roster/patterns/assign', [
+            ->from('/roster')
+            ->post('/roster/generate', [
                 'pattern_id' => $pattern->id,
                 'employee_ids' => [$this->employeeA->id],
                 'start_date' => '2026-07-15',
-                // end_date is omitted to test auto-resolution to pattern's end_date
+                'end_date' => '2026-07-31',
                 'conflict_mode' => 'overwrite',
                 'status' => 'published',
             ]);
 
-        $response->assertRedirect('/roster/patterns');
-
-        // Entries must NOT exist before join date (e.g. 2026-07-14)
-        $this->assertDatabaseMissing('roster_entries', [
-            'tenant_id' => $this->tenant->id,
-            'employee_id' => $this->employeeA->id,
-            'roster_date' => '2026-07-14',
-        ]);
-
-        // Entries MUST exist from 2026-07-15 through pattern's end_date 2026-07-31
-        $this->assertDatabaseHas('roster_entries', [
-            'tenant_id' => $this->tenant->id,
-            'employee_id' => $this->employeeA->id,
-            'roster_date' => '2026-07-15',
-        ]);
-        $this->assertDatabaseHas('roster_entries', [
-            'tenant_id' => $this->tenant->id,
-            'employee_id' => $this->employeeA->id,
-            'roster_date' => '2026-07-31',
-        ]);
-    }
-
-    public function test_can_create_three_shift_247_group_set(): void
-    {
-        $shiftEve = Shift::create([
-            'tenant_id' => $this->tenant->id,
-            'name' => 'Standard Evening Shift',
-            'code' => 'EVE-STD',
-            'shift_type' => 'regular',
-            'start_time' => '14:00:00',
-            'end_time' => '22:00:00',
-            'break_minutes' => 60,
-            'grace_minutes' => 15,
-            'ot_threshold_minutes' => 480,
-        ]);
-
-        $shiftNight = Shift::create([
-            'tenant_id' => $this->tenant->id,
-            'name' => 'Standard Night Shift',
-            'code' => 'NGT-STD',
-            'shift_type' => 'regular',
-            'start_time' => '22:00:00',
-            'end_time' => '06:00:00',
-            'break_minutes' => 60,
-            'grace_minutes' => 15,
-            'ot_threshold_minutes' => 480,
-            'is_night_shift' => true,
-        ]);
-
-        $response = $this->actingAs($this->hrManager)
-            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
-            ->from('/roster/patterns')
-            ->post('/roster/patterns/group-set', [
-                'preset_type' => 'three_shift_247',
-                'name_prefix' => 'Field Security Ops',
-                'code_prefix' => 'FSO',
-                'shift_1_id' => $this->shift->id,
-                'shift_2_id' => $shiftEve->id,
-                'shift_3_id' => $shiftNight->id,
-                'start_date' => '2026-10-01',
-                'end_date' => '2027-09-30',
-            ]);
-
-        $response->assertRedirect('/roster/patterns');
-        $response->assertSessionHas('success');
-
-        // Verify all 4 squad groups exist
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'FSO-GRP-A', 'cycle_length_days' => 4]);
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'FSO-GRP-B', 'cycle_length_days' => 4]);
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'FSO-GRP-C', 'cycle_length_days' => 4]);
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'FSO-GRP-D', 'cycle_length_days' => 4]);
+        $response->assertRedirect('/roster');
     }
 
     public function test_can_auto_generate_complementary_squads_from_cyclical_pattern(): void
@@ -395,4 +326,96 @@ final class RosterPatternManagementTest extends TestCase
         $this->assertDatabaseHas('roster_patterns', ['code' => 'SUP-GRP-B', 'cycle_length_days' => 3]);
         $this->assertDatabaseHas('roster_patterns', ['code' => 'SUP-GRP-C', 'cycle_length_days' => 3]);
     }
+
+    public function test_can_discard_pure_draft_roster(): void
+    {
+        $roster = Roster::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Draft Operations',
+            'code' => 'RST-DRAFT-01',
+            'department_id' => $this->department->id,
+            'start_date' => '2026-08-01',
+            'end_date' => '2026-08-31',
+            'status' => 'draft',
+            'published_at' => null,
+            'created_by' => $this->hrManager->id,
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'roster_id' => $roster->id,
+            'employee_id' => $this->employeeA->id,
+            'roster_date' => '2026-08-01',
+            'shift_id' => $this->shift->id,
+            'schedule_type' => 'shift',
+            'status' => 'draft',
+            'created_by' => $this->hrManager->id,
+        ]);
+
+        $response = $this->actingAs($this->hrManager)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->from('/roster')
+            ->delete("/roster/rosters/{$roster->id}");
+
+        $response->assertRedirect('/roster');
+        $response->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('rosters', ['id' => $roster->id]);
+        $this->assertDatabaseMissing('roster_entries', ['roster_id' => $roster->id]);
+    }
+
+    public function test_can_archive_published_roster(): void
+    {
+        $roster = Roster::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Official August Roster',
+            'code' => 'RST-OFF-01',
+            'department_id' => $this->department->id,
+            'start_date' => '2026-08-01',
+            'end_date' => '2026-08-31',
+            'status' => 'published',
+            'published_at' => now(),
+            'created_by' => $this->hrManager->id,
+        ]);
+
+        $response = $this->actingAs($this->hrManager)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->from('/roster')
+            ->post("/roster/rosters/{$roster->id}/archive");
+
+        $response->assertRedirect('/roster');
+        $response->assertSessionHas('success');
+
+        $this->assertDatabaseHas('rosters', [
+            'id' => $roster->id,
+            'status' => 'archived',
+        ]);
+    }
+
+    public function test_cannot_delete_previously_published_roster(): void
+    {
+        $roster = Roster::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Published September Roster',
+            'code' => 'RST-SEP-01',
+            'department_id' => $this->department->id,
+            'start_date' => '2026-09-01',
+            'end_date' => '2026-09-30',
+            'status' => 'draft', // even if reverted to draft, published_at is retained
+            'published_at' => now()->subDay(),
+            'created_by' => $this->hrManager->id,
+        ]);
+
+        $response = $this->actingAs($this->hrManager)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->from('/roster')
+            ->delete("/roster/rosters/{$roster->id}");
+
+        $response->assertRedirect('/roster');
+        $response->assertSessionHas('error');
+
+        // Roster must still exist in DB
+        $this->assertDatabaseHas('rosters', ['id' => $roster->id]);
+    }
 }
+

@@ -35,6 +35,7 @@ import {
     Info,
     CalendarDays,
     Settings,
+    Archive,
 } from 'lucide-react';
 
 interface Shift {
@@ -248,7 +249,6 @@ export default function Index({
     const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
     const [isManageMembersModalOpen, setIsManageMembersModalOpen] = useState(false);
     const [targetSquadForEnroll, setTargetSquadForEnroll] = useState<RosterGroup | null>(null);
-    const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
     const [selectedCell, setSelectedCell] = useState<{
         employeeId: string;
         employeeName: string;
@@ -279,9 +279,9 @@ export default function Index({
             groups[sq.id] = { squad: sq, rows: [] };
         });
 
-        // Add 'Unassigned' group bucket
+        // Add 'unassigned' group bucket for direct/non-squad employees
         groups['unassigned'] = {
-            squad: { id: 'unassigned', name: 'General / Unassigned to Squad', color: '#64748b' },
+            squad: { id: 'unassigned', name: 'Department Personnel / Direct Assigned', color: '#64748b' },
             rows: [],
         };
 
@@ -297,7 +297,7 @@ export default function Index({
         });
 
         // Filter out empty unassigned bucket if empty
-        if (groups['unassigned'].rows.length === 0 && squads.length > 0) {
+        if (groups['unassigned'].rows.length === 0) {
             delete groups['unassigned'];
         }
 
@@ -373,6 +373,7 @@ export default function Index({
         override_reason: 'Sick Cover',
         notes: '',
         status: 'published',
+        roster_id: '',
     });
 
     const openCellDrawer = (empId: string, empName: string, date: string, cell: MatrixCell) => {
@@ -389,7 +390,8 @@ export default function Index({
             schedule_type: cell.schedule_type || 'shift',
             override_reason: cell.override_reason || 'Supervisor Operational Reassignment',
             notes: cell.notes || '',
-            status: cell.status || 'published',
+            status: active_roster?.status === 'draft' ? 'draft' : (cell.status || 'published'),
+            roster_id: active_roster?.id || '',
         });
     };
 
@@ -413,13 +415,9 @@ export default function Index({
         })(),
         status: 'published',
         notes: '',
-        generation_mode: 'direct_pattern' as 'direct_pattern' | 'group_set' | 'blank',
+        generation_mode: 'direct_pattern' as 'direct_pattern' | 'blank',
         pattern_id: patterns[0]?.id || '',
         employee_ids: [] as string[],
-        group_set_preset: 'three_shift_247' as 'three_shift_247' | 'two_shift' | 'general_weekly',
-        shift_1_id: shifts[0]?.id || '',
-        shift_2_id: shifts[1]?.id || shifts[0]?.id || '',
-        shift_3_id: shifts[2]?.id || shifts[0]?.id || '',
     });
 
     const openNewRosterModal = () => {
@@ -441,10 +439,6 @@ export default function Index({
             generation_mode: 'direct_pattern',
             pattern_id: patterns[0]?.id || '',
             employee_ids: defaultEmpIds,
-            group_set_preset: 'three_shift_247',
-            shift_1_id: shifts[0]?.id || '',
-            shift_2_id: shifts[1]?.id || shifts[0]?.id || '',
-            shift_3_id: shifts[2]?.id || shifts[0]?.id || '',
         });
         setIsNewRosterModalOpen(true);
     };
@@ -597,23 +591,7 @@ export default function Index({
         }
     };
 
-    // 5. Shift Swap Form
-    const swapForm = useForm({
-        employee_a_id: matrix[0]?.employee.id || '',
-        employee_b_id: matrix[1]?.employee.id || '',
-        date: days[0]?.date || `${year}-${String(month).padStart(2, '0')}-01`,
-        reason: 'Mutual shift trade',
-    });
-
-    const handleSwapSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        swapForm.post('/roster/swap', {
-            preserveScroll: true,
-            onSuccess: () => setIsSwapModalOpen(false),
-        });
-    };
-
-    // 6. 1-Click Roster Sync
+    // 5. 1-Click Roster Sync
     const handleSyncRoster = () => {
         if (!active_roster) return;
         if (confirm(`Synchronize calendar entries for all squads in '${active_roster.name}'? Existing manual supervisor overrides will be preserved.`)) {
@@ -621,7 +599,7 @@ export default function Index({
         }
     };
 
-    // 7. Publish / Draft Toggle
+    // 6. Publish / Draft Toggle
     const handlePublishToggle = (publish: boolean) => {
         if (!active_roster) return;
         router.post(
@@ -640,8 +618,7 @@ export default function Index({
         newRosterForm.processing ||
         newSquadForm.processing ||
         quickPatternForm.processing ||
-        cloneForm.processing ||
-        swapForm.processing;
+        cloneForm.processing;
 
     const renderMatrixRow = (row: MatrixRow) => {
         return (
@@ -804,7 +781,7 @@ export default function Index({
                                     >
                                         {rosters.map((rst) => (
                                             <option key={rst.id} value={rst.id}>
-                                                {rst.name} ({rst.status.toUpperCase()})
+                                                {rst.name} ({rst.code}) • {rst.start_date} → {rst.end_date} [{rst.status.toUpperCase()}]
                                             </option>
                                         ))}
                                         {rosters.length === 0 && <option value="">No Rosters Found</option>}
@@ -821,14 +798,44 @@ export default function Index({
                                 </button>
 
                                 {active_roster && (
-                                    <button
-                                        onClick={openCloneModal}
-                                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
-                                        title="Clone this roster to next month"
-                                    >
-                                        <Copy className="w-3.5 h-3.5 text-sky-400" />
-                                        <span>Clone</span>
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={openCloneModal}
+                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
+                                            title="Clone this roster to next month"
+                                        >
+                                            <Copy className="w-3.5 h-3.5 text-sky-400" />
+                                            <span>Clone</span>
+                                        </button>
+
+                                        {active_roster.published_at === null ? (
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm(`Are you sure you want to discard draft roster '${active_roster.name}'? This will permanently delete this draft and any associated draft entries.`)) {
+                                                        router.delete(`/roster/rosters/${active_roster.id}`, { preserveScroll: true });
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs font-semibold border border-rose-800/60 hover:border-rose-700 transition flex items-center gap-1.5 shadow-sm"
+                                                title="Discard this draft roster permanently"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                                <span>Discard Draft</span>
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm(`Archive roster '${active_roster.name}'? This withdraws it from active scheduling while strictly preserving historical attendance logs and biometric audit trails.`)) {
+                                                        router.post(`/roster/rosters/${active_roster.id}/archive`, {}, { preserveScroll: true });
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
+                                                title="Archive this published roster"
+                                            >
+                                                <Archive className="w-3.5 h-3.5 text-slate-400" />
+                                                <span>Archive Roster</span>
+                                            </button>
+                                        )}
+                                    </>
                                 )}
                             </div>
 
@@ -889,13 +896,14 @@ export default function Index({
                                 </>
                             )}
 
-                            <button
-                                onClick={() => setIsSwapModalOpen(true)}
+                            <Link
+                                href="/roster/shift-swaps"
                                 className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                title="Departmental Shift Swaps Governance"
                             >
                                 <ArrowLeftRight className="w-3.5 h-3.5 text-sky-400" />
-                                <span>Swap Shift</span>
-                            </button>
+                                <span>Shift Swaps</span>
+                            </Link>
 
                             <Link
                                 href="/roster/patterns"
@@ -1690,7 +1698,7 @@ export default function Index({
                             {/* STEP 2: Scheduling Strategy */}
                             {rosterWizardStep === 2 && (
                                 <div className="space-y-4">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         {/* Option A: Direct Pattern */}
                                         <div
                                             onClick={() => newRosterForm.setData('generation_mode', 'direct_pattern')}
@@ -1705,29 +1713,11 @@ export default function Index({
                                                 <span className="font-bold text-xs text-white">Direct Pattern</span>
                                             </div>
                                             <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Apply a single weekly or cyclical pattern directly to your staff.
+                                                Apply a standard shift pattern formula directly to personnel.
                                             </p>
                                         </div>
 
-                                        {/* Option B: Rotating Shift Groups */}
-                                        <div
-                                            onClick={() => newRosterForm.setData('generation_mode', 'group_set')}
-                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
-                                                newRosterForm.data.generation_mode === 'group_set'
-                                                    ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500'
-                                                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <Layers className="w-4 h-4 text-emerald-400" />
-                                                <span className="font-bold text-xs text-white">Rotating Squads</span>
-                                            </div>
-                                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                24/7 or 2-Shift multi-squad rotation (Groups A, B, C, D).
-                                            </p>
-                                        </div>
-
-                                        {/* Option C: Blank Schedule */}
+                                        {/* Option B: Blank Schedule */}
                                         <div
                                             onClick={() => newRosterForm.setData('generation_mode', 'blank')}
                                             className={`p-3.5 rounded-xl border cursor-pointer transition ${
@@ -1738,10 +1728,10 @@ export default function Index({
                                         >
                                             <div className="flex items-center gap-2 mb-1.5">
                                                 <CalendarDays className="w-4 h-4 text-amber-400" />
-                                                <span className="font-bold text-xs text-white">Blank Roster</span>
+                                                <span className="font-bold text-xs text-white">Blank Roster Shell</span>
                                             </div>
                                             <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Create empty shell to schedule cell-by-cell or add squads later.
+                                                Create an empty roster shell to schedule manually or attach squads later.
                                             </p>
                                         </div>
                                     </div>
@@ -1772,73 +1762,7 @@ export default function Index({
                                         </div>
                                     )}
 
-                                    {newRosterForm.data.generation_mode === 'group_set' && (
-                                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                                    Industry Squad Preset *
-                                                </label>
-                                                <select
-                                                    value={newRosterForm.data.group_set_preset}
-                                                    onChange={(e) => newRosterForm.setData('group_set_preset', e.target.value as any)}
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                                                >
-                                                    <option value="three_shift_247">3 Shifts + 1 OFF (24/7 Operations &bull; 4 Groups A, B, C, D)</option>
-                                                    <option value="two_shift">2 Shifts + 1 OFF (Two-Shift Coverage &bull; 3 Groups A, B, C)</option>
-                                                </select>
-                                            </div>
 
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                                                <div>
-                                                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                                                        Shift 1 (Morning)
-                                                    </label>
-                                                    <select
-                                                        value={newRosterForm.data.shift_1_id}
-                                                        onChange={(e) => newRosterForm.setData('shift_1_id', e.target.value)}
-                                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                                                    >
-                                                        {shifts.map((s) => (
-                                                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                                                        Shift 2 (Evening)
-                                                    </label>
-                                                    <select
-                                                        value={newRosterForm.data.shift_2_id}
-                                                        onChange={(e) => newRosterForm.setData('shift_2_id', e.target.value)}
-                                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                                                    >
-                                                        {shifts.map((s) => (
-                                                            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                {newRosterForm.data.group_set_preset === 'three_shift_247' && (
-                                                    <div>
-                                                        <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                                                            Shift 3 (Night)
-                                                        </label>
-                                                        <select
-                                                            value={newRosterForm.data.shift_3_id}
-                                                            onChange={(e) => newRosterForm.setData('shift_3_id', e.target.value)}
-                                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                                                        >
-                                                            {shifts.map((s) => (
-                                                                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <p className="text-[11px] text-slate-400">
-                                                This will automatically generate rotating squads attached to this roster. You can enroll team members into squads after creation.
-                                            </p>
-                                        </div>
-                                    )}
 
                                     {newRosterForm.data.generation_mode === 'blank' && (
                                         <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-400">
@@ -2096,110 +2020,7 @@ export default function Index({
                 </div>
             )}
 
-            {/* MODAL 5: Shift Swap Modal */}
-            {isSwapModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
-                        <button
-                            onClick={() => setIsSwapModalOpen(false)}
-                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
 
-                        <div>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                                Shift Exchange
-                            </span>
-                            <h3 className="text-base font-bold text-white mt-1">
-                                Atomic Shift Swap
-                            </h3>
-                            <p className="text-xs text-slate-400">
-                                Exchanges duty assignments between two personnel on a specific date with audit trail.
-                            </p>
-                        </div>
-
-                        <form onSubmit={handleSwapSubmit} className="space-y-3.5">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Date of Swap
-                                </label>
-                                <input
-                                    type="date"
-                                    required
-                                    value={swapForm.data.date}
-                                    onChange={(e) => swapForm.setData('date', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Employee A
-                                </label>
-                                <select
-                                    value={swapForm.data.employee_a_id}
-                                    onChange={(e) => swapForm.setData('employee_a_id', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                >
-                                    {matrix.map((r) => (
-                                        <option key={r.employee.id} value={r.employee.id}>
-                                            {r.employee.full_name} ({r.employee.emp_no})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Employee B
-                                </label>
-                                <select
-                                    value={swapForm.data.employee_b_id}
-                                    onChange={(e) => swapForm.setData('employee_b_id', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                >
-                                    {matrix.map((r) => (
-                                        <option key={r.employee.id} value={r.employee.id}>
-                                            {r.employee.full_name} ({r.employee.emp_no})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Reason / Reference
-                                </label>
-                                <input
-                                    type="text"
-                                    value={swapForm.data.reason}
-                                    onChange={(e) => swapForm.setData('reason', e.target.value)}
-                                    placeholder="e.g. Mutual consent / family obligation"
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            <div className="pt-2 flex items-center justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsSwapModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={swapForm.processing || swapForm.data.employee_a_id === swapForm.data.employee_b_id}
-                                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
-                                >
-                                    {swapForm.processing ? 'Swapping...' : 'Execute Shift Swap'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
 
             {/* MODAL 6: Create New Squad */}
             {isNewSquadModalOpen && active_roster && (
