@@ -60,6 +60,21 @@ class DatabaseSeeder extends Seeder
             $owner->assignRole('Company Owner');
         }
 
+        // 3b. Seed requested Company Admin wasansl@gmail.com
+        $wasanAdmin = User::updateOrCreate(
+            ['email' => 'wasansl@gmail.com'],
+            [
+                'name' => 'Wasan (Company Admin)',
+                'password' => Hash::make('123123123'),
+                'tenant_id' => $tenant->id,
+                'email_verified_at' => now(),
+            ]
+        );
+
+        if (! $wasanAdmin->hasRole('Company Owner')) {
+            $wasanAdmin->assignRole('Company Owner');
+        }
+
         // 4. Populate Shift Presets & Sri Lankan Holidays for Tenant
         session(['tenant_id' => $tenant->id]);
         app()->instance('current_tenant', $tenant);

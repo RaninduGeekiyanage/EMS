@@ -955,8 +955,101 @@ final class RosterService
             ]);
 
             $generationMode = $data['generation_mode'] ?? 'blank';
+            $defaultColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#f97316', '#6366f1'];
+            $alphabet = range('A', 'Z');
 
-            if ($generationMode === 'direct_pattern' && ! empty($data['pattern_id'])) {
+            if ($generationMode === 'auto_stagger_squads') {
+                $basePatternId = $data['base_pattern_id'] ?? null;
+                $basePattern = $basePatternId ? RosterPattern::find($basePatternId) : null;
+                $squadCount = (int) ($data['squad_count'] ?? count($data['squads'] ?? []) ?: 4);
+                $staggerDays = (int) ($data['stagger_days'] ?? 2);
+
+                $steps = $basePattern ? ($basePattern->pattern_data['steps'] ?? $basePattern->pattern_data ?? []) : [];
+                $count = count($steps);
+                $baseName = $basePattern ? preg_replace('/(\s*-\s*Group\s*[A-Z].*)$/i', '', $basePattern->name) : 'Shift Squad';
+                $baseCode = $basePattern ? preg_replace('/(-GRP-[A-Z].*)$/i', '', $basePattern->code) : 'SQD';
+
+                $squadsData = ! empty($data['squads']) ? $data['squads'] : [];
+                if (empty($squadsData)) {
+                    for ($i = 0; $i < $squadCount; $i++) {
+                        $letter = $alphabet[$i] ?? ('G' . ($i + 1));
+                        $squadsData[] = [
+                            'name' => "Squad {$letter}",
+                            'code' => "SQD-{$letter}",
+                            'color' => $defaultColors[$i % count($defaultColors)],
+                            'offset_days' => ($i * $staggerDays) % max($count, 1),
+                            'employee_ids' => [],
+                        ];
+                    }
+                }
+
+                foreach ($squadsData as $idx => $squadDef) {
+                    $letter = $alphabet[$idx] ?? ('G' . ($idx + 1));
+                    $squadPatternId = $squadDef['pattern_id'] ?? null;
+
+                    if (empty($squadPatternId) && $basePattern && $count > 0) {
+                        if ($idx === 0) {
+                            $squadPatternId = $basePattern->id;
+                        } else {
+                            $offset = isset($squadDef['offset_days'])
+                                ? (int) $squadDef['offset_days']
+                                : (($idx * $staggerDays) % $count);
+
+                            $rotated = [];
+                            for ($i = 0; $i < $count; $i++) {
+                                $src = $steps[($i + $offset) % $count];
+                                $rotated[] = [
+                                    'step' => $i + 1,
+                                    'shift_id' => $src['shift_id'] ?? null,
+                                    'is_rest_day' => (bool) ($src['is_rest_day'] ?? false),
+                                ];
+                            }
+
+                            $newPatternCode = "{$baseCode}-GRP-{$letter}";
+                            $squadPattern = RosterPattern::firstOrCreate(
+                                ['code' => $newPatternCode],
+                                [
+                                    'name' => "{$baseName} - Group {$letter}",
+                                    'pattern_type' => 'cyclical',
+                                    'start_date' => $basePattern->start_date,
+                                    'end_date' => $basePattern->end_date,
+                                    'cycle_length_days' => $count,
+                                    'pattern_data' => ['steps' => $rotated],
+                                    'is_active' => true,
+                                ]
+                            );
+                            $squadPatternId = $squadPattern->id;
+                        }
+                    }
+
+                    $squadGroup = RosterGroup::create([
+                        'roster_id' => $roster->id,
+                        'roster_pattern_id' => $squadPatternId,
+                        'name' => ! empty($squadDef['name']) ? trim($squadDef['name']) : "Squad {$letter}",
+                        'code' => strtoupper(trim($squadDef['code'] ?? "SQD-{$letter}")),
+                        'color' => $squadDef['color'] ?? $defaultColors[$idx % count($defaultColors)],
+                    ]);
+
+                    if (! empty($squadDef['employee_ids'])) {
+                        $this->enrollEmployees($squadGroup, (array) $squadDef['employee_ids']);
+                    }
+                }
+            } elseif ($generationMode === 'multi_pattern' && ! empty($data['squads'])) {
+                foreach ($data['squads'] as $idx => $squadDef) {
+                    $letter = $alphabet[$idx] ?? ('G' . ($idx + 1));
+                    $squadGroup = RosterGroup::create([
+                        'roster_id' => $roster->id,
+                        'roster_pattern_id' => ! empty($squadDef['pattern_id']) ? $squadDef['pattern_id'] : null,
+                        'name' => ! empty($squadDef['name']) ? trim($squadDef['name']) : "Squad {$letter}",
+                        'code' => strtoupper(trim($squadDef['code'] ?? "SQD-{$letter}")),
+                        'color' => $squadDef['color'] ?? $defaultColors[$idx % count($defaultColors)],
+                    ]);
+
+                    if (! empty($squadDef['employee_ids'])) {
+                        $this->enrollEmployees($squadGroup, (array) $squadDef['employee_ids']);
+                    }
+                }
+            } elseif ($generationMode === 'direct_pattern' && ! empty($data['pattern_id'])) {
                 $empIds = $data['employee_ids'] ?? [];
                 if (empty($empIds) && ! empty($data['department_id']) && $data['department_id'] !== 'all') {
                     $empIds = Employee::where('department_id', $data['department_id'])

@@ -320,4 +320,147 @@ final class EnterpriseRosterTest extends TestCase
         $entriesCount = RosterEntry::where('roster_group_id', $squad->id)->count();
         $this->assertEquals(31, $entriesCount); // 31 days in December
     }
+
+    public function test_can_create_roster_with_auto_stagger_squads_and_member_enrollments(): void
+    {
+        $this->actingAs($this->admin);
+
+        // 8-day cyclical pattern: 2 Morn, 2 Night, 4 Off
+        $cyclicalPattern = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Continuous 8-Day Master',
+            'code' => 'CONT-8D',
+            'pattern_type' => 'cyclical',
+            'cycle_length_days' => 8,
+            'pattern_data' => [
+                'steps' => [
+                    ['step' => 1, 'shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                    ['step' => 2, 'shift_id' => $this->morningShift->id, 'is_rest_day' => false],
+                    ['step' => 3, 'shift_id' => $this->nightShift->id, 'is_rest_day' => false],
+                    ['step' => 4, 'shift_id' => $this->nightShift->id, 'is_rest_day' => false],
+                    ['step' => 5, 'shift_id' => null, 'is_rest_day' => true],
+                    ['step' => 6, 'shift_id' => null, 'is_rest_day' => true],
+                    ['step' => 7, 'shift_id' => null, 'is_rest_day' => true],
+                    ['step' => 8, 'shift_id' => null, 'is_rest_day' => true],
+                ],
+            ],
+            'is_active' => true,
+        ]);
+
+        $response = $this->post(route('roster.rosters.store'), [
+            'name' => 'January 2027 24/7 Operations',
+            'code' => 'RST-2027-01-247',
+            'department_id' => $this->dept->id,
+            'start_date' => '2027-01-01',
+            'end_date' => '2027-01-31',
+            'status' => 'published',
+            'generation_mode' => 'auto_stagger_squads',
+            'base_pattern_id' => $cyclicalPattern->id,
+            'squad_count' => 4,
+            'stagger_days' => 2,
+            'squads' => [
+                [
+                    'name' => 'Squad A',
+                    'code' => 'SQD-A',
+                    'color' => '#3b82f6',
+                    'offset_days' => 0,
+                    'employee_ids' => [$this->emp1->id],
+                ],
+                [
+                    'name' => 'Squad B',
+                    'code' => 'SQD-B',
+                    'color' => '#8b5cf6',
+                    'offset_days' => 2,
+                    'employee_ids' => [$this->emp2->id],
+                ],
+            ],
+        ]);
+
+        $response->assertRedirect();
+
+        $roster = Roster::where('code', 'RST-2027-01-247')->first();
+        $this->assertNotNull($roster);
+        $this->assertEquals('published', $roster->status);
+
+        // Verify 2 squads were created with patterns attached
+        $squads = RosterGroup::where('roster_id', $roster->id)->get();
+        $this->assertCount(2, $squads);
+
+        // Verify members enrolled in squads
+        $this->assertDatabaseHas('roster_group_members', [
+            'roster_group_id' => $squads->firstWhere('code', 'SQD-A')->id,
+            'employee_id' => $this->emp1->id,
+        ]);
+        $this->assertDatabaseHas('roster_group_members', [
+            'roster_group_id' => $squads->firstWhere('code', 'SQD-B')->id,
+            'employee_id' => $this->emp2->id,
+        ]);
+
+        // Verify calendar entries generated for January (31 days * 2 employees = 62 entries)
+        $entriesCount = RosterEntry::where('roster_id', $roster->id)->count();
+        $this->assertEquals(62, $entriesCount);
+    }
+
+    public function test_can_create_roster_with_multi_pattern_squads(): void
+    {
+        $this->actingAs($this->admin);
+
+        $pat1 = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Pattern 1',
+            'code' => 'PAT-1',
+            'pattern_type' => 'daily',
+            'cycle_length_days' => 1,
+            'pattern_data' => ['shift_id' => $this->morningShift->id, 'rest_days' => ['sun']],
+            'is_active' => true,
+        ]);
+
+        $pat2 = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Pattern 2',
+            'code' => 'PAT-2',
+            'pattern_type' => 'daily',
+            'cycle_length_days' => 1,
+            'pattern_data' => ['shift_id' => $this->nightShift->id, 'rest_days' => ['sun']],
+            'is_active' => true,
+        ]);
+
+        $response = $this->post(route('roster.rosters.store'), [
+            'name' => 'February 2027 Mixed',
+            'code' => 'RST-2027-02-MIX',
+            'start_date' => '2027-02-01',
+            'end_date' => '2027-02-28',
+            'status' => 'draft',
+            'generation_mode' => 'multi_pattern',
+            'squads' => [
+                [
+                    'name' => 'Morning Crew',
+                    'code' => 'CRW-M',
+                    'color' => '#3b82f6',
+                    'pattern_id' => $pat1->id,
+                    'employee_ids' => [$this->emp1->id],
+                ],
+                [
+                    'name' => 'Night Crew',
+                    'code' => 'CRW-N',
+                    'color' => '#ec4899',
+                    'pattern_id' => $pat2->id,
+                    'employee_ids' => [$this->emp2->id],
+                ],
+            ],
+        ]);
+
+        $response->assertRedirect();
+
+        $roster = Roster::where('code', 'RST-2027-02-MIX')->first();
+        $this->assertNotNull($roster);
+
+        $squads = RosterGroup::where('roster_id', $roster->id)->get();
+        $this->assertCount(2, $squads);
+
+        // 28 days in Feb * 2 employees = 56 entries
+        $entriesCount = RosterEntry::where('roster_id', $roster->id)->count();
+        $this->assertEquals(56, $entriesCount);
+    }
 }
+

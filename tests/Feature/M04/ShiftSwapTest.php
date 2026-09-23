@@ -242,4 +242,66 @@ final class ShiftSwapTest extends TestCase
         $this->assertEquals($this->nightShift->id, $updatedA1->shift_id);
         $this->assertEquals($this->morningShift->id, $updatedA2->shift_id);
     }
+
+    public function test_can_propose_and_approve_shift_swap_for_employees_without_department(): void
+    {
+        $empNoDept1 = Employee::create([
+            'tenant_id' => $this->tenant->id,
+            'emp_no' => 'NOD-001',
+            'full_name' => 'General Employee 1',
+            'nic' => '199511111111',
+            'department_id' => null,
+            'employment_status' => 'active',
+            'date_of_joining' => '2025-01-01',
+        ]);
+
+        $empNoDept2 = Employee::create([
+            'tenant_id' => $this->tenant->id,
+            'emp_no' => 'NOD-002',
+            'full_name' => 'General Employee 2',
+            'nic' => '199522222222',
+            'department_id' => null,
+            'employment_status' => 'active',
+            'date_of_joining' => '2025-01-01',
+        ]);
+
+        $date = Carbon::parse('2026-10-10');
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $empNoDept1->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $empNoDept2->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->nightShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        /** @var ShiftSwapService $service */
+        $service = app(ShiftSwapService::class);
+        $swap = $service->requestSwap([
+            'requesting_employee_id' => $empNoDept1->id,
+            'target_employee_id' => $empNoDept2->id,
+            'shift_date' => $date->toDateString(),
+            'reason' => 'General pool shift swap',
+        ], $this->tenant->id);
+
+        $this->assertInstanceOf(ShiftSwapRequest::class, $swap);
+        $this->assertNull($swap->department_id);
+        $this->assertEquals('pending', $swap->status);
+
+        // Admin approves
+        $service->approveSwap($swap, $this->admin, $this->tenant->id, 'Admin approved for unassigned department');
+        $swap->refresh();
+        $this->assertEquals('approved', $swap->status);
+    }
 }
+

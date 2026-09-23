@@ -127,7 +127,7 @@ final class ShiftSwapService
         $isCompanyAdmin = $approver->hasRole(['Company Admin', 'Company Owner', 'Super Admin']) || $approver->can('shift_swap.approve_all');
 
         if (! $isCompanyAdmin) {
-            $isDepartmentHod = DepartmentHead::where('tenant_id', $tenantId)
+            $isDepartmentHod = $swapRequest->department_id !== null && DepartmentHead::where('tenant_id', $tenantId)
                 ->where('department_id', $swapRequest->department_id)
                 ->whereHas('employee', function ($q) use ($approver) {
                     $q->where('email', $approver->email);

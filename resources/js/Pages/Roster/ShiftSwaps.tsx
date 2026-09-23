@@ -21,7 +21,7 @@ interface EmployeeSummary {
     id: string;
     emp_no: string;
     full_name: string;
-    department_id: string;
+    department_id?: string | null;
 }
 
 interface ShiftSummary {
@@ -42,7 +42,7 @@ interface DepartmentSummary {
 interface ShiftSwapRecord {
     id: string;
     tenant_id: string;
-    department_id: string;
+    department_id?: string | null;
     requesting_employee_id: string;
     target_employee_id: string;
     shift_date: string;
@@ -55,7 +55,7 @@ interface ShiftSwapRecord {
     approved_at?: string | null;
     admin_notes?: string | null;
     created_at: string;
-    department: DepartmentSummary;
+    department?: DepartmentSummary | null;
     requesting_employee: EmployeeSummary;
     target_employee: EmployeeSummary;
     requesting_shift?: ShiftSummary | null;
@@ -145,7 +145,7 @@ export default function ShiftSwaps({
     // Filter target employees to only those in the same department
     const requestingEmp = employees.find((e) => e.id === createForm.data.requesting_employee_id);
     const availableTargets = requestingEmp
-        ? employees.filter((e) => e.department_id === requestingEmp.department_id && e.id !== requestingEmp.id)
+        ? employees.filter((e) => (e.department_id || null) === (requestingEmp.department_id || null) && e.id !== requestingEmp.id)
         : [];
 
     return (
@@ -258,7 +258,7 @@ export default function ShiftSwaps({
                                                 {swap.shift_date}
                                             </td>
                                             <td className="py-3 px-4">
-                                                <span className="font-semibold text-white">{swap.department?.name}</span>
+                                                <span className="font-semibold text-white">{swap.department?.name || 'General'}</span>
                                             </td>
                                             <td className="py-3 px-4">
                                                 <div className="font-medium text-white">{swap.requesting_employee?.full_name}</div>

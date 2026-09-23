@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('shift_swap_requests', function (Blueprint $table) {
             $table->ulid('id')->primary();
             $table->ulid('tenant_id');
-            $table->ulid('department_id');
+            $table->ulid('department_id')->nullable();
             $table->ulid('requesting_employee_id');
             $table->ulid('target_employee_id');
             $table->date('shift_date');
@@ -29,7 +29,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->foreign('tenant_id')->references('id')->on('tenants')->cascadeOnDelete();
-            $table->foreign('department_id')->references('id')->on('departments')->cascadeOnDelete();
+            $table->foreign('department_id')->references('id')->on('departments')->nullOnDelete();
             $table->foreign('requesting_employee_id')->references('id')->on('employees')->cascadeOnDelete();
             $table->foreign('target_employee_id')->references('id')->on('employees')->cascadeOnDelete();
             $table->foreign('requesting_shift_id')->references('id')->on('shifts')->nullOnDelete();
