@@ -28,7 +28,7 @@ final class StoreEmployeeRequest extends FormRequest
             'nic' => ['required', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
-            'department_id' => ['nullable', 'string'],
+            'department_id' => ['required', 'string', 'exists:departments,id'],
             'designation_id' => ['nullable', 'string'],
             'branch_id' => ['nullable', 'string'],
             'employment_type' => ['required', new Enum(EmploymentType::class)],
@@ -148,6 +148,27 @@ final class StoreEmployeeRequest extends FormRequest
         return [
             'is_epf_member' => (bool) $this->validated('is_epf_member', true),
             'epf_no' => $this->validated('epf_no'),
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return [
+            'department_id' => 'assigned department',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'department_id.required' => 'The assigned department field is required.',
+            'department_id.exists' => 'The selected assigned department is invalid.',
         ];
     }
 }

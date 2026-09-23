@@ -70,12 +70,18 @@ final class EmployeeCrudTest extends TestCase
             'is_active' => true,
         ]);
 
+        $department = Department::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Engineering',
+        ]);
+
         $response = $this->withHeaders([
             'X-Tenant-ID' => (string) $tenant->id,
         ])->post('/employees', [
             'emp_no' => 'EMP-0050',
             'full_name' => 'Anura Kumara',
             'nic' => '198012345678',
+            'department_id' => $department->id,
             'email' => 'anura.k@mfg.lk',
             'phone' => '+94712345678',
             'employment_type' => 'permanent',
@@ -104,6 +110,7 @@ final class EmployeeCrudTest extends TestCase
         $this->assertNotNull($employee);
         $this->assertEquals('Anura Kumara', $employee->full_name);
         $this->assertEquals('198012345678', $employee->nic);
+        $this->assertEquals($department->id, $employee->department_id);
         $this->assertDatabaseHas('employee_payment_info', [
             'employee_id' => $employee->id,
             'payment_mode' => 'monthly',
@@ -112,6 +119,29 @@ final class EmployeeCrudTest extends TestCase
             'employee_id' => $employee->id,
             'epf_no' => 'EPF-7766',
         ]);
+    }
+
+    public function test_store_employee_fails_validation_without_department_id(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Lanka Manufacturing',
+            'slug' => 'lanka-mfg-2',
+            'is_active' => true,
+        ]);
+
+        $response = $this->withHeaders([
+            'X-Tenant-ID' => (string) $tenant->id,
+        ])->post('/employees', [
+            'emp_no' => 'EMP-0051',
+            'full_name' => 'Anura Kumara',
+            'nic' => '198012345679',
+            'department_id' => '',
+            'employment_type' => 'permanent',
+            'employment_status' => 'active',
+            'payment_mode' => 'monthly',
+        ]);
+
+        $response->assertSessionHasErrors(['department_id']);
     }
 
     public function test_can_update_employee_via_http_put(): void

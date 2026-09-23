@@ -606,7 +606,7 @@ export default function Create({
 
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                                        Assigned Department
+                                        Assigned Department *
                                     </label>
                                     <select
                                         value={form.data.department_id}
