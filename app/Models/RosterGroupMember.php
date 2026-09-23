@@ -58,6 +58,36 @@ final class RosterGroupMember extends Model
     }
 
     /**
+     * Scope for members active on a given date.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<RosterGroupMember>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<RosterGroupMember>
+     */
+    public function scopeActiveOnDate(\Illuminate\Database\Eloquent\Builder $query, string $date): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->where(function ($q) use ($date) {
+            $q->whereNull('start_date')->orWhere('start_date', '<=', $date);
+        })->where(function ($q) use ($date) {
+            $q->whereNull('end_date')->orWhere('end_date', '>=', $date);
+        });
+    }
+
+    /**
+     * Scope for members active within an overlapping date range.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<RosterGroupMember>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<RosterGroupMember>
+     */
+    public function scopeOverlapping(\Illuminate\Database\Eloquent\Builder $query, string $startDate, string $endDate): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->where(function ($q) use ($endDate) {
+            $q->whereNull('start_date')->orWhere('start_date', '<=', $endDate);
+        })->where(function ($q) use ($startDate) {
+            $q->whereNull('end_date')->orWhere('end_date', '>=', $startDate);
+        });
+    }
+
+    /**
      * Enrolled employee.
      *
      * @return BelongsTo<Employee, $this>

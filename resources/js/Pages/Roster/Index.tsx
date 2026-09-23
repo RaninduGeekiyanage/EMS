@@ -106,6 +106,20 @@ interface AvailableEmployee {
     designation_title: string;
     is_available: boolean;
     exclusion_reason?: string | null;
+    current_squad?: {
+        id: string;
+        name: string;
+        code: string;
+        color: string | null;
+        start_date?: string;
+        end_date?: string;
+    } | null;
+    current_roster?: {
+        id: string;
+        name: string;
+        code: string;
+    } | null;
+    can_transfer?: boolean;
 }
 
 interface DayHeader {
@@ -415,7 +429,7 @@ export default function Index({
             const lastDay = new Date(year, month, 0).getDate();
             return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
         })(),
-        status: 'published' as 'draft' | 'published',
+        status: 'draft' as 'draft' | 'published',
         notes: '',
         generation_mode: 'auto_stagger_squads' as 'auto_stagger_squads' | 'multi_pattern' | 'direct_pattern' | 'blank',
         base_pattern_id: patterns[0]?.id || '',
@@ -472,7 +486,7 @@ export default function Index({
                 const lastDay = new Date(year, month, 0).getDate();
                 return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
             })(),
-            status: 'published',
+            status: 'draft',
             notes: '',
             generation_mode: 'auto_stagger_squads',
             base_pattern_id: initialBasePattern,
@@ -691,15 +705,19 @@ export default function Index({
         });
     };
 
-    // 4. Enroll Members Form
+    // 4. Enroll / Transfer Members State & Handlers
     const [selectedEnrollEmpIds, setSelectedEnrollEmpIds] = useState<string[]>([]);
     const [memberSearchQuery, setMemberSearchQuery] = useState('');
     const [memberDeptFilter, setMemberDeptFilter] = useState('all');
+    const [enrollEffectiveDate, setEnrollEffectiveDate] = useState<string>('');
+    const [manageMembersTab, setManageMembersTab] = useState<'current' | 'add'>('current');
 
     const openManageMembers = (squad: RosterGroup) => {
         setTargetSquadForEnroll(squad);
         setSelectedEnrollEmpIds([]);
         setMemberSearchQuery('');
+        setEnrollEffectiveDate(active_roster?.start_date || new Date().toISOString().split('T')[0]);
+        setManageMembersTab('current');
         setIsManageMembersModalOpen(true);
     };
 
@@ -707,7 +725,10 @@ export default function Index({
         if (!targetSquadForEnroll || selectedEnrollEmpIds.length === 0) return;
         router.post(
             `/roster/squads/${targetSquadForEnroll.id}/enroll`,
-            { employee_ids: selectedEnrollEmpIds },
+            {
+                employee_ids: selectedEnrollEmpIds,
+                effective_start_date: enrollEffectiveDate || undefined,
+            },
             {
                 preserveScroll: true,
                 onSuccess: () => {
@@ -718,14 +739,48 @@ export default function Index({
         );
     };
 
-    const handleRemoveMember = (squadId: string, empId: string, empName: string) => {
-        if (confirm(`Are you sure you want to remove ${empName} from this squad?`)) {
+    const handleTransferMember = (empId: string, empName: string) => {
+        if (!targetSquadForEnroll) return;
+        const effective = enrollEffectiveDate || active_roster?.start_date;
+        if (confirm(`Transfer '${empName}' to ${targetSquadForEnroll.name} effective from ${effective}?\n\n• Prior worked shifts before ${effective} will remain intact.\n• New squad shifts from ${effective} onwards will be generated.`)) {
             router.post(
-                `/roster/squads/${squadId}/remove-member`,
-                { employee_id: empId },
-                { preserveScroll: true }
+                `/roster/squads/${targetSquadForEnroll.id}/transfer`,
+                {
+                    employee_id: empId,
+                    effective_date: effective,
+                },
+                {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        setIsManageMembersModalOpen(false);
+                    },
+                }
             );
         }
+    };
+
+    const handleRemoveMember = (squadId: string, empId: string, empName: string) => {
+        const today = new Date().toISOString().split('T')[0];
+        const choice = prompt(
+            `Choose removal option for ${empName}:\n\n` +
+            `Type "today" (or specific date YYYY-MM-DD) to end assignment effective from that date (preserves past attendance).\n` +
+            `Type "all" to delete all entries for this roster.`,
+            today
+        );
+        if (choice === null) return;
+
+        const effectiveDate = choice.trim().toLowerCase() === 'all'
+            ? null
+            : (choice.trim().toLowerCase() === 'today' ? today : choice.trim());
+
+        router.post(
+            `/roster/squads/${squadId}/remove-member`,
+            {
+                employee_id: empId,
+                effective_date: effectiveDate,
+            },
+            { preserveScroll: true }
+        );
     };
 
     // 5. 1-Click Roster Sync
@@ -945,7 +1000,7 @@ export default function Index({
                                             <span>Clone</span>
                                         </button>
 
-                                        {active_roster.published_at === null ? (
+                                        {active_roster.status === 'draft' && active_roster.published_at === null ? (
                                             <button
                                                 onClick={() => {
                                                     if (confirm(`Are you sure you want to discard draft roster '${active_roster.name}'? This will permanently delete this draft and any associated draft entries.`)) {
@@ -953,7 +1008,7 @@ export default function Index({
                                                     }
                                                 }}
                                                 className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs font-semibold border border-rose-800/60 hover:border-rose-700 transition flex items-center gap-1.5 shadow-sm"
-                                                title="Discard this draft roster permanently"
+                                                title="Discard this un-published draft roster permanently"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                                                 <span>Discard Draft</span>
@@ -966,7 +1021,7 @@ export default function Index({
                                                     }
                                                 }}
                                                 className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
-                                                title="Archive this published roster"
+                                                title="Archive this roster to protect historical audit trail"
                                             >
                                                 <Archive className="w-3.5 h-3.5 text-slate-400" />
                                                 <span>Archive Roster</span>
@@ -2602,7 +2657,238 @@ export default function Index({
                 </div>
             )}
 
+            {/* MODAL 5: Manage Squad Members & Mid-Month Transfers */}
+            {isManageMembersModalOpen && targetSquadForEnroll && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                        <button
+                            onClick={() => setIsManageMembersModalOpen(false)}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
 
+                        <div className="flex items-center gap-2.5">
+                            <span
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: targetSquadForEnroll.color || '#3b82f6' }}
+                            />
+                            <div>
+                                <h3 className="text-base font-bold text-white">
+                                    Manage Members &bull; {targetSquadForEnroll.name}
+                                </h3>
+                                <p className="text-xs text-slate-400">
+                                    {targetSquadForEnroll.pattern
+                                        ? `Pattern: ${targetSquadForEnroll.pattern.name} (${targetSquadForEnroll.pattern.cycle_length_days}d cycle)`
+                                        : 'Manual Assignment'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                            <button
+                                type="button"
+                                onClick={() => setManageMembersTab('current')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    manageMembersTab === 'current'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                Enrolled Personnel ({targetSquadForEnroll.employees?.length || 0})
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setManageMembersTab('add')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    manageMembersTab === 'add'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                + Enroll / Transfer Staff
+                            </button>
+                        </div>
+
+                        {/* TAB 1: Current Members */}
+                        {manageMembersTab === 'current' && (
+                            <div className="space-y-3">
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 divide-y divide-slate-900 max-h-72 overflow-y-auto">
+                                    {(targetSquadForEnroll.employees || []).map((emp) => (
+                                        <div
+                                            key={emp.id}
+                                            className="p-3 flex items-center justify-between hover:bg-slate-900/50 transition"
+                                        >
+                                            <div>
+                                                <span className="font-semibold text-xs text-white block">
+                                                    {emp.full_name}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                    {emp.emp_no} &bull; {emp.department?.name || 'General'}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveMember(targetSquadForEnroll.id, emp.id, emp.full_name)}
+                                                className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[11px] font-medium flex items-center gap-1 transition"
+                                                title="Remove or end squad assignment"
+                                            >
+                                                <UserMinus className="w-3.5 h-3.5 text-rose-400" />
+                                                <span>Remove / End</span>
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {(!targetSquadForEnroll.employees || targetSquadForEnroll.employees.length === 0) && (
+                                        <div className="p-6 text-center text-xs text-slate-500">
+                                            No personnel currently enrolled in this squad. Click "+ Enroll / Transfer Staff" to add members.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TAB 2: Enroll / Transfer Staff */}
+                        {manageMembersTab === 'add' && (
+                            <div className="space-y-3.5">
+                                {/* Effective Date Setting */}
+                                <div className="bg-slate-950 p-3 rounded-xl border border-indigo-500/30 space-y-1">
+                                    <label className="block text-xs font-semibold text-indigo-300">
+                                        Effective Assignment / Transfer Date *
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={enrollEffectiveDate}
+                                        onChange={(e) => setEnrollEffectiveDate(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                    <p className="text-[10px] text-slate-400">
+                                        For mid-month transfers or new joiners, pick the exact start date. Prior worked shifts before this date remain 100% preserved.
+                                    </p>
+                                </div>
+
+                                {/* Filters */}
+                                <div className="flex items-center gap-2">
+                                    <div className="relative flex-1">
+                                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            type="text"
+                                            value={memberSearchQuery}
+                                            onChange={(e) => setMemberSearchQuery(e.target.value)}
+                                            placeholder="Search staff by name or emp no..."
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500"
+                                        />
+                                    </div>
+                                    <select
+                                        value={memberDeptFilter}
+                                        onChange={(e) => setMemberDeptFilter(e.target.value)}
+                                        className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300"
+                                    >
+                                        <option value="all">All Departments</option>
+                                        {departments.map((d) => (
+                                            <option key={d.id} value={d.id}>{d.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Employee Pool */}
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-56 overflow-y-auto divide-y divide-slate-900 p-1">
+                                    {available_employees
+                                        .filter((emp) => {
+                                            const matchesSearch =
+                                                emp.full_name.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
+                                                emp.emp_no.toLowerCase().includes(memberSearchQuery.toLowerCase());
+                                            const matchesDept = memberDeptFilter === 'all' || emp.department_name === memberDeptFilter;
+                                            return matchesSearch && matchesDept;
+                                        })
+                                        .map((emp) => {
+                                            const isSelected = selectedEnrollEmpIds.includes(emp.id);
+                                            const isAlreadyInThisSquad = targetSquadForEnroll.employees?.some((e) => e.id === emp.id);
+
+                                            if (isAlreadyInThisSquad) {
+                                                return (
+                                                    <div key={emp.id} className="p-2.5 flex items-center justify-between opacity-50 bg-slate-900/30">
+                                                        <div>
+                                                            <span className="font-semibold text-xs text-slate-300 block">{emp.full_name}</span>
+                                                            <span className="text-[10px] text-slate-500 font-mono">Already in this squad</span>
+                                                        </div>
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">Enrolled</span>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (emp.current_squad) {
+                                                return (
+                                                    <div key={emp.id} className="p-2.5 flex items-center justify-between hover:bg-slate-900/60 transition">
+                                                        <div>
+                                                            <span className="font-semibold text-xs text-white block">{emp.full_name}</span>
+                                                            <span className="text-[10px] text-amber-400 font-mono">
+                                                                Currently in {emp.current_squad.name} ({emp.current_roster?.name})
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleTransferMember(emp.id, emp.full_name)}
+                                                            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1 transition shadow-sm"
+                                                        >
+                                                            <span>Transfer &rarr; {enrollEffectiveDate || 'Date'}</span>
+                                                        </button>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={emp.id}
+                                                    onClick={() => {
+                                                        const next = isSelected
+                                                            ? selectedEnrollEmpIds.filter((id) => id !== emp.id)
+                                                            : [...selectedEnrollEmpIds, emp.id];
+                                                        setSelectedEnrollEmpIds(next);
+                                                    }}
+                                                    className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                        isSelected ? 'bg-indigo-600/20 border border-indigo-500/30' : 'hover:bg-slate-900/60'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                                            isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                        }`}>
+                                                            {isSelected && <Check className="w-3 h-3" />}
+                                                        </div>
+                                                        <div>
+                                                            <span className="font-bold text-xs text-white block">{emp.full_name}</span>
+                                                            <span className="text-[10px] text-slate-400 font-mono">{emp.emp_no} &bull; {emp.department_name}</span>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400 font-mono">Available</span>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+
+                                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsManageMembersModalOpen(false)}
+                                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleEnrollSubmit}
+                                        disabled={selectedEnrollEmpIds.length === 0}
+                                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-40"
+                                    >
+                                        Enroll Selected ({selectedEnrollEmpIds.length})
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* MODAL 6: Create New Squad */}
             {isNewSquadModalOpen && active_roster && (

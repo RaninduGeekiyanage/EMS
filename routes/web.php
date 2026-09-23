@@ -145,6 +145,7 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::put('/roster/squads/{squad}', [RosterController::class, 'updateSquad'])->middleware('can:roster.update')->name('roster.squads.update');
         Route::delete('/roster/squads/{squad}', [RosterController::class, 'destroySquad'])->middleware('can:roster.delete')->name('roster.squads.destroy');
         Route::post('/roster/squads/{squad}/enroll', [RosterController::class, 'enrollSquadMembers'])->middleware('can:roster.create')->name('roster.squads.enroll');
+        Route::post('/roster/squads/{squad}/transfer', [RosterController::class, 'transferSquadMember'])->middleware('can:roster.create')->name('roster.squads.transfer');
         Route::post('/roster/squads/{squad}/remove-member', [RosterController::class, 'removeSquadMember'])->middleware('can:roster.delete')->name('roster.squads.remove-member');
 
         // Departmentalized Shift Swap Requests

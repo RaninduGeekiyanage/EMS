@@ -587,7 +587,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.employment_type}
-                                        onChange={(e) => form.setData('employment_type', e.target.value)}
+                                        onChange={(e) => form.setData('employment_type', e.target.value as EmploymentType)}
                                         className={getInputClass(!!form.errors.employment_type)}
                                     >
                                         {employmentTypes.map((t) => (
@@ -728,7 +728,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.employment_category}
-                                        onChange={(e) => form.setData('employment_category', e.target.value)}
+                                        onChange={(e) => form.setData('employment_category', e.target.value as 'shop_and_office' | 'wages_board')}
                                         className={getInputClass(!!form.errors.employment_category)}
                                     >
                                         <option value="shop_and_office">Shop & Office Act (White Collar / Standard)</option>
@@ -847,7 +847,7 @@ export default function Edit({
                                     </label>
                                     <select
                                         value={form.data.payment_mode}
-                                        onChange={(e) => form.setData('payment_mode', e.target.value)}
+                                        onChange={(e) => form.setData('payment_mode', e.target.value as PaymentMode)}
                                         className={getInputClass(!!form.errors.payment_mode)}
                                     >
                                         {paymentModes.map((m) => (

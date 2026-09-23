@@ -233,12 +233,49 @@ final class RosterController extends Controller
         $validated = $request->validate([
             'employee_ids' => ['required', 'array', 'min:1'],
             'employee_ids.*' => ['required', 'string', 'exists:employees,id'],
+            'effective_start_date' => ['nullable', 'date'],
+            'effective_end_date' => ['nullable', 'date'],
         ]);
 
-        $enrolled = $this->rosterService->enrollEmployees($squad, $validated['employee_ids']);
-        $count = count($enrolled);
+        try {
+            $enrolled = $this->rosterService->enrollEmployees(
+                $squad,
+                $validated['employee_ids'],
+                $validated['effective_start_date'] ?? null,
+                $validated['effective_end_date'] ?? null
+            );
+            $count = count($enrolled);
 
-        return redirect()->back()->with('success', "{$count} staff member(s) enrolled into {$squad->name}.");
+            return redirect()->back()->with('success', "{$count} staff member(s) enrolled into {$squad->name}.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Transfer an employee into a Squad from an effective date.
+     */
+    public function transferSquadMember(Request $request, RosterGroup $squad): RedirectResponse
+    {
+        $validated = $request->validate([
+            'employee_id' => ['required', 'string', 'exists:employees,id'],
+            'effective_date' => ['required', 'date'],
+        ]);
+
+        try {
+            $result = $this->rosterService->transferEmployeeSquad(
+                $squad,
+                $validated['employee_id'],
+                $validated['effective_date']
+            );
+
+            return redirect()->back()->with(
+                'success',
+                "Staff member '{$result['employee']->full_name}' transferred to {$squad->name} effective from {$result['effective_date']}."
+            );
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -248,11 +285,20 @@ final class RosterController extends Controller
     {
         $validated = $request->validate([
             'employee_id' => ['required', 'string', 'exists:employees,id'],
+            'effective_date' => ['nullable', 'date'],
         ]);
 
-        $this->rosterService->removeEmployeeFromSquad($squad, $validated['employee_id']);
+        try {
+            $this->rosterService->removeEmployeeFromSquad(
+                $squad,
+                $validated['employee_id'],
+                $validated['effective_date'] ?? null
+            );
 
-        return redirect()->back()->with('success', 'Employee removed from squad successfully.');
+            return redirect()->back()->with('success', 'Employee squad assignment updated successfully.');
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**

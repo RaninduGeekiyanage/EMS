@@ -380,7 +380,8 @@ final class EnterpriseRosterTest extends TestCase
 
         $roster = Roster::where('code', 'RST-2027-01-247')->first();
         $this->assertNotNull($roster);
-        $this->assertEquals('published', $roster->status);
+        $this->assertEquals('draft', $roster->status);
+        $this->assertNull($roster->published_at);
 
         // Verify 2 squads were created with patterns attached
         $squads = RosterGroup::where('roster_id', $roster->id)->get();

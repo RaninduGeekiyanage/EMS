@@ -296,6 +296,8 @@ final class RosterService
                 $dailyCells[$dateString] = [
                     'entry_id' => $entry?->id,
                     'date' => $dateString,
+                    'roster_id' => $entry?->roster_id,
+                    'roster_group_id' => $entry?->roster_group_id,
                     'schedule_type' => $entry?->schedule_type ?? null,
                     'shift' => $entry?->shift ? [
                         'id' => $entry->shift->id,
@@ -476,7 +478,7 @@ final class RosterService
             } elseif (! empty($data['department_id']) && $data['department_id'] !== 'all') {
                 $employeeQuery->where('department_id', $data['department_id']);
             }
-            $targetEmployees = $employeeQuery->get(['id']);
+            $targetEmployees = $employeeQuery->get(['id', 'hire_date']);
 
             if ($targetEmployees->isEmpty()) {
                 return ['created' => 0, 'updated' => 0, 'total' => 0];
@@ -559,10 +561,33 @@ final class RosterService
             $rosterGroupId = $data['roster_group_id'] ?? null;
             $rosterPatternId = $data['pattern_id'] ?? null;
 
+            $memberDateLookup = [];
+            if ($rosterGroupId !== null) {
+                $memberDateLookup = RosterGroupMember::where('roster_group_id', $rosterGroupId)
+                    ->whereIn('employee_id', $empIds)
+                    ->get(['employee_id', 'start_date', 'end_date'])
+                    ->keyBy('employee_id');
+            }
+
             foreach ($targetEmployees as $emp) {
                 $empSourceCopy = $sourceCopyEntries?->get($emp->id, collect());
+                $empHireDate = $emp->hire_date ? Carbon::parse($emp->hire_date)->startOfDay() : null;
+                $memberRec = $memberDateLookup[$emp->id] ?? null;
+                $memberStart = $memberRec?->start_date ? Carbon::parse($memberRec->start_date)->startOfDay() : null;
+                $memberEnd = $memberRec?->end_date ? Carbon::parse($memberRec->end_date)->endOfDay() : null;
 
                 foreach ($dates as $date) {
+                    // Temporal and Hire Date Clamping
+                    if ($empHireDate && $date->lt($empHireDate)) {
+                        continue;
+                    }
+                    if ($memberStart && $date->lt($memberStart)) {
+                        continue;
+                    }
+                    if ($memberEnd && $date->gt($memberEnd)) {
+                        continue;
+                    }
+
                     $dateString = $date->toDateString();
                     $lookupKey = "{$emp->id}:{$dateString}";
                     $hasExisting = isset($existingLookup[$lookupKey]);
@@ -949,7 +974,9 @@ final class RosterService
                 'department_id' => ! empty($data['department_id']) && $data['department_id'] !== 'all' ? $data['department_id'] : null,
                 'start_date' => $startDate->toDateString(),
                 'end_date' => $endDate->toDateString(),
-                'status' => $data['status'] ?? 'draft',
+                'status' => 'draft',
+                'published_at' => null,
+                'published_by' => null,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => Auth::id(),
             ]);
@@ -1201,7 +1228,9 @@ final class RosterService
                 'start_date' => $startDate->toDateString(),
                 'end_date' => $endDate->toDateString(),
                 'status' => 'draft',
-                'notes' => "Cloned from {$sourceRoster->name}",
+                'published_at' => null,
+                'published_by' => null,
+                'notes' => $data['notes'] ?? "Cloned from {$sourceRoster->name}",
                 'created_by' => Auth::id(),
             ]);
 
@@ -1307,6 +1336,12 @@ final class RosterService
      *
      * @return \Illuminate\Support\Collection<int, array<string, mixed>>
      */
+    /**
+     * Query available active employees for enrollment with strict Roster Exclusivity filtering.
+     * Enriched with current squad and transfer capabilities.
+     *
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
     public function getAvailableEmployees(
         string $startDate,
         string $endDate,
@@ -1316,34 +1351,20 @@ final class RosterService
         $start = Carbon::parse($startDate)->toDateString();
         $end = Carbon::parse($endDate)->toDateString();
 
-        // 1. Find all employee IDs already enrolled in another active roster during overlapping dates
-        $squadEmpIds = RosterGroupMember::query()
-            ->whereHas('group.roster', function ($q) use ($start, $end, $excludeRosterId) {
+        // 1. Find all active squad memberships in overlapping active rosters
+        $activeMemberships = RosterGroupMember::query()
+            ->with(['group.roster:id,name,code,status'])
+            ->whereHas('group.roster', function ($q) use ($start, $end) {
                 $q->where('start_date', '<=', $end)
                     ->where('end_date', '>=', $start)
                     ->where('status', '!=', 'archived');
-                if ($excludeRosterId !== null) {
-                    $q->where('id', '!=', $excludeRosterId);
-                }
             })
-            ->pluck('employee_id');
-
-        $entryEmpIds = RosterEntry::query()
-            ->whereBetween('roster_date', [$start, $end])
-            ->whereNotNull('roster_id')
-            ->whereHas('roster', function ($q) use ($start, $end, $excludeRosterId) {
-                $q->where('status', '!=', 'archived');
-                if ($excludeRosterId !== null) {
-                    $q->where('id', '!=', $excludeRosterId);
-                }
-            })
-            ->pluck('employee_id');
-
-        $excludedEmpIds = $squadEmpIds->concat($entryEmpIds)->unique()->all();
+            ->get()
+            ->keyBy('employee_id');
 
         // 2. Query active employees
         $query = Employee::query()
-            ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id')
+            ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id', 'hire_date')
             ->with(['department:id,name,code', 'designation:id,title'])
             ->where('employment_status', 'active')
             ->orderBy('emp_no');
@@ -1354,29 +1375,64 @@ final class RosterService
 
         $allEmployees = $query->get();
 
-        return $allEmployees->map(function ($emp) use ($excludedEmpIds) {
-            $isRosteredElsewhere = in_array($emp->id, $excludedEmpIds, true);
+        return $allEmployees->map(function ($emp) use ($activeMemberships, $excludeRosterId) {
+            $membership = $activeMemberships->get($emp->id);
+            $isEnrolledElsewhere = false;
+            $currentSquad = null;
+            $currentRoster = null;
+            $canTransfer = false;
+
+            if ($membership && $membership->group && $membership->group->roster) {
+                $currentSquad = [
+                    'id' => $membership->group->id,
+                    'name' => $membership->group->name,
+                    'code' => $membership->group->code,
+                    'color' => $membership->group->color,
+                    'start_date' => $membership->start_date?->toDateString(),
+                    'end_date' => $membership->end_date?->toDateString(),
+                ];
+                $currentRoster = [
+                    'id' => $membership->group->roster->id,
+                    'name' => $membership->group->roster->name,
+                    'code' => $membership->group->roster->code,
+                ];
+
+                if ($excludeRosterId === null || $membership->group->roster_id !== $excludeRosterId) {
+                    $isEnrolledElsewhere = true;
+                }
+                $canTransfer = true;
+            }
 
             return [
                 'id' => $emp->id,
                 'emp_no' => $emp->emp_no,
                 'full_name' => $emp->full_name,
+                'hire_date' => $emp->hire_date?->toDateString(),
                 'department_name' => $emp->department?->name ?? 'General',
                 'designation_title' => $emp->designation?->title ?? 'Staff',
-                'is_available' => ! $isRosteredElsewhere,
-                'exclusion_reason' => $isRosteredElsewhere ? 'Enrolled in another active roster' : null,
+                'is_available' => ! $isEnrolledElsewhere,
+                'exclusion_reason' => $isEnrolledElsewhere
+                    ? "Assigned to {$currentRoster['name']} ({$currentSquad['name']})"
+                    : null,
+                'current_squad' => $currentSquad,
+                'current_roster' => $currentRoster,
+                'can_transfer' => $canTransfer,
             ];
         });
     }
 
     /**
-     * Enroll one or multiple employees into a Squad with exclusivity protection and instant sync.
+     * Enroll one or multiple employees into a Squad with date-range awareness and instant sync.
      *
      * @param  array<int, string>  $employeeIds
      * @return array<int, string> Enrolled employee IDs
      */
-    public function enrollEmployees(RosterGroup $group, array $employeeIds): array
-    {
+    public function enrollEmployees(
+        RosterGroup $group,
+        array $employeeIds,
+        ?string $effectiveStartDate = null,
+        ?string $effectiveEndDate = null
+    ): array {
         $roster = $group->roster;
         if ($roster === null) {
             throw new DomainException('Target squad does not have an associated roster.');
@@ -1384,35 +1440,34 @@ final class RosterService
 
         $enrolled = [];
 
-        DB::transaction(function () use ($group, $roster, $employeeIds, &$enrolled): void {
-            $startDate = $roster->start_date instanceof CarbonInterface ? $roster->start_date->toDateString() : (string) $roster->start_date;
-            $endDate = $roster->end_date instanceof CarbonInterface ? $roster->end_date->toDateString() : (string) $roster->end_date;
+        DB::transaction(function () use ($group, $roster, $employeeIds, $effectiveStartDate, $effectiveEndDate, &$enrolled): void {
+            $rosterStart = $roster->start_date instanceof CarbonInterface ? $roster->start_date->toDateString() : (string) $roster->start_date;
+            $rosterEnd = $roster->end_date instanceof CarbonInterface ? $roster->end_date->toDateString() : (string) $roster->end_date;
+
+            $memberStart = $effectiveStartDate ? Carbon::parse($effectiveStartDate)->toDateString() : $rosterStart;
+            $memberEnd = $effectiveEndDate ? Carbon::parse($effectiveEndDate)->toDateString() : $rosterEnd;
 
             foreach ($employeeIds as $empId) {
-                // Check if already in another roster
+                // Check if already in another squad/roster with overlapping active dates
                 $inOtherRoster = RosterGroupMember::query()
                     ->where('employee_id', $empId)
-                    ->whereHas('group.roster', function ($q) use ($startDate, $endDate, $roster) {
-                        $q->where('id', '!=', $roster->id)
-                            ->where('start_date', '<=', $endDate)
-                            ->where('end_date', '>=', $startDate)
+                    ->where('roster_group_id', '!=', $group->id)
+                    ->whereHas('group.roster', function ($q) use ($memberStart, $memberEnd) {
+                        $q->where('start_date', '<=', $memberEnd)
+                            ->where('end_date', '>=', $memberStart)
                             ->where('status', '!=', 'archived');
                     })
-                    ->exists();
-
-                $inOtherRosterEntries = RosterEntry::query()
-                    ->where('employee_id', $empId)
-                    ->whereBetween('roster_date', [$startDate, $endDate])
-                    ->whereNotNull('roster_id')
-                    ->where('roster_id', '!=', $roster->id)
-                    ->whereHas('roster', function ($q) {
-                        $q->where('status', '!=', 'archived');
+                    ->where(function ($q) use ($memberStart, $memberEnd) {
+                        $q->whereNull('start_date')->orWhere('start_date', '<=', $memberEnd);
+                    })
+                    ->where(function ($q) use ($memberStart, $memberEnd) {
+                        $q->whereNull('end_date')->orWhere('end_date', '>=', $memberStart);
                     })
                     ->exists();
 
-                if ($inOtherRoster || $inOtherRosterEntries) {
+                if ($inOtherRoster) {
                     $emp = Employee::find($empId);
-                    throw new DomainException("Employee '{$emp?->full_name}' ({$emp?->emp_no}) is already assigned to another active roster during this period.");
+                    throw new DomainException("Employee '{$emp?->full_name}' ({$emp?->emp_no}) is already assigned to another squad during this date range. Use the Mid-Month Transfer feature to safely reassign them.");
                 }
 
                 RosterGroupMember::updateOrCreate(
@@ -1421,8 +1476,8 @@ final class RosterService
                         'employee_id' => $empId,
                     ],
                     [
-                        'start_date' => $startDate,
-                        'end_date' => $endDate,
+                        'start_date' => $memberStart,
+                        'end_date' => $memberEnd,
                     ]
                 );
 
@@ -1435,8 +1490,8 @@ final class RosterService
                 if ($pattern) {
                     $this->generateRoster([
                         'pattern_id' => $pattern->id,
-                        'start_date' => $startDate,
-                        'end_date' => $endDate,
+                        'start_date' => $memberStart,
+                        'end_date' => $memberEnd,
                         'employee_ids' => $enrolled,
                         'conflict_mode' => 'overwrite',
                         'status' => $roster->status === 'published' ? 'published' : 'draft',
@@ -1452,23 +1507,132 @@ final class RosterService
     }
 
     /**
-     * Remove an employee from a Squad and clean their future uncompleted roster entries.
+     * Atomically transfer an employee from their existing squad to a new target squad with an effective date.
+     * Preserves historical worked days (days < effectiveDate) and generates new squad schedule from effectiveDate onwards.
+     *
+     * @return array{success: bool, employee: Employee, effective_date: string}
      */
-    public function removeEmployeeFromSquad(RosterGroup $group, string $employeeId): bool
+    public function transferEmployeeSquad(RosterGroup $targetSquad, string $employeeId, string $effectiveDate): array
+    {
+        $targetRoster = $targetSquad->roster;
+        if ($targetRoster === null) {
+            throw new DomainException('Target squad does not have an associated roster.');
+        }
+
+        $effective = Carbon::parse($effectiveDate)->toDateString();
+        $targetStart = $targetRoster->start_date instanceof CarbonInterface ? $targetRoster->start_date->toDateString() : (string) $targetRoster->start_date;
+        $targetEnd = $targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date;
+
+        if ($effective < $targetStart || $effective > $targetEnd) {
+            throw new DomainException("Effective transfer date {$effective} must be within the roster period ({$targetStart} to {$targetEnd}).");
+        }
+
+        $this->ensureNotLockedInRange(Carbon::parse($effective), Carbon::parse($targetEnd));
+
+        $employee = Employee::findOrFail($employeeId);
+
+        DB::transaction(function () use ($targetSquad, $targetRoster, $employeeId, $effective, $targetStart, $targetEnd): void {
+            $prevDay = Carbon::parse($effective)->subDay()->toDateString();
+
+            // 1. Locate existing squad memberships overlapping with or starting after effective date
+            $existingMemberships = RosterGroupMember::query()
+                ->where('employee_id', $employeeId)
+                ->where('roster_group_id', '!=', $targetSquad->id)
+                ->whereHas('group.roster', function ($q) use ($targetStart, $targetEnd) {
+                    $q->where('start_date', '<=', $targetEnd)
+                        ->where('end_date', '>=', $targetStart)
+                        ->where('status', '!=', 'archived');
+                })
+                ->get();
+
+            foreach ($existingMemberships as $membership) {
+                $mStart = $membership->start_date?->toDateString() ?? $targetStart;
+                if ($mStart >= $effective) {
+                    // Membership started on or after transfer date -> delete entirely
+                    $membership->delete();
+                } else {
+                    // Cap previous membership at previous day
+                    $membership->update(['end_date' => $prevDay]);
+                }
+            }
+
+            // 2. Prune future uncompleted entries from the old squad/roster from effective date onwards
+            RosterEntry::where('employee_id', $employeeId)
+                ->where('roster_date', '>=', $effective)
+                ->where('status', '!=', 'locked')
+                ->delete();
+
+            // 3. Create or update target squad membership starting from effective date
+            RosterGroupMember::updateOrCreate(
+                [
+                    'roster_group_id' => $targetSquad->id,
+                    'employee_id' => $employeeId,
+                ],
+                [
+                    'start_date' => $effective,
+                    'end_date' => $targetEnd,
+                ]
+            );
+
+            // 4. Generate shifts for the new squad pattern starting from effective date
+            if ($targetSquad->roster_pattern_id && $targetSquad->pattern) {
+                $this->generateRoster([
+                    'pattern_id' => $targetSquad->roster_pattern_id,
+                    'start_date' => $effective,
+                    'end_date' => $targetEnd,
+                    'employee_ids' => [$employeeId],
+                    'conflict_mode' => 'overwrite',
+                    'status' => $targetRoster->status === 'published' ? 'published' : 'draft',
+                    'preserve_leaves' => true,
+                    'roster_id' => $targetRoster->id,
+                    'roster_group_id' => $targetSquad->id,
+                ]);
+            }
+        });
+
+        return [
+            'success' => true,
+            'employee' => $employee,
+            'effective_date' => $effective,
+        ];
+    }
+
+    /**
+     * Remove an employee from a Squad with optional effective date support.
+     * If effective date is supplied, preserves prior attendance and only prunes future uncompleted entries.
+     */
+    public function removeEmployeeFromSquad(RosterGroup $group, string $employeeId, ?string $effectiveDate = null): bool
     {
         $roster = $group->roster;
 
-        return DB::transaction(function () use ($group, $roster, $employeeId): bool {
-            RosterGroupMember::where('roster_group_id', $group->id)
-                ->where('employee_id', $employeeId)
-                ->delete();
+        return DB::transaction(function () use ($group, $roster, $employeeId, $effectiveDate): bool {
+            $rosterStart = $roster ? ($roster->start_date instanceof CarbonInterface ? $roster->start_date->toDateString() : (string) $roster->start_date) : null;
+            $effective = $effectiveDate ? Carbon::parse($effectiveDate)->toDateString() : null;
 
-            if ($roster) {
-                // Delete entries in this roster that haven't been locked
-                RosterEntry::where('roster_id', $roster->id)
+            if ($effective !== null && $rosterStart !== null && $effective > $rosterStart) {
+                $prevDay = Carbon::parse($effective)->subDay()->toDateString();
+                RosterGroupMember::where('roster_group_id', $group->id)
                     ->where('employee_id', $employeeId)
-                    ->where('status', '!=', 'locked')
+                    ->update(['end_date' => $prevDay]);
+
+                if ($roster) {
+                    RosterEntry::where('roster_id', $roster->id)
+                        ->where('employee_id', $employeeId)
+                        ->where('roster_date', '>=', $effective)
+                        ->where('status', '!=', 'locked')
+                        ->delete();
+                }
+            } else {
+                RosterGroupMember::where('roster_group_id', $group->id)
+                    ->where('employee_id', $employeeId)
                     ->delete();
+
+                if ($roster) {
+                    RosterEntry::where('roster_id', $roster->id)
+                        ->where('employee_id', $employeeId)
+                        ->where('status', '!=', 'locked')
+                        ->delete();
+                }
             }
 
             return true;
