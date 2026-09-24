@@ -245,7 +245,7 @@ export default function Index({
     summary,
 }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [viewMode, setViewMode] = useState<'squad' | 'flat' | null>(null);
+    const [viewMode, setViewMode] = useState<'squad' | 'flat'>('squad');
     const [deptFilter, setDeptFilter] = useState<string>(selected_department || 'all');
     const [squadFilter, setSquadFilter] = useState<string>('all');
     const [collapsedSquads, setCollapsedSquads] = useState<Record<string, boolean>>({});
@@ -269,6 +269,41 @@ export default function Index({
     const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
     const [isManageMembersModalOpen, setIsManageMembersModalOpen] = useState(false);
     const [targetSquadForEnroll, setTargetSquadForEnroll] = useState<RosterGroup | null>(null);
+
+    // Dedicated Modals for Personnel Lifecycle (Replacing Prompts/Confirms)
+    const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+    const [transferringEmployee, setTransferringEmployee] = useState<{
+        id: string;
+        full_name: string;
+        emp_no: string;
+        current_squad?: { id: string; name: string; code: string; color: string | null } | null;
+        current_roster?: { id: string; name: string; code: string } | null;
+    } | null>(null);
+    const [transferTargetSquadId, setTransferTargetSquadId] = useState<string>('');
+    const [transferEffectiveDate, setTransferEffectiveDate] = useState<string>('');
+    const [transferProcessing, setTransferProcessing] = useState(false);
+
+    const [isRemoveModalOpen, setIsRemoveModalOpen] = useState(false);
+    const [removingEmployee, setRemovingEmployee] = useState<{
+        id: string;
+        full_name: string;
+        emp_no: string;
+        squad_id?: string;
+        squad_name?: string;
+    } | null>(null);
+    const [removeMode, setRemoveMode] = useState<'effective_date' | 'purge_all'>('effective_date');
+    const [removeEffectiveDate, setRemoveEffectiveDate] = useState<string>('');
+    const [removeProcessing, setRemoveProcessing] = useState(false);
+
+    const [isRosterPersonnelModalOpen, setIsRosterPersonnelModalOpen] = useState(false);
+    const [personnelHubTab, setPersonnelHubTab] = useState<'available' | 'transfer' | 'assigned'>('available');
+    const [personnelHubTargetSquadId, setPersonnelHubTargetSquadId] = useState<string>('');
+    const [personnelHubSearch, setPersonnelHubSearch] = useState('');
+    const [personnelHubDeptFilter, setPersonnelHubDeptFilter] = useState('all');
+    const [personnelHubSelectedEmpIds, setPersonnelHubSelectedEmpIds] = useState<string[]>([]);
+    const [personnelHubEffectiveDate, setPersonnelHubEffectiveDate] = useState<string>('');
+    const [personnelHubProcessing, setPersonnelHubProcessing] = useState(false);
+
     const [selectedCell, setSelectedCell] = useState<{
         employeeId: string;
         employeeName: string;
@@ -278,11 +313,6 @@ export default function Index({
 
     // Filter matrix rows
     const filteredMatrix = useMemo(() => {
-        // First-time visit: no view mode or filter selected yet -> show empty table
-        if (!viewMode) {
-            return [];
-        }
-
         return matrix.filter((row) => {
             const matchesSearch =
                 !searchQuery ||
@@ -299,7 +329,7 @@ export default function Index({
 
             return matchesSearch && matchesDept && matchesSquad;
         });
-    }, [matrix, searchQuery, squadFilter, deptFilter, viewMode]);
+    }, [matrix, searchQuery, squadFilter, deptFilter]);
 
     // Group rows by Squad for Squad View
     const groupedBySquad = useMemo(() => {
@@ -831,7 +861,7 @@ export default function Index({
         });
     };
 
-    // 4. Enroll / Transfer Members State & Handlers
+    // 4. Dedicated Modal Openers & Handlers (Replacing native prompts & confirms)
     const [selectedEnrollEmpIds, setSelectedEnrollEmpIds] = useState<string[]>([]);
     const [memberSearchQuery, setMemberSearchQuery] = useState('');
     const [memberDeptFilter, setMemberDeptFilter] = useState('all');
@@ -865,56 +895,131 @@ export default function Index({
         );
     };
 
-    const handleTransferMember = (empId: string, empName: string) => {
-        if (!targetSquadForEnroll) return;
-        const effective = enrollEffectiveDate || active_roster?.start_date;
-        if (confirm(`Transfer '${empName}' to ${targetSquadForEnroll.name} effective from ${effective}?\n\n• Prior worked shifts before ${effective} will remain intact.\n• New squad shifts from ${effective} onwards will be generated.`)) {
-            router.post(
-                `/roster/squads/${targetSquadForEnroll.id}/transfer`,
-                {
-                    employee_id: empId,
-                    effective_date: effective,
-                },
-                {
-                    preserveScroll: true,
-                    onSuccess: () => {
-                        setIsManageMembersModalOpen(false);
-                    },
-                }
-            );
-        }
+    // 4a. Transfer Staff Modal Opener & Submitter
+    const openTransferModal = (emp: {
+        id: string;
+        full_name: string;
+        emp_no: string;
+        current_squad?: { id: string; name: string; code: string; color: string | null } | null;
+        current_roster?: { id: string; name: string; code: string } | null;
+    }) => {
+        setTransferringEmployee(emp);
+        const otherSquad = squads.find((s) => s.id !== emp.current_squad?.id) || squads[0];
+        setTransferTargetSquadId(otherSquad?.id || '');
+        const todayStr = new Date().toISOString().split('T')[0];
+        const defaultDate = active_roster?.start_date && todayStr < active_roster.start_date
+            ? active_roster.start_date
+            : todayStr;
+        setTransferEffectiveDate(defaultDate);
+        setIsTransferModalOpen(true);
     };
 
-    const handleRemoveMember = (squadId: string, empId: string, empName: string) => {
-        const today = new Date().toISOString().split('T')[0];
-        const choice = prompt(
-            `Choose removal option for ${empName}:\n\n` +
-            `Type "today" (or specific date YYYY-MM-DD) to end assignment effective from that date (preserves past attendance).\n` +
-            `Type "all" to delete all entries for this roster.`,
-            today
-        );
-        if (choice === null) return;
+    const handleTransferSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!transferringEmployee || !transferTargetSquadId || !transferEffectiveDate) return;
 
-        const effectiveDate = choice.trim().toLowerCase() === 'all'
-            ? null
-            : (choice.trim().toLowerCase() === 'today' ? today : choice.trim());
-
+        setTransferProcessing(true);
         router.post(
-            `/roster/squads/${squadId}/remove-member`,
+            `/roster/squads/${transferTargetSquadId}/transfer`,
             {
-                employee_id: empId,
+                employee_id: transferringEmployee.id,
+                effective_date: transferEffectiveDate,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setIsTransferModalOpen(false);
+                    setTransferringEmployee(null);
+                    setTransferProcessing(false);
+                },
+                onError: () => {
+                    setTransferProcessing(false);
+                },
+            }
+        );
+    };
+
+    // 4b. Remove Staff Modal Opener & Submitter
+    const openRemoveModal = (emp: {
+        id: string;
+        full_name: string;
+        emp_no: string;
+        squad_id?: string;
+        squad_name?: string;
+    }) => {
+        setRemovingEmployee(emp);
+        setRemoveMode(active_roster?.status === 'draft' ? 'purge_all' : 'effective_date');
+        setRemoveEffectiveDate(new Date().toISOString().split('T')[0]);
+        setIsRemoveModalOpen(true);
+    };
+
+    const handleRemoveSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!removingEmployee || !removingEmployee.squad_id) return;
+
+        const effectiveDate = removeMode === 'purge_all' ? null : (removeEffectiveDate || null);
+
+        setRemoveProcessing(true);
+        router.post(
+            `/roster/squads/${removingEmployee.squad_id}/remove-member`,
+            {
+                employee_id: removingEmployee.id,
                 effective_date: effectiveDate,
             },
-            { preserveScroll: true }
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setIsRemoveModalOpen(false);
+                    setRemovingEmployee(null);
+                    setRemoveProcessing(false);
+                },
+                onError: () => {
+                    setRemoveProcessing(false);
+                },
+            }
+        );
+    };
+
+    // 4c. Unified Roster Personnel Hub
+    const openRosterPersonnelModal = () => {
+        setPersonnelHubTab('available');
+        setPersonnelHubTargetSquadId(squads[0]?.id || '');
+        setPersonnelHubSearch('');
+        setPersonnelHubDeptFilter('all');
+        setPersonnelHubSelectedEmpIds([]);
+        setPersonnelHubEffectiveDate(active_roster?.start_date || new Date().toISOString().split('T')[0]);
+        setIsRosterPersonnelModalOpen(true);
+    };
+
+    const handleRosterPersonnelEnroll = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!personnelHubTargetSquadId || personnelHubSelectedEmpIds.length === 0) return;
+
+        setPersonnelHubProcessing(true);
+        router.post(
+            `/roster/squads/${personnelHubTargetSquadId}/enroll`,
+            {
+                employee_ids: personnelHubSelectedEmpIds,
+                effective_start_date: personnelHubEffectiveDate || undefined,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setPersonnelHubSelectedEmpIds([]);
+                    setIsRosterPersonnelModalOpen(false);
+                    setPersonnelHubProcessing(false);
+                },
+                onError: () => {
+                    setPersonnelHubProcessing(false);
+                },
+            }
         );
     };
 
     // 5. 1-Click Roster Sync
     const handleSyncRoster = () => {
         if (!active_roster) return;
-        if (confirm(`Synchronize calendar entries for all squads in '${active_roster.name}'? Existing manual supervisor overrides will be preserved.`)) {
-            router.post(`/roster/rosters/${active_roster.id}/sync`, {}, { preserveScroll: true });
-        }
+        router.post(`/roster/rosters/${active_roster.id}/sync`, {}, { preserveScroll: true });
     };
 
     // 6. Publish / Draft Toggle
@@ -942,9 +1047,9 @@ export default function Index({
         return (
             <tr key={row.employee.id} className="hover:bg-slate-800/40 transition">
                 {/* Employee Name (Sticky Left) */}
-                <td className="sticky left-0 z-20 bg-slate-900 px-4 py-2.5 border-r border-slate-800 max-w-[260px]">
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
+                <td className="sticky left-0 z-20 bg-slate-900 px-3.5 py-2 border-r border-slate-800 max-w-[260px] group/empcell">
+                    <div className="flex items-center justify-between gap-1.5">
+                        <div className="min-w-0 flex-1">
                             <div className="font-bold text-white truncate text-xs">
                                 {row.employee.full_name}
                             </div>
@@ -952,14 +1057,51 @@ export default function Index({
                                 {row.employee.emp_no} &bull; {row.employee.department?.name || 'General'}
                             </div>
                         </div>
-                        {row.squad && viewMode === 'flat' && (
-                            <span
-                                className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white shrink-0"
-                                style={{ backgroundColor: row.squad.color || '#3b82f6' }}
+                        <div className="flex items-center gap-1 shrink-0">
+                            {row.squad && viewMode === 'flat' && (
+                                <span
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white shrink-0"
+                                    style={{ backgroundColor: row.squad.color || '#3b82f6' }}
+                                >
+                                    {row.squad.code}
+                                </span>
+                            )}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    openTransferModal({
+                                        id: row.employee.id,
+                                        full_name: row.employee.full_name,
+                                        emp_no: row.employee.emp_no,
+                                        current_squad: row.squad ? { id: row.squad.id, name: row.squad.name, code: row.squad.code, color: row.squad.color } : null,
+                                        current_roster: active_roster ? { id: active_roster.id, name: active_roster.name, code: active_roster.code } : null,
+                                    });
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition"
+                                title="Transfer Staff to Another Squad / Rotation (Mid-Period)"
                             >
-                                {row.squad.code}
-                            </span>
-                        )}
+                                <ArrowLeftRight className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const assignedSquadId = row.squad?.id || squads[0]?.id;
+                                    openRemoveModal({
+                                        id: row.employee.id,
+                                        full_name: row.employee.full_name,
+                                        emp_no: row.employee.emp_no,
+                                        squad_id: assignedSquadId,
+                                        squad_name: row.squad?.name || 'Assigned Squad',
+                                    });
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                                title="Remove or End Assignment"
+                            >
+                                <UserMinus className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                     </div>
                 </td>
 
@@ -1116,14 +1258,25 @@ export default function Index({
                                 </button>
 
                                 {active_roster && (
-                                    <button
-                                        onClick={openNewSquadModal}
-                                        className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 hover:border-indigo-500/50 transition flex items-center gap-1.5 shadow-sm"
-                                        title="Create a new workforce squad under this roster"
-                                    >
-                                        <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
-                                        <span>+ Add Squad</span>
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={openRosterPersonnelModal}
+                                            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
+                                            title="Manage, enroll, or transfer personnel for this roster"
+                                        >
+                                            <Users className="w-3.5 h-3.5" />
+                                            <span>Manage Personnel</span>
+                                        </button>
+
+                                        <button
+                                            onClick={openNewSquadModal}
+                                            className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 hover:border-indigo-500/50 transition flex items-center gap-1.5 shadow-sm"
+                                            title="Create a new workforce squad under this roster"
+                                        >
+                                            <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+                                            <span>+ Add Squad</span>
+                                        </button>
+                                    </>
                                 )}
 
                                 {active_roster && (
@@ -1253,6 +1406,56 @@ export default function Index({
                         </div>
                     </div>
                 </div>
+
+                {/* 1b. Draft Mode Visual Alert Banner */}
+                {active_roster && active_roster.status === 'draft' && (
+                    <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-slate-900 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+                                <AlertTriangle className="w-5 h-5 text-amber-400" />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                                        Unpublished Draft Roster
+                                    </h4>
+                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-400/30 font-semibold">
+                                        Draft Stage &bull; Full Editing Enabled
+                                    </span>
+                                </div>
+                                <p className="text-xs text-slate-300 mt-0.5">
+                                    Shifts in this roster are not yet official or visible to standard staff. You can add/remove personnel, alter schedules, or publish when finalized.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                            <button
+                                type="button"
+                                onClick={openRosterPersonnelModal}
+                                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                            >
+                                <UserPlus className="w-3.5 h-3.5" />
+                                <span>Manage Personnel</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSyncRoster}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
+                            >
+                                <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Sync Shifts</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handlePublishToggle(true)}
+                                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-md"
+                            >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>Publish Official</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* 2. Control & Filter Strip */}
                 <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
@@ -4116,6 +4319,562 @@ export default function Index({
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+            {/* MODAL 8: Dedicated Temporal Transfer Staff Modal */}
+            {isTransferModalOpen && transferringEmployee && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsTransferModalOpen(false);
+                                setTransferringEmployee(null);
+                            }}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Mid-Period Operational Reassignment
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Transfer Staff &bull; {transferringEmployee.full_name}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Shift staff member to a new squad or rotation pattern effective from a specific date.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleTransferSubmit} className="space-y-4">
+                            {/* Current Squad Info */}
+                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                                <div>
+                                    <span className="text-[10px] text-slate-400 uppercase font-mono block">Current Squad / Roster</span>
+                                    <span className="text-xs font-bold text-white">
+                                        {transferringEmployee.current_squad?.name || 'Department Direct Assigned'}
+                                    </span>
+                                </div>
+                                {transferringEmployee.current_squad && (
+                                    <span
+                                        className="text-[10px] font-bold px-2 py-0.5 rounded text-white font-mono"
+                                        style={{ backgroundColor: transferringEmployee.current_squad.color || '#3b82f6' }}
+                                    >
+                                        {transferringEmployee.current_squad.code}
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Target Squad Selector */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Target Squad / Destination Rotation *
+                                </label>
+                                <select
+                                    required
+                                    value={transferTargetSquadId}
+                                    onChange={(e) => setTransferTargetSquadId(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                >
+                                    <option value="">-- Select Destination Squad --</option>
+                                    {squads.map((sq) => (
+                                        <option key={sq.id} value={sq.id}>
+                                            {sq.name} ({sq.code}) {sq.pattern ? `• ${sq.pattern.name} (${sq.pattern.cycle_length_days}d)` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Effective Transfer Date */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Effective Transfer Date (Start in new squad) *
+                                </label>
+                                <input
+                                    type="date"
+                                    required
+                                    value={transferEffectiveDate}
+                                    onChange={(e) => setTransferEffectiveDate(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            {/* Impact Summary Box */}
+                            <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 space-y-1.5 text-xs">
+                                <span className="font-semibold text-indigo-300 flex items-center gap-1">
+                                    <Info className="w-3.5 h-3.5" />
+                                    <span>Temporal Lineage Continuity Rules:</span>
+                                </span>
+                                <ul className="list-disc list-inside text-slate-300 text-[11px] space-y-1 pl-1">
+                                    <li>
+                                        <strong>Prior shifts before {transferEffectiveDate || '[Date]'}:</strong> Will remain 100% intact under the current squad with past attendance preserved.
+                                    </li>
+                                    <li>
+                                        <strong>Shifts from {transferEffectiveDate || '[Date]'} onwards:</strong> Will be generated under the new target squad's rotation pattern.
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsTransferModalOpen(false);
+                                        setTransferringEmployee(null);
+                                    }}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={transferProcessing || !transferTargetSquadId || !transferEffectiveDate}
+                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
+                                >
+                                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                                    <span>{transferProcessing ? 'Transferring...' : 'Execute Transfer'}</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 9: Dedicated Remove / End Assignment Modal */}
+            {isRemoveModalOpen && removingEmployee && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsRemoveModalOpen(false);
+                                setRemovingEmployee(null);
+                            }}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                Personnel Assignment Removal
+                            </span>
+                            <h3 className="text-base font-bold text-white mt-1">
+                                Remove Staff &bull; {removingEmployee.full_name}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Choose how to detach {removingEmployee.full_name} ({removingEmployee.emp_no}) from {removingEmployee.squad_name || 'this roster'}.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleRemoveSubmit} className="space-y-4">
+                            <div className="space-y-2.5">
+                                {/* Option 1: Effective-Dated End */}
+                                <label
+                                    onClick={() => setRemoveMode('effective_date')}
+                                    className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition ${
+                                        removeMode === 'effective_date'
+                                            ? 'bg-indigo-950/30 border-indigo-500/50 text-white'
+                                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                                    }`}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="removeMode"
+                                        checked={removeMode === 'effective_date'}
+                                        onChange={() => setRemoveMode('effective_date')}
+                                        className="mt-0.5 bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div className="space-y-1">
+                                        <span className="font-bold text-xs block text-slate-200">
+                                            End Assignment on Date (Recommended)
+                                        </span>
+                                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                                            Preserves past attendance and worked shifts prior to the selected date. Only clears future uncompleted shifts.
+                                        </p>
+                                    </div>
+                                </label>
+
+                                {removeMode === 'effective_date' && (
+                                    <div className="pl-6 pt-1">
+                                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                            Effective End Date *
+                                        </label>
+                                        <input
+                                            type="date"
+                                            required
+                                            value={removeEffectiveDate}
+                                            onChange={(e) => setRemoveEffectiveDate(e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Option 2: Complete Purge */}
+                                <label
+                                    onClick={() => setRemoveMode('purge_all')}
+                                    className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition ${
+                                        removeMode === 'purge_all'
+                                            ? 'bg-rose-950/30 border-rose-500/50 text-white'
+                                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                                    }`}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="removeMode"
+                                        checked={removeMode === 'purge_all'}
+                                        onChange={() => setRemoveMode('purge_all')}
+                                        className="mt-0.5 bg-slate-900 border-slate-700 text-rose-600 focus:ring-rose-500"
+                                    />
+                                    <div className="space-y-1">
+                                        <span className="font-bold text-xs block text-slate-200">
+                                            Complete Draft Purge
+                                        </span>
+                                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                                            Completely deletes all generated shifts for this employee for this month's roster.
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsRemoveModalOpen(false);
+                                        setRemovingEmployee(null);
+                                    }}
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={removeProcessing}
+                                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
+                                >
+                                    <UserMinus className="w-3.5 h-3.5" />
+                                    <span>{removeProcessing ? 'Removing...' : 'Confirm Removal'}</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 10: Unified Roster Personnel Management Hub */}
+            {isRosterPersonnelModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-4 shadow-2xl relative max-h-[88vh] overflow-y-auto flex flex-col">
+                        <button
+                            type="button"
+                            onClick={() => setIsRosterPersonnelModalOpen(false)}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Workforce Management
+                            </span>
+                            <h3 className="text-base md:text-lg font-bold text-white mt-1">
+                                Roster Personnel Hub &bull; {active_roster?.name || 'Active Roster'}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Add available staff, execute mid-period temporal transfers, or review currently enrolled personnel.
+                            </p>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                            <button
+                                type="button"
+                                onClick={() => setPersonnelHubTab('available')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    personnelHubTab === 'available'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                Available Staff (Unassigned)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPersonnelHubTab('transfer')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    personnelHubTab === 'transfer'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                Assigned Elsewhere / Transfer
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPersonnelHubTab('assigned')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    personnelHubTab === 'assigned'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                Current Roster Members ({filteredMatrix.length})
+                            </button>
+                        </div>
+
+                        {/* TAB 1: Available Staff (Direct Enrollment) */}
+                        {personnelHubTab === 'available' && (
+                            <form onSubmit={handleRosterPersonnelEnroll} className="space-y-3.5 flex-1 flex flex-col justify-between">
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Enroll Into Squad *
+                                            </label>
+                                            <select
+                                                required
+                                                value={personnelHubTargetSquadId}
+                                                onChange={(e) => setPersonnelHubTargetSquadId(e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                            >
+                                                {squads.map((sq) => (
+                                                    <option key={sq.id} value={sq.id}>
+                                                        {sq.name} ({sq.code}) {sq.pattern ? `• ${sq.pattern.name}` : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Effective Start Date *
+                                            </label>
+                                            <input
+                                                type="date"
+                                                required
+                                                value={personnelHubEffectiveDate}
+                                                onChange={(e) => setPersonnelHubEffectiveDate(e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Search & Dept Filters */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                            <input
+                                                type="text"
+                                                value={personnelHubSearch}
+                                                onChange={(e) => setPersonnelHubSearch(e.target.value)}
+                                                placeholder="Search available personnel..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500"
+                                            />
+                                        </div>
+                                        <select
+                                            value={personnelHubDeptFilter}
+                                            onChange={(e) => setPersonnelHubDeptFilter(e.target.value)}
+                                            className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300"
+                                        >
+                                            <option value="all">All Departments</option>
+                                            {departments.map((d) => (
+                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* Available Staff List */}
+                                    <div className="bg-slate-950 rounded-xl border border-slate-800 h-60 overflow-y-auto divide-y divide-slate-900 p-1">
+                                        {available_employees
+                                            .filter((emp) => emp.is_available)
+                                            .filter((emp) => {
+                                                const matchesSearch =
+                                                    emp.full_name.toLowerCase().includes(personnelHubSearch.toLowerCase()) ||
+                                                    emp.emp_no.toLowerCase().includes(personnelHubSearch.toLowerCase());
+                                                const matchesDept =
+                                                    personnelHubDeptFilter === 'all' ||
+                                                    emp.department_id === personnelHubDeptFilter ||
+                                                    emp.department_name === personnelHubDeptFilter;
+                                                return matchesSearch && matchesDept;
+                                            })
+                                            .map((emp) => {
+                                                const isSelected = personnelHubSelectedEmpIds.includes(emp.id);
+                                                return (
+                                                    <div
+                                                        key={emp.id}
+                                                        onClick={() => {
+                                                            const next = isSelected
+                                                                ? personnelHubSelectedEmpIds.filter((id) => id !== emp.id)
+                                                                : [...personnelHubSelectedEmpIds, emp.id];
+                                                            setPersonnelHubSelectedEmpIds(next);
+                                                        }}
+                                                        className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                            isSelected ? 'bg-indigo-600/20 border border-indigo-500/30' : 'hover:bg-slate-900/60'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5">
+                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                                                isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                            }`}>
+                                                                {isSelected && <Check className="w-3 h-3" />}
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-xs text-white block">
+                                                                    {emp.full_name}
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                                    {emp.emp_no} &bull; {emp.department_name}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                            Available
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        {available_employees.filter((emp) => emp.is_available).length === 0 && (
+                                            <div className="p-8 text-center text-xs text-slate-500">
+                                                No unassigned employees available for direct enrollment. Check the "Transfer" tab to reassign staff.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="pt-3 flex items-center justify-between border-t border-slate-800">
+                                    <span className="text-xs text-slate-400">
+                                        {personnelHubSelectedEmpIds.length} Staff Selected
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsRosterPersonnelModalOpen(false)}
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={personnelHubProcessing || personnelHubSelectedEmpIds.length === 0 || !personnelHubTargetSquadId}
+                                            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-40"
+                                        >
+                                            {personnelHubProcessing ? 'Enrolling...' : `Enroll Selected (${personnelHubSelectedEmpIds.length})`}
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        )}
+
+                        {/* TAB 2: Assigned Elsewhere / Transfer */}
+                        {personnelHubTab === 'transfer' && (
+                            <div className="space-y-3">
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 divide-y divide-slate-900 max-h-72 overflow-y-auto p-1">
+                                    {available_employees
+                                        .filter((emp) => !emp.is_available)
+                                        .map((emp) => (
+                                            <div key={emp.id} className="p-3 flex items-center justify-between hover:bg-slate-900/50 transition">
+                                                <div>
+                                                    <span className="font-semibold text-xs text-white block">
+                                                        {emp.full_name}
+                                                    </span>
+                                                    <span className="text-[10px] text-amber-300 font-mono">
+                                                        {emp.exclusion_reason || 'Currently Scheduled in another squad'}
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsRosterPersonnelModalOpen(false);
+                                                        openTransferModal({
+                                                            id: emp.id,
+                                                            full_name: emp.full_name,
+                                                            emp_no: emp.emp_no,
+                                                            current_squad: emp.current_squad,
+                                                            current_roster: emp.current_roster,
+                                                        });
+                                                    }}
+                                                    className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                                                >
+                                                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                                                    <span>Transfer to this Roster</span>
+                                                </button>
+                                            </div>
+                                        ))}
+                                    {available_employees.filter((emp) => !emp.is_available).length === 0 && (
+                                        <div className="p-8 text-center text-xs text-slate-500">
+                                            No occupied personnel found.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TAB 3: Current Roster Members */}
+                        {personnelHubTab === 'assigned' && (
+                            <div className="space-y-3">
+                                <div className="bg-slate-950 rounded-xl border border-slate-800 divide-y divide-slate-900 max-h-72 overflow-y-auto p-1">
+                                    {filteredMatrix.map((r) => (
+                                        <div key={r.employee.id} className="p-3 flex items-center justify-between hover:bg-slate-900/50 transition">
+                                            <div>
+                                                <span className="font-semibold text-xs text-white block">
+                                                    {r.employee.full_name}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                    {r.employee.emp_no} &bull; {r.employee.department?.name || 'General'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {r.squad && (
+                                                    <span
+                                                        className="text-[10px] font-bold px-2 py-0.5 rounded text-white font-mono"
+                                                        style={{ backgroundColor: r.squad.color || '#3b82f6' }}
+                                                    >
+                                                        {r.squad.name}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsRosterPersonnelModalOpen(false);
+                                                        openTransferModal({
+                                                            id: r.employee.id,
+                                                            full_name: r.employee.full_name,
+                                                            emp_no: r.employee.emp_no,
+                                                            current_squad: r.squad ? { id: r.squad.id, name: r.squad.name, code: r.squad.code, color: r.squad.color } : null,
+                                                            current_roster: active_roster ? { id: active_roster.id, name: active_roster.name, code: active_roster.code } : null,
+                                                        });
+                                                    }}
+                                                    className="px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                                                >
+                                                    <ArrowLeftRight className="w-3 h-3" />
+                                                    <span>Transfer</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsRosterPersonnelModalOpen(false);
+                                                        openRemoveModal({
+                                                            id: r.employee.id,
+                                                            full_name: r.employee.full_name,
+                                                            emp_no: r.employee.emp_no,
+                                                            squad_id: r.squad?.id || squads[0]?.id,
+                                                            squad_name: r.squad?.name || 'Assigned Squad',
+                                                        });
+                                                    }}
+                                                    className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                                                >
+                                                    <UserMinus className="w-3 h-3" />
+                                                    <span>Remove</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
