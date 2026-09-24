@@ -478,7 +478,7 @@ final class RosterService
             } elseif (! empty($data['department_id']) && $data['department_id'] !== 'all') {
                 $employeeQuery->where('department_id', $data['department_id']);
             }
-            $targetEmployees = $employeeQuery->get(['id', 'hire_date']);
+            $targetEmployees = $employeeQuery->get(['id', 'date_of_joining']);
 
             if ($targetEmployees->isEmpty()) {
                 return ['created' => 0, 'updated' => 0, 'total' => 0];
@@ -571,7 +571,7 @@ final class RosterService
 
             foreach ($targetEmployees as $emp) {
                 $empSourceCopy = $sourceCopyEntries?->get($emp->id, collect());
-                $empHireDate = $emp->hire_date ? Carbon::parse($emp->hire_date)->startOfDay() : null;
+                $empHireDate = $emp->date_of_joining ? Carbon::parse($emp->date_of_joining)->startOfDay() : null;
                 $memberRec = $memberDateLookup[$emp->id] ?? null;
                 $memberStart = $memberRec?->start_date ? Carbon::parse($memberRec->start_date)->startOfDay() : null;
                 $memberEnd = $memberRec?->end_date ? Carbon::parse($memberRec->end_date)->endOfDay() : null;
@@ -1364,7 +1364,7 @@ final class RosterService
 
         // 2. Query active employees
         $query = Employee::query()
-            ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id', 'hire_date')
+            ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id', 'date_of_joining')
             ->with(['department:id,name,code', 'designation:id,title'])
             ->where('employment_status', 'active')
             ->orderBy('emp_no');
@@ -1407,7 +1407,8 @@ final class RosterService
                 'id' => $emp->id,
                 'emp_no' => $emp->emp_no,
                 'full_name' => $emp->full_name,
-                'hire_date' => $emp->hire_date?->toDateString(),
+                'date_of_joining' => $emp->date_of_joining?->toDateString(),
+                'hire_date' => $emp->date_of_joining?->toDateString(),
                 'department_name' => $emp->department?->name ?? 'General',
                 'designation_title' => $emp->designation?->title ?? 'Staff',
                 'is_available' => ! $isEnrolledElsewhere,

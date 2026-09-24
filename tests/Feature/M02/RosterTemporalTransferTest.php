@@ -110,7 +110,7 @@ final class RosterTemporalTransferTest extends TestCase
             'marital_status' => 'single',
             'designation_id' => null,
             'employment_status' => 'active',
-            'hire_date' => '2026-09-01',
+            'date_of_joining' => '2026-09-01',
         ]);
     }
 
@@ -285,7 +285,7 @@ final class RosterTemporalTransferTest extends TestCase
             'marital_status' => 'single',
             'designation_id' => null,
             'employment_status' => 'active',
-            'hire_date' => '2026-09-16',
+            'date_of_joining' => '2026-09-16',
         ]);
 
         $roster = Roster::create([
