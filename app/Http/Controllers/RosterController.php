@@ -7,6 +7,9 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Roster\ClearRosterRequest;
 use App\Http\Requests\Roster\GenerateRosterRequest;
 use App\Http\Requests\Roster\PublishRosterRequest;
+use App\Http\Requests\Roster\RemoveRosterAllocationRequest;
+use App\Http\Requests\Roster\StoreRosterAllocationRequest;
+use App\Http\Requests\Roster\TransferRosterAllocationRequest;
 use App\Http\Requests\Roster\UpdateRosterEntryRequest;
 use App\Models\Roster;
 use App\Services\RosterService;
@@ -251,5 +254,58 @@ final class RosterController extends Controller
         );
 
         return redirect()->back()->with('success', "Cleared {$count} roster entries.");
+    }
+
+    /**
+     * Allocate employee(s) to a named roster for a specific date range.
+     */
+    public function storeAllocation(StoreRosterAllocationRequest $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validated();
+
+        $count = $this->rosterService->allocateEmployee(
+            $roster->id,
+            $validated['employee_ids'],
+            $validated['effective_from'],
+            $validated['effective_to'],
+            $validated['pattern_id'] ?? null,
+            $validated['notes'] ?? null
+        );
+
+        return redirect()->back()->with('success', "{$count} employee(s) successfully allocated to roster '{$roster->name}'.");
+    }
+
+    /**
+     * Remove an employee from a roster (full month or effective date).
+     */
+    public function removeAllocation(RemoveRosterAllocationRequest $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validated();
+
+        $this->rosterService->deallocateEmployee(
+            $roster->id,
+            $validated['employee_id'],
+            $validated['effective_removal_date'] ?? null
+        );
+
+        return redirect()->back()->with('success', "Employee successfully removed from roster '{$roster->name}'.");
+    }
+
+    /**
+     * Transfer an employee from source roster to target roster starting on transfer date.
+     */
+    public function transferRoster(TransferRosterAllocationRequest $request, Roster $roster): RedirectResponse
+    {
+        $validated = $request->validated();
+
+        $this->rosterService->transferEmployee(
+            $roster->id,
+            $validated['target_roster_id'],
+            $validated['employee_id'],
+            $validated['transfer_date'],
+            $validated['pattern_id'] ?? null
+        );
+
+        return redirect()->back()->with('success', "Employee successfully transferred to target roster.");
     }
 }

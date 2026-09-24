@@ -213,8 +213,13 @@ export default function Index({
     const [isNewRosterModalOpen, setIsNewRosterModalOpen] = useState(false);
     const [isQuickPatternModalOpen, setIsQuickPatternModalOpen] = useState(false);
     const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
+    const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
+    const [isRemoveEmployeeModalOpen, setIsRemoveEmployeeModalOpen] = useState(false);
+    const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+
     const [quickPatternEmpSearch, setQuickPatternEmpSearch] = useState('');
     const [quickPatternDeptFilter, setQuickPatternDeptFilter] = useState('all');
+    const [addEmpSearch, setAddEmpSearch] = useState('');
 
     const [selectedCell, setSelectedCell] = useState<{
         employeeId: string;
@@ -411,9 +416,10 @@ export default function Index({
         roster_id: active_roster?.id || '',
     });
 
-    const openQuickPatternModal = () => {
+    const openQuickPatternModal = (empId?: string) => {
         setQuickPatternEmpSearch('');
         setQuickPatternDeptFilter('all');
+        const empList = empId ? [empId] : matrix.map((r) => r.employee.id);
         quickPatternForm.setData({
             pattern_id: patterns[0]?.id || '',
             start_date: active_roster?.start_date || `${year}-${String(month).padStart(2, '0')}-01`,
@@ -421,7 +427,7 @@ export default function Index({
                 const lastDay = new Date(year, month, 0).getDate();
                 return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
             })(),
-            employee_ids: matrix.map((r) => r.employee.id),
+            employee_ids: empList,
             preserve_leaves: true,
             status: active_roster?.status === 'draft' ? 'draft' : 'published',
             roster_id: active_roster?.id || '',
@@ -470,6 +476,97 @@ export default function Index({
         });
     };
 
+    // 5. Add Employee Allocation Form
+    const addEmployeeForm = useForm({
+        employee_ids: [] as string[],
+        effective_from: active_roster?.start_date || `${year}-${String(month).padStart(2, '0')}-01`,
+        effective_to: active_roster?.end_date || `${year}-${String(month).padStart(2, '0')}-30`,
+        pattern_id: '',
+        notes: '',
+    });
+
+    const openAddEmployeeModal = () => {
+        if (!active_roster) return;
+        addEmployeeForm.setData({
+            employee_ids: [],
+            effective_from: active_roster.start_date,
+            effective_to: active_roster.end_date,
+            pattern_id: '',
+            notes: '',
+        });
+        setAddEmpSearch('');
+        setIsAddEmployeeModalOpen(true);
+    };
+
+    const handleAddEmployeeSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!active_roster) return;
+        addEmployeeForm.post(`/roster/rosters/${active_roster.id}/allocations`, {
+            preserveScroll: true,
+            onSuccess: () => setIsAddEmployeeModalOpen(false),
+        });
+    };
+
+    // 6. Remove Employee Allocation Form
+    const removeEmployeeForm = useForm({
+        employee_id: '',
+        effective_removal_date: active_roster?.start_date || '',
+        is_full_month: false,
+    });
+
+    const openRemoveEmployeeModal = (empId?: string) => {
+        if (!active_roster) return;
+        const targetEmp = empId || matrix[0]?.employee.id || '';
+        removeEmployeeForm.setData({
+            employee_id: targetEmp,
+            effective_removal_date: active_roster.start_date,
+            is_full_month: false,
+        });
+        setIsRemoveEmployeeModalOpen(true);
+    };
+
+    const handleRemoveEmployeeSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!active_roster) return;
+        router.delete(`/roster/rosters/${active_roster.id}/allocations`, {
+            data: {
+                employee_id: removeEmployeeForm.data.employee_id,
+                effective_removal_date: removeEmployeeForm.data.is_full_month ? null : removeEmployeeForm.data.effective_removal_date,
+            },
+            preserveScroll: true,
+            onSuccess: () => setIsRemoveEmployeeModalOpen(false),
+        });
+    };
+
+    // 7. Transfer / Change Pattern Form
+    const transferForm = useForm({
+        employee_id: '',
+        target_roster_id: '',
+        transfer_date: active_roster?.start_date || '',
+        pattern_id: '',
+    });
+
+    const openTransferModal = (empId?: string) => {
+        if (!active_roster) return;
+        const midDay = `${year}-${String(month).padStart(2, '0')}-15`;
+        transferForm.setData({
+            employee_id: empId || matrix[0]?.employee.id || '',
+            target_roster_id: active_roster.id,
+            transfer_date: midDay,
+            pattern_id: patterns[0]?.id || '',
+        });
+        setIsTransferModalOpen(true);
+    };
+
+    const handleTransferSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!active_roster) return;
+        transferForm.post(`/roster/rosters/${active_roster.id}/transfer`, {
+            preserveScroll: true,
+            onSuccess: () => setIsTransferModalOpen(false),
+        });
+    };
+
     // Publish / Revert Draft Toggle
     const handlePublishToggle = (publish: boolean) => {
         if (!active_roster) return;
@@ -499,6 +596,34 @@ export default function Index({
                                 {row.employee.emp_no} &bull; {row.employee.department?.name || 'General'}
                             </div>
                         </div>
+                        {active_roster && (
+                            <div className="opacity-0 group-hover/empcell:opacity-100 flex items-center gap-1 transition shrink-0 no-print">
+                                <button
+                                    type="button"
+                                    onClick={() => openTransferModal(row.employee.id)}
+                                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                                    title="Transfer employee or change pattern effective date"
+                                >
+                                    <ArrowLeftRight className="w-3 h-3 text-sky-400" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => openQuickPatternModal(row.employee.id)}
+                                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                                    title="Apply shift pattern to date range for this employee"
+                                >
+                                    <Sparkles className="w-3 h-3 text-amber-300" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => openRemoveEmployeeModal(row.employee.id)}
+                                    className="p-1 rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 transition"
+                                    title="Remove employee from roster"
+                                >
+                                    <Trash2 className="w-3 h-3 text-rose-400" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </td>
 
@@ -513,6 +638,18 @@ export default function Index({
                                 className="border-r border-slate-800/60 text-center p-0.5 hover:bg-indigo-600/20 cursor-pointer"
                             >
                                 <span className="text-[10px] text-slate-600">-</span>
+                            </td>
+                        );
+                    }
+
+                    if (cell.is_pre_hire) {
+                        return (
+                            <td
+                                key={d.date}
+                                className="border-r border-slate-800/60 p-0.5 text-center relative bg-slate-950/80 cursor-not-allowed select-none"
+                                title={cell.notes || 'Mid-Joiner: Not yet employed'}
+                            >
+                                <span className="text-[9px] font-mono text-slate-600 italic">Not Join</span>
                             </td>
                         );
                     }
@@ -636,12 +773,12 @@ export default function Index({
                                         onChange={(e) => handleRosterChange(e.target.value)}
                                         className="bg-slate-950 border border-slate-700 text-white font-bold text-base sm:text-lg rounded-xl px-3.5 py-1.5 pr-9 hover:border-indigo-500 focus:ring-2 focus:ring-indigo-500 transition shadow-inner cursor-pointer"
                                     >
+                                        <option value="">-- Select a Roster --</option>
                                         {rosters.map((rst) => (
                                             <option key={rst.id} value={rst.id}>
                                                 {rst.name} ({rst.code}) • {rst.start_date} → {rst.end_date} [{rst.status.toUpperCase()}]
                                             </option>
                                         ))}
-                                        {rosters.length === 0 && <option value="">No Rosters Found</option>}
                                     </select>
                                 </div>
 
@@ -656,6 +793,33 @@ export default function Index({
 
                                 {active_roster && (
                                     <>
+                                        <button
+                                            onClick={openAddEmployeeModal}
+                                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
+                                            title="Add allocated employees to active roster"
+                                        >
+                                            <Plus className="w-3.5 h-3.5" />
+                                            <span>Add Employees</span>
+                                        </button>
+
+                                        <button
+                                            onClick={() => openRemoveEmployeeModal()}
+                                            className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs font-semibold border border-rose-800/60 hover:border-rose-700 transition flex items-center gap-1.5 shadow-sm"
+                                            title="Remove an employee from active roster"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                            <span>Remove Employee</span>
+                                        </button>
+
+                                        <button
+                                            onClick={() => openTransferModal()}
+                                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
+                                            title="Transfer employee starting on effective date"
+                                        >
+                                            <ArrowLeftRight className="w-3.5 h-3.5 text-sky-400" />
+                                            <span>Transfer</span>
+                                        </button>
+
                                         <button
                                             onClick={openCloneModal}
                                             className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 shadow-sm"
@@ -1620,6 +1784,351 @@ export default function Index({
                                     className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition disabled:opacity-50"
                                 >
                                     {cloneForm.processing ? 'Cloning...' : 'Clone Structure'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 5: Add Employee Allocation Modal */}
+            {isAddEmployeeModalOpen && active_roster && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsAddEmployeeModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                Roster Membership
+                            </span>
+                            <h3 className="text-lg font-bold text-white mt-1">
+                                Add Personnel to Roster
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                Select unallocated staff to assign to {active_roster.name}.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleAddEmployeeSubmit} className="space-y-4 text-xs">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-slate-400 font-medium mb-1">
+                                        Effective From Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={addEmployeeForm.data.effective_from}
+                                        onChange={(e) => addEmployeeForm.setData('effective_from', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-slate-400 font-medium mb-1">
+                                        Effective To Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={addEmployeeForm.data.effective_to}
+                                        onChange={(e) => addEmployeeForm.setData('effective_to', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Initial Shift Pattern (Optional)
+                                </label>
+                                <select
+                                    value={addEmployeeForm.data.pattern_id}
+                                    onChange={(e) => addEmployeeForm.setData('pattern_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    <option value="">No Initial Pattern (Rest Days / Empty)</option>
+                                    {patterns.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name} ({p.code}) • {p.pattern_type.toUpperCase()}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Select Available Employees ({available_employees.length} available)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={addEmpSearch}
+                                    onChange={(e) => setAddEmpSearch(e.target.value)}
+                                    placeholder="Search available staff..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-white mb-2"
+                                />
+                                <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-xl p-2 bg-slate-950/60 divide-y divide-slate-800/50">
+                                    {available_employees
+                                        .filter((e) => !addEmpSearch || e.full_name.toLowerCase().includes(addEmpSearch.toLowerCase()) || e.emp_no.toLowerCase().includes(addEmpSearch.toLowerCase()))
+                                        .map((emp) => {
+                                            const isSelected = addEmployeeForm.data.employee_ids.includes(emp.id);
+                                            return (
+                                                <label key={emp.id} className="flex items-center justify-between px-2.5 py-1.5 hover:bg-slate-800/40 rounded-lg cursor-pointer">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    addEmployeeForm.setData('employee_ids', [...addEmployeeForm.data.employee_ids, emp.id]);
+                                                                } else {
+                                                                    addEmployeeForm.setData('employee_ids', addEmployeeForm.data.employee_ids.filter((id) => id !== emp.id));
+                                                                }
+                                                            }}
+                                                            className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                                                        />
+                                                        <div>
+                                                            <div className="font-semibold text-white">{emp.full_name}</div>
+                                                            <div className="text-[10px] text-slate-400 font-mono">{emp.emp_no} &bull; {emp.department_name}</div>
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            );
+                                        })}
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAddEmployeeModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={addEmployeeForm.processing || addEmployeeForm.data.employee_ids.length === 0}
+                                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition disabled:opacity-50"
+                                >
+                                    {addEmployeeForm.processing ? 'Allocating...' : `Allocate ${addEmployeeForm.data.employee_ids.length} Staff`}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 6: Remove Employee Allocation Modal */}
+            {isRemoveEmployeeModalOpen && active_roster && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsRemoveEmployeeModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                De-Allocation
+                            </span>
+                            <h3 className="text-lg font-bold text-white mt-1">
+                                Remove Personnel from Roster
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                De-allocate employee from {active_roster.name}.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleRemoveEmployeeSubmit} className="space-y-4 text-xs">
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Select Employee
+                                </label>
+                                <select
+                                    value={removeEmployeeForm.data.employee_id}
+                                    onChange={(e) => removeEmployeeForm.setData('employee_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    {matrix.map((r) => (
+                                        <option key={r.employee.id} value={r.employee.id}>
+                                            {r.employee.full_name} ({r.employee.emp_no})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-slate-300 font-medium cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={removeEmployeeForm.data.is_full_month}
+                                        onChange={(e) => removeEmployeeForm.setData('is_full_month', e.target.checked)}
+                                        className="w-4 h-4 rounded text-rose-600 bg-slate-950 border-slate-700 focus:ring-rose-500"
+                                    />
+                                    <span>Remove Completely for Full Month</span>
+                                </label>
+
+                                {!removeEmployeeForm.data.is_full_month && (
+                                    <div>
+                                        <label className="block text-slate-400 font-medium mb-1">
+                                            Effective Removal Date
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={removeEmployeeForm.data.effective_removal_date}
+                                            onChange={(e) => removeEmployeeForm.setData('effective_removal_date', e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-1">
+                                            Dates prior to this remain intact in this roster. From this date onwards, staff is deallocated.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsRemoveEmployeeModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold shadow-md transition"
+                                >
+                                    Remove Staff
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 7: Transfer Roster Modal */}
+            {isTransferModalOpen && active_roster && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setIsTransferModalOpen(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                Date-Bounded Roster Transfer
+                            </span>
+                            <h3 className="text-lg font-bold text-white mt-1">
+                                Transfer Employee to Roster
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                Move personnel from {active_roster.name} to another active roster starting on transfer date.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleTransferSubmit} className="space-y-4 text-xs">
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Select Employee
+                                </label>
+                                <select
+                                    value={transferForm.data.employee_id}
+                                    onChange={(e) => transferForm.setData('employee_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    {matrix.map((r) => (
+                                        <option key={r.employee.id} value={r.employee.id}>
+                                            {r.employee.full_name} ({r.employee.emp_no})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Destination Roster
+                                </label>
+                                <select
+                                    required
+                                    value={transferForm.data.target_roster_id}
+                                    onChange={(e) => transferForm.setData('target_roster_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    <option value={active_roster.id}>
+                                        Same Roster: {active_roster.name} (Shift Pattern Switch)
+                                    </option>
+                                    {rosters.filter((r) => r.id !== active_roster.id).map((r) => (
+                                        <option key={r.id} value={r.id}>
+                                            {r.name} ({r.code})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Effective Date
+                                </label>
+                                <input
+                                    type="date"
+                                    required
+                                    value={transferForm.data.transfer_date}
+                                    onChange={(e) => transferForm.setData('transfer_date', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:ring-1 focus:ring-indigo-500"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    {transferForm.data.target_roster_id === active_roster.id
+                                        ? `Shifts prior to this date remain under previous pattern. From this date onwards, employee switches to new pattern.`
+                                        : `Dates before this stay in ${active_roster.name}. From this date onwards, staff is transferred to target roster.`}
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-slate-400 font-medium mb-1">
+                                    Target Shift Pattern
+                                </label>
+                                <select
+                                    value={transferForm.data.pattern_id}
+                                    onChange={(e) => transferForm.setData('pattern_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-medium focus:ring-1 focus:ring-indigo-500"
+                                >
+                                    <option value="">No Initial Pattern (Rest Days / Empty)</option>
+                                    {patterns.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name} ({p.code}) • {p.pattern_type.toUpperCase()}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsTransferModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={transferForm.processing || !transferForm.data.target_roster_id}
+                                    className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold shadow-md transition disabled:opacity-50"
+                                >
+                                    {transferForm.processing
+                                        ? 'Updating...'
+                                        : transferForm.data.target_roster_id === active_roster.id
+                                        ? 'Apply Pattern Switch'
+                                        : 'Transfer Employee'}
                                 </button>
                             </div>
                         </form>

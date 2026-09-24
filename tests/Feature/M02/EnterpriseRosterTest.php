@@ -287,4 +287,100 @@ final class EnterpriseRosterTest extends TestCase
         $this->expectException(DomainException::class);
         $rosterService->deleteRoster($roster);
     }
+
+    public function test_unselected_roster_returns_empty_matrix(): void
+    {
+        $this->actingAs($this->admin);
+
+        $response = $this->get('/roster');
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Roster/Index')
+            ->where('active_roster', null)
+            ->where('matrix', [])
+        );
+    }
+
+    public function test_allocate_and_deallocate_employee_with_effective_dates(): void
+    {
+        $this->actingAs($this->admin);
+        $rosterService = app(RosterService::class);
+
+        $roster = $rosterService->createRoster([
+            'name' => 'June 2027 Roster A',
+            'start_date' => '2027-06-01',
+            'end_date' => '2027-06-30',
+            'status' => 'draft',
+        ]);
+
+        // Allocate emp1 to roster
+        $res = $this->post(route('roster.allocations.store', $roster->id), [
+            'employee_ids' => [$this->emp1->id],
+            'effective_from' => '2027-06-01',
+            'effective_to' => '2027-06-30',
+        ]);
+        $res->assertRedirect();
+        $this->assertDatabaseHas('roster_employee_allocations', [
+            'roster_id' => $roster->id,
+            'employee_id' => $this->emp1->id,
+        ]);
+
+        // Deallocate emp1 starting from June 16
+        $res2 = $this->delete(route('roster.allocations.destroy', $roster->id), [
+            'employee_id' => $this->emp1->id,
+            'effective_removal_date' => '2027-06-16',
+        ]);
+        $res2->assertRedirect();
+        $this->assertDatabaseHas('roster_employee_allocations', [
+            'roster_id' => $roster->id,
+            'employee_id' => $this->emp1->id,
+            'effective_to' => '2027-06-15',
+        ]);
+    }
+
+    public function test_transfer_employee_between_rosters(): void
+    {
+        $this->actingAs($this->admin);
+        $rosterService = app(RosterService::class);
+
+        $rosterA = $rosterService->createRoster([
+            'name' => 'July 2027 Roster A',
+            'start_date' => '2027-07-01',
+            'end_date' => '2027-07-31',
+            'status' => 'draft',
+        ]);
+
+        $rosterB = $rosterService->createRoster([
+            'name' => 'July 2027 Roster B',
+            'start_date' => '2027-07-01',
+            'end_date' => '2027-07-31',
+            'status' => 'draft',
+        ]);
+
+        // Allocate to Roster A
+        $rosterService->allocateEmployee($rosterA->id, [$this->emp1->id], '2027-07-01', '2027-07-31');
+
+        // Transfer to Roster B effective July 16
+        $res = $this->post(route('roster.transfer', $rosterA->id), [
+            'employee_id' => $this->emp1->id,
+            'target_roster_id' => $rosterB->id,
+            'transfer_date' => '2027-07-16',
+        ]);
+        $res->assertRedirect();
+
+        // Check allocation A ended on July 15
+        $this->assertDatabaseHas('roster_employee_allocations', [
+            'roster_id' => $rosterA->id,
+            'employee_id' => $this->emp1->id,
+            'effective_to' => '2027-07-15',
+        ]);
+
+        // Check allocation B starts on July 16
+        $this->assertDatabaseHas('roster_employee_allocations', [
+            'roster_id' => $rosterB->id,
+            'employee_id' => $this->emp1->id,
+            'effective_from' => '2027-07-16',
+            'effective_to' => '2027-07-31',
+        ]);
+    }
 }

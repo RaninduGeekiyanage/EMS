@@ -193,6 +193,16 @@ final class Employee extends Model
         return $this->hasMany(RosterEntry::class, 'employee_id');
     }
 
+    /**
+     * Get the roster allocations for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<RosterEmployeeAllocation, $this>
+     */
+    public function rosterAllocations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(RosterEmployeeAllocation::class, 'employee_id');
+    }
+
 
     /**
      * Get the organizational Job Grade (OC Grade) of the employee.

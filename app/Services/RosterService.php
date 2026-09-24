@@ -10,6 +10,7 @@ use App\Models\LeaveRequest;
 use App\Models\PayrollRun;
 use App\Models\PublicHoliday;
 use App\Models\Roster;
+use App\Models\RosterEmployeeAllocation;
 use App\Models\RosterEntry;
 use App\Models\RosterPattern;
 use App\Models\Shift;
@@ -60,12 +61,6 @@ final class RosterService
             ])->find($rosterId);
         }
 
-        if ($activeRoster === null) {
-            $activeRoster = Roster::with([
-                'department:id,name,code',
-            ])->where('status', '!=', 'archived')->forMonth($year, $month)->first() ?? $allRosters->first();
-        }
-
         // 1. Generate Days list for headers
         $days = [];
         $holidays = PublicHoliday::whereBetween('holiday_date', [$startDate->toDateString(), $endDate->toDateString()])
@@ -101,19 +96,38 @@ final class RosterService
             ];
         }
 
-        // 2. Query Employees by selected department or active roster's department
-        $employeeQuery = Employee::query()
-            ->select('id', 'emp_no', 'full_name', 'department_id')
-            ->with(['department:id,name'])
-            ->where('employment_status', 'active')
-            ->orderBy('emp_no');
-
+        // 2. Query Employees: If no roster is selected, return empty matrix (Requirement 1 & 2)
+        $employees = collect();
         $targetDeptId = $departmentId ?? $activeRoster?->department_id;
-        if ($targetDeptId !== null && $targetDeptId !== '' && $targetDeptId !== 'all') {
-            $employeeQuery->where('department_id', $targetDeptId);
+
+        if ($activeRoster !== null) {
+            $allocatedEmpIds = RosterEmployeeAllocation::query()
+                ->where('roster_id', $activeRoster->id)
+                ->where('effective_from', '<=', $endDate->toDateString())
+                ->where('effective_to', '>=', $startDate->toDateString())
+                ->pluck('employee_id');
+
+            $entryEmpIds = RosterEntry::query()
+                ->where('roster_id', $activeRoster->id)
+                ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+                ->pluck('employee_id');
+
+            $allAllocatedIds = $allocatedEmpIds->concat($entryEmpIds)->unique()->filter()->values()->all();
+
+            $employeeQuery = Employee::query()
+                ->select('id', 'emp_no', 'full_name', 'department_id', 'date_of_joining')
+                ->with(['department:id,name'])
+                ->where('employment_status', 'active')
+                ->whereIn('id', $allAllocatedIds)
+                ->orderBy('emp_no');
+
+            if ($targetDeptId !== null && $targetDeptId !== '' && $targetDeptId !== 'all') {
+                $employeeQuery->where('department_id', $targetDeptId);
+            }
+
+            $employees = $employeeQuery->get();
         }
 
-        $employees = $employeeQuery->get();
         $employeeIds = $employees->pluck('id')->all();
 
         // 3. Query Roster Entries for this month (plus last day of previous month for fatigue calculation)
@@ -193,11 +207,15 @@ final class RosterService
                 $prevShiftEndDateTime = $prevShiftEnd;
             }
 
+            $empHireDate = $emp->date_of_joining ? Carbon::parse($emp->date_of_joining)->startOfDay() : null;
+
             for ($d = 1; $d <= $daysInMonth; $d++) {
-                $dateString = Carbon::createFromDate($year, $month, $d)->toDateString();
+                $dateObj = Carbon::createFromDate($year, $month, $d);
+                $dateString = $dateObj->toDateString();
                 $entry = $empEntries->get($dateString);
                 $leave = $leaveMap[$emp->id][$dateString] ?? null;
 
+                $isPreHire = $empHireDate && $dateObj->lt($empHireDate);
                 $fatigueWarning = false;
                 $restHours = null;
 
@@ -205,7 +223,7 @@ final class RosterService
                     $coverageSummary[$dateString]['total_leave']++;
                 }
 
-                if ($entry !== null) {
+                if ($entry !== null && ! $isPreHire) {
                     if ($entry->schedule_type === 'shift' && $entry->shift !== null) {
                         $scheduledWorkDays++;
                         $totalScheduledShifts++;
@@ -260,9 +278,9 @@ final class RosterService
                 $cellData = [
                     'day' => $d,
                     'date' => $dateString,
-                    'entry_id' => $entry?->id,
-                    'schedule_type' => $entry?->schedule_type ?? ($leave ? 'leave' : null),
-                    'shift' => $entry?->shift ? [
+                    'entry_id' => $isPreHire ? null : $entry?->id,
+                    'schedule_type' => $isPreHire ? null : ($entry?->schedule_type ?? ($leave ? 'leave' : null)),
+                    'shift' => (! $isPreHire && $entry?->shift) ? [
                         'id' => $entry->shift->id,
                         'name' => $entry->shift->name,
                         'code' => $entry->shift->code,
@@ -271,20 +289,21 @@ final class RosterService
                         'end_time' => $entry->shift->end_time,
                         'is_night_shift' => (bool) $entry->shift->is_night_shift,
                     ] : null,
-                    'original_shift' => $entry?->originalShift ? [
+                    'original_shift' => (! $isPreHire && $entry?->originalShift) ? [
                         'id' => $entry->originalShift->id,
                         'name' => $entry->originalShift->name,
                         'code' => $entry->originalShift->code,
                         'color' => $entry->originalShift->color,
                     ] : null,
-                    'status' => $entry?->status ?? null,
-                    'is_overridden' => $entry ? (bool) $entry->is_overridden : false,
-                    'override_reason' => $entry?->override_reason,
-                    'overridden_by' => $entry?->overriddenBy?->name,
-                    'notes' => $entry?->notes,
-                    'leave' => $leave,
-                    'fatigue_warning' => $fatigueWarning,
-                    'rest_hours' => $restHours,
+                    'status' => $isPreHire ? null : ($entry?->status ?? null),
+                    'is_overridden' => $isPreHire ? false : ($entry ? (bool) $entry->is_overridden : false),
+                    'override_reason' => $isPreHire ? null : $entry?->override_reason,
+                    'overridden_by' => $isPreHire ? null : $entry?->overriddenBy?->name,
+                    'notes' => $isPreHire ? "Joined on " . $emp->date_of_joining?->format('Y-m-d') : $entry?->notes,
+                    'leave' => $isPreHire ? null : $leave,
+                    'fatigue_warning' => $isPreHire ? false : $fatigueWarning,
+                    'rest_hours' => $isPreHire ? null : $restHours,
+                    'is_pre_hire' => $isPreHire,
                 ];
 
                 $dailyCells[$d] = $cellData;
@@ -1334,6 +1353,165 @@ final class RosterService
     public function deletePattern(RosterPattern $pattern): bool
     {
         return (bool) $pattern->delete();
+    }
+
+    /**
+     * Allocate an employee or multiple employees to a roster for a specified date range.
+     *
+     * @param  array<int, string>|string  $employeeIds
+     */
+    public function allocateEmployee(
+        string $rosterId,
+        array|string $employeeIds,
+        string $effectiveFrom,
+        string $effectiveTo,
+        ?string $patternId = null,
+        ?string $notes = null
+    ): int {
+        $roster = Roster::findOrFail($rosterId);
+        $empIds = (array) $employeeIds;
+
+        if (empty($empIds)) {
+            return 0;
+        }
+
+        $userId = Auth::id();
+        $tenantId = session('tenant_id')
+            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null)
+            ?? Auth::user()?->tenant_id;
+
+        return DB::transaction(function () use ($roster, $empIds, $effectiveFrom, $effectiveTo, $patternId, $notes, $userId, $tenantId): int {
+            $createdCount = 0;
+
+            foreach ($empIds as $empId) {
+                // Remove overlapping allocation for this employee in this roster if any exists
+                RosterEmployeeAllocation::where('roster_id', $roster->id)
+                    ->where('employee_id', $empId)
+                    ->where('effective_from', '<=', $effectiveTo)
+                    ->where('effective_to', '>=', $effectiveFrom)
+                    ->delete();
+
+                RosterEmployeeAllocation::create([
+                    'tenant_id' => $tenantId,
+                    'roster_id' => $roster->id,
+                    'employee_id' => $empId,
+                    'effective_from' => $effectiveFrom,
+                    'effective_to' => $effectiveTo,
+                    'notes' => $notes,
+                    'created_by' => $userId,
+                ]);
+
+                $createdCount++;
+            }
+
+            // If patternId is supplied, auto-generate shift entries for allocated range
+            if ($patternId !== null && $patternId !== '') {
+                $this->generateRoster([
+                    'roster_id' => $roster->id,
+                    'pattern_id' => $patternId,
+                    'employee_ids' => $empIds,
+                    'start_date' => $effectiveFrom,
+                    'end_date' => $effectiveTo,
+                ]);
+            }
+
+            return $createdCount;
+        });
+    }
+
+    /**
+     * Deallocate an employee from a roster (full month or from effective removal date).
+     */
+    public function deallocateEmployee(
+        string $rosterId,
+        string $employeeId,
+        ?string $effectiveRemovalDate = null
+    ): bool {
+        return DB::transaction(function () use ($rosterId, $employeeId, $effectiveRemovalDate): bool {
+            if ($effectiveRemovalDate === null || $effectiveRemovalDate === '') {
+                // Full removal from roster
+                RosterEmployeeAllocation::where('roster_id', $rosterId)
+                    ->where('employee_id', $employeeId)
+                    ->delete();
+
+                RosterEntry::where('roster_id', $rosterId)
+                    ->where('employee_id', $employeeId)
+                    ->delete();
+
+                return true;
+            }
+
+            $removalDate = Carbon::parse($effectiveRemovalDate)->toDateString();
+            $allocations = RosterEmployeeAllocation::where('roster_id', $rosterId)
+                ->where('employee_id', $employeeId)
+                ->get();
+
+            foreach ($allocations as $alloc) {
+                $allocStart = $alloc->effective_from->toDateString();
+                $allocEnd = $alloc->effective_to->toDateString();
+
+                if ($allocStart >= $removalDate) {
+                    $alloc->delete();
+                } elseif ($allocEnd >= $removalDate) {
+                    $alloc->update([
+                        'effective_to' => Carbon::parse($removalDate)->subDay()->toDateString(),
+                    ]);
+                }
+            }
+
+            // Clear entries for remove_date onwards
+            RosterEntry::where('roster_id', $rosterId)
+                ->where('employee_id', $employeeId)
+                ->where('roster_date', '>=', $removalDate)
+                ->delete();
+
+            return true;
+        });
+    }
+
+    /**
+     * Transfer an employee from source roster to target roster starting on transfer date.
+     */
+    public function transferEmployee(
+        string $sourceRosterId,
+        string $targetRosterId,
+        string $employeeId,
+        string $transferDate,
+        ?string $patternId = null
+    ): bool {
+        return DB::transaction(function () use ($sourceRosterId, $targetRosterId, $employeeId, $transferDate, $patternId): bool {
+            $targetRoster = Roster::findOrFail($targetRosterId);
+
+            if ($sourceRosterId === $targetRosterId) {
+                // Same Roster Shift Pattern Switch: Apply pattern starting from transferDate
+                if ($patternId !== null && $patternId !== '') {
+                    $this->generateRoster([
+                        'roster_id' => $targetRosterId,
+                        'pattern_id' => $patternId,
+                        'employee_ids' => [$employeeId],
+                        'start_date' => $transferDate,
+                        'end_date' => $targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date,
+                        'conflict_mode' => 'overwrite',
+                    ]);
+                }
+                return true;
+            }
+
+            // 1. Deallocate from source roster from transferDate onwards
+            $this->deallocateEmployee($sourceRosterId, $employeeId, $transferDate);
+
+            // 2. Allocate to target roster from transferDate to targetRoster end_date
+            $targetEnd = $targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date;
+            $this->allocateEmployee(
+                $targetRoster->id,
+                [$employeeId],
+                $transferDate,
+                $targetEnd,
+                $patternId
+            );
+
+            return true;
+        });
     }
 
     /**

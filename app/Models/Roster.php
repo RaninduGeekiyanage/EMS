@@ -106,6 +106,16 @@ final class Roster extends Model
     }
 
     /**
+     * Employee allocations belonging to this roster.
+     *
+     * @return HasMany<RosterEmployeeAllocation, $this>
+     */
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(RosterEmployeeAllocation::class, 'roster_id');
+    }
+
+    /**
      * Publisher user relation.
      *
      * @return BelongsTo<User, $this>

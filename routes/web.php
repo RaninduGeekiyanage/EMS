@@ -138,6 +138,9 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/roster/rosters/{roster}/publish', [RosterController::class, 'publishNamedRoster'])->middleware('can:roster.publish')->name('roster.rosters.publish');
         Route::post('/roster/rosters/{roster}/archive', [RosterController::class, 'archiveRoster'])->middleware('can:roster.update')->name('roster.rosters.archive');
         Route::post('/roster/rosters/{roster}/clone', [RosterController::class, 'cloneRoster'])->middleware('can:roster.create')->name('roster.rosters.clone');
+        Route::post('/roster/rosters/{roster}/allocations', [RosterController::class, 'storeAllocation'])->middleware('can:roster.update')->name('roster.allocations.store');
+        Route::delete('/roster/rosters/{roster}/allocations', [RosterController::class, 'removeAllocation'])->middleware('can:roster.update')->name('roster.allocations.destroy');
+        Route::post('/roster/rosters/{roster}/transfer', [RosterController::class, 'transferRoster'])->middleware('can:roster.update')->name('roster.transfer');
 
         // Departmentalized Shift Swap Requests
         Route::get('/roster/shift-swaps', [ShiftSwapController::class, 'index'])->middleware('can:shift_swap.view')->name('roster.shift-swaps.index');
