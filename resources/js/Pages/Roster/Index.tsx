@@ -102,6 +102,7 @@ interface AvailableEmployee {
     id: string;
     emp_no: string;
     full_name: string;
+    department_id?: string | null;
     department_name: string;
     designation_title: string;
     is_available: boolean;
@@ -244,7 +245,8 @@ export default function Index({
     summary,
 }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [viewMode, setViewMode] = useState<'squad' | 'flat'>('squad');
+    const [viewMode, setViewMode] = useState<'squad' | 'flat' | null>(null);
+    const [deptFilter, setDeptFilter] = useState<string>(selected_department || 'all');
     const [squadFilter, setSquadFilter] = useState<string>('all');
     const [collapsedSquads, setCollapsedSquads] = useState<Record<string, boolean>>({});
 
@@ -255,7 +257,11 @@ export default function Index({
     const [wizardDeptFilter, setWizardDeptFilter] = useState('all');
 
     const [isNewSquadModalOpen, setIsNewSquadModalOpen] = useState(false);
+    const [isEditSquadModalOpen, setIsEditSquadModalOpen] = useState(false);
+    const [editingSquad, setEditingSquad] = useState<RosterGroup | null>(null);
+    const [isSquadDirectoryModalOpen, setIsSquadDirectoryModalOpen] = useState(false);
     const [squadEmpSearch, setSquadEmpSearch] = useState('');
+    const [squadDeptFilter, setSquadDeptFilter] = useState('all');
 
     const [isQuickPatternModalOpen, setIsQuickPatternModalOpen] = useState(false);
     const [quickPatternEmpSearch, setQuickPatternEmpSearch] = useState('');
@@ -272,17 +278,28 @@ export default function Index({
 
     // Filter matrix rows
     const filteredMatrix = useMemo(() => {
+        // First-time visit: no view mode or filter selected yet -> show empty table
+        if (!viewMode) {
+            return [];
+        }
+
         return matrix.filter((row) => {
             const matchesSearch =
+                !searchQuery ||
                 row.employee.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 row.employee.emp_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (row.employee.department?.name && row.employee.department.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+            const matchesDept =
+                deptFilter === 'all' ||
+                row.employee.department?.id === deptFilter ||
+                row.employee.department?.name === deptFilter;
+
             const matchesSquad = squadFilter === 'all' || row.squad?.id === squadFilter;
 
-            return matchesSearch && matchesSquad;
+            return matchesSearch && matchesDept && matchesSquad;
         });
-    }, [matrix, searchQuery, squadFilter]);
+    }, [matrix, searchQuery, squadFilter, deptFilter, viewMode]);
 
     // Group rows by Squad for Squad View
     const groupedBySquad = useMemo(() => {
@@ -611,8 +628,18 @@ export default function Index({
         employee_ids: [] as string[],
     });
 
+    const selectedSquadPattern = useMemo(() => {
+        return patterns.find((p) => p.id === newSquadForm.data.roster_pattern_id) || null;
+    }, [patterns, newSquadForm.data.roster_pattern_id]);
+
+    const squadPatternSteps = useMemo(() => {
+        if (!selectedSquadPattern) return [];
+        return selectedSquadPattern.pattern_data?.steps || selectedSquadPattern.pattern_data || [];
+    }, [selectedSquadPattern]);
+
     const openNewSquadModal = () => {
         setSquadEmpSearch('');
+        setSquadDeptFilter('all');
         newSquadForm.setData({
             name: '',
             code: '',
@@ -624,13 +651,112 @@ export default function Index({
         setIsNewSquadModalOpen(true);
     };
 
+    const handleSelectAllSquadAvailable = () => {
+        const matchingAvailable = available_employees
+            .filter((emp) => {
+                const matchesSearch =
+                    emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
+                    emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase());
+                const matchesDept =
+                    squadDeptFilter === 'all' ||
+                    emp.department_id === squadDeptFilter ||
+                    emp.department_name === squadDeptFilter;
+                return matchesSearch && matchesDept && emp.is_available && !emp.current_squad;
+            })
+            .map((emp) => emp.id);
+
+        const merged = Array.from(new Set([...newSquadForm.data.employee_ids, ...matchingAvailable]));
+        newSquadForm.setData('employee_ids', merged);
+    };
+
+    const handleDeselectAllSquad = () => {
+        newSquadForm.setData('employee_ids', []);
+    };
+
     const handleNewSquadSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!active_roster) return;
-        newSquadForm.post(`/roster/rosters/${active_roster.id}/squads`, {
+        const url = active_roster ? `/roster/rosters/${active_roster.id}/squads` : '/roster/squads';
+        newSquadForm.post(url, {
             preserveScroll: true,
             onSuccess: () => setIsNewSquadModalOpen(false),
         });
+    };
+
+    // 2b-ii. Edit Squad Form
+    const editSquadForm = useForm({
+        name: '',
+        code: '',
+        color: '#3b82f6',
+        roster_pattern_id: '',
+        description: '',
+        employee_ids: [] as string[],
+    });
+
+    const selectedEditSquadPattern = useMemo(() => {
+        return patterns.find((p) => p.id === editSquadForm.data.roster_pattern_id) || null;
+    }, [patterns, editSquadForm.data.roster_pattern_id]);
+
+    const editSquadPatternSteps = useMemo(() => {
+        if (!selectedEditSquadPattern) return [];
+        return selectedEditSquadPattern.pattern_data?.steps || selectedEditSquadPattern.pattern_data || [];
+    }, [selectedEditSquadPattern]);
+
+    const openEditSquadModal = (squad: RosterGroup) => {
+        setEditingSquad(squad);
+        editSquadForm.setData({
+            name: squad.name,
+            code: squad.code,
+            color: squad.color || '#3b82f6',
+            roster_pattern_id: squad.roster_pattern_id || '',
+            description: squad.description || '',
+            employee_ids: (squad.employees || []).map((e) => e.id),
+        });
+        setSquadEmpSearch('');
+        setSquadDeptFilter('all');
+        setIsEditSquadModalOpen(true);
+    };
+
+    const handleEditSquadSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingSquad) return;
+        editSquadForm.put(`/roster/squads/${editingSquad.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setIsEditSquadModalOpen(false);
+                setEditingSquad(null);
+            },
+        });
+    };
+
+    const handleSelectAllEditSquadAvailable = () => {
+        const matchingAvailable = available_employees
+            .filter((emp) => {
+                const matchesSearch =
+                    emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
+                    emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase());
+                const matchesDept =
+                    squadDeptFilter === 'all' ||
+                    emp.department_id === squadDeptFilter ||
+                    emp.department_name === squadDeptFilter;
+                const isCurrentlyInThisEditingSquad = editingSquad && (editingSquad.employees || []).some((e) => e.id === emp.id);
+                return matchesSearch && matchesDept && (isCurrentlyInThisEditingSquad || (emp.is_available && !emp.current_squad));
+            })
+            .map((emp) => emp.id);
+
+        const merged = Array.from(new Set([...editSquadForm.data.employee_ids, ...matchingAvailable]));
+        editSquadForm.setData('employee_ids', merged);
+    };
+
+    const handleDeselectAllEditSquad = () => {
+        editSquadForm.setData('employee_ids', []);
+    };
+
+    const handleDeleteSquad = (squad: RosterGroup) => {
+        if (confirm(`Are you sure you want to delete squad '${squad.name}'? All member enrollments will be cleared.`)) {
+            router.delete(`/roster/squads/${squad.id}`, {
+                preserveScroll: true,
+            });
+        }
     };
 
     // 2c. Quick Pattern / Bulk Fill Form
@@ -990,6 +1116,17 @@ export default function Index({
                                 </button>
 
                                 {active_roster && (
+                                    <button
+                                        onClick={openNewSquadModal}
+                                        className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 hover:border-indigo-500/50 transition flex items-center gap-1.5 shadow-sm"
+                                        title="Create a new workforce squad under this roster"
+                                    >
+                                        <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+                                        <span>+ Add Squad</span>
+                                    </button>
+                                )}
+
+                                {active_roster && (
                                     <>
                                         <button
                                             onClick={openCloneModal}
@@ -1119,7 +1256,7 @@ export default function Index({
 
                 {/* 2. Control & Filter Strip */}
                 <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
-                    {/* View Switcher & Squad Filter */}
+                    {/* View Switcher, Department & Squad Filters */}
                     <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
                         {/* View Switcher */}
                         <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center text-xs font-semibold">
@@ -1145,11 +1282,33 @@ export default function Index({
                             </button>
                         </div>
 
+                        {/* Department Filter Dropdown (Added after All Personnel) */}
+                        <div className="relative">
+                            <select
+                                value={deptFilter}
+                                onChange={(e) => {
+                                    setDeptFilter(e.target.value);
+                                    if (!viewMode) setViewMode('squad');
+                                }}
+                                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-1.5 pr-8 hover:border-slate-700 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                            >
+                                <option value="all">All Departments ({departments.length})</option>
+                                {departments.map((d) => (
+                                    <option key={d.id} value={d.id}>
+                                        {d.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
                         {/* Squad Filter Dropdown */}
                         <div className="relative">
                             <select
                                 value={squadFilter}
-                                onChange={(e) => setSquadFilter(e.target.value)}
+                                onChange={(e) => {
+                                    setSquadFilter(e.target.value);
+                                    if (!viewMode) setViewMode('squad');
+                                }}
                                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-1.5 pr-8 hover:border-slate-700 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                             >
                                 <option value="all">All Squads ({squads.length})</option>
@@ -1161,16 +1320,25 @@ export default function Index({
                             </select>
                         </div>
 
-                        {viewMode === 'squad' && active_roster && (
-                            <button
-                                onClick={openNewSquadModal}
-                                className="px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-400 hover:text-indigo-300 text-xs font-semibold flex items-center gap-1 transition shadow-sm"
-                                title="Create a new squad under this roster"
-                            >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>Add Squad</span>
-                            </button>
-                        )}
+                        <button
+                            type="button"
+                            onClick={openNewSquadModal}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-400 hover:text-indigo-300 text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                            title="Create a new squad or permanent crew"
+                        >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Squad</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setIsSquadDirectoryModalOpen(true)}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                            title="View and manage all squads, patterns & enrollments"
+                        >
+                            <Users className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Squad Directory</span>
+                        </button>
 
                         {/* Search Input */}
                         <div className="relative flex-1 sm:w-60">
@@ -1178,7 +1346,10 @@ export default function Index({
                             <input
                                 type="text"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => {
+                                    setSearchQuery(e.target.value);
+                                    if (!viewMode) setViewMode('squad');
+                                }}
                                 placeholder="Search employee..."
                                 className="bg-slate-950 border border-slate-800 text-white text-xs rounded-xl pl-9 pr-3 py-1.5 w-full focus:ring-1 focus:ring-indigo-500 placeholder-slate-500"
                             />
@@ -1304,15 +1475,36 @@ export default function Index({
                                                                 </span>
                                                             </div>
 
-                                                            {/* Squad Actions: Add Staff */}
+                                                            {/* Squad Actions: Edit, Manage Staff, Delete */}
                                                             {'roster_id' in squad && (
-                                                                <button
-                                                                    onClick={() => openManageMembers(squad as RosterGroup)}
-                                                                    className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition"
-                                                                >
-                                                                    <UserPlus className="w-3.5 h-3.5" />
-                                                                    <span>Add / Manage Staff</span>
-                                                                </button>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openEditSquadModal(squad as RosterGroup)}
+                                                                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-semibold flex items-center gap-1 transition"
+                                                                        title="Edit Squad Details and Rotation Pattern"
+                                                                    >
+                                                                        <Settings className="w-3.5 h-3.5" />
+                                                                        <span>Edit</span>
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openManageMembers(squad as RosterGroup)}
+                                                                        className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition"
+                                                                        title="Add or Remove Staff from Squad"
+                                                                    >
+                                                                        <UserPlus className="w-3.5 h-3.5" />
+                                                                        <span>Manage Staff ({rows.length})</span>
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDeleteSquad(squad as RosterGroup)}
+                                                                        className="p-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 border border-rose-800/40 text-[11px] transition"
+                                                                        title="Delete Squad"
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                </div>
                                                             )}
                                                         </div>
                                                     </td>
@@ -1343,31 +1535,66 @@ export default function Index({
                                             </React.Fragment>
                                         );
                                     })
-                                ) : (
+                                ) : viewMode === 'flat' ? (
                                     // FLAT STAFF VIEW
                                     filteredMatrix.map((row) => renderMatrixRow(row))
-                                )}
+                                ) : null}
 
                                 {filteredMatrix.length === 0 && (
                                     <tr>
                                         <td
                                             colSpan={days.length + 2}
-                                            className="px-6 py-12 text-center text-slate-400"
+                                            className="px-6 py-16 text-center text-slate-400"
                                         >
-                                            <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-                                            <p className="text-sm font-semibold text-white">
-                                                No personnel roster entries found.
-                                            </p>
-                                            <p className="text-xs text-slate-500 mt-1">
-                                                Enroll staff into squads or create a new Named Roster.
-                                            </p>
+                                            {!viewMode ? (
+                                                <div className="max-w-md mx-auto space-y-3">
+                                                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto shadow-inner">
+                                                        <Users className="w-6 h-6" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-white">
+                                                            Select a View Filter to Display Roster
+                                                        </h4>
+                                                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                                            Choose a viewing mode, select a department, or pick a squad above to load and explore schedule matrix data.
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center justify-center gap-2.5 pt-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setViewMode('squad')}
+                                                            className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition flex items-center gap-1.5"
+                                                        >
+                                                            <Users className="w-3.5 h-3.5" />
+                                                            <span>Group by Squad</span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setViewMode('flat')}
+                                                            className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold shadow-sm transition"
+                                                        >
+                                                            All Personnel
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                                                    <p className="text-sm font-semibold text-white">
+                                                        No personnel roster entries found.
+                                                    </p>
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        Try adjusting your department, squad, or search filter.
+                                                    </p>
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 )}
                             </tbody>
 
                             {/* Sticky Daily Coverage Summary Footer */}
-                            {coverage_summary && (
+                            {coverage_summary && filteredMatrix.length > 0 && (
                                 <tfoot className="sticky bottom-0 z-30 bg-slate-950 border-t-2 border-slate-700 text-xs font-mono font-semibold">
                                     <tr>
                                         <td className="sticky left-0 z-40 bg-slate-950 px-4 py-2.5 font-bold text-white border-r border-slate-800">
@@ -1714,20 +1941,21 @@ export default function Index({
 
             {/* MODAL 3: Unified Multi-Squad Roster Creation Wizard */}
             {isNewRosterModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg md:max-w-3xl lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl p-5 md:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto flex flex-col">
                         <button
+                            type="button"
                             onClick={() => setIsNewRosterModalOpen(false)}
-                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
                         >
                             <X className="w-5 h-5" />
                         </button>
 
-                        <div>
+                        <div className="mb-4">
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                 Enterprise Scheduling Wizard
                             </span>
-                            <h3 className="text-lg font-bold text-white mt-1">
+                            <h3 className="text-base md:text-lg font-bold text-white mt-1">
                                 Create Operational Roster
                             </h3>
                             <p className="text-xs text-slate-400">
@@ -1736,11 +1964,11 @@ export default function Index({
                         </div>
 
                         {/* Wizard Step Indicator */}
-                        <div className="flex items-center gap-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800">
+                        <div className="flex items-center gap-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800 mb-4">
                             <button
                                 type="button"
                                 onClick={() => setRosterWizardStep(1)}
-                                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                                     rosterWizardStep === 1
                                         ? 'bg-indigo-600 text-white shadow-md'
                                         : 'text-slate-400 hover:text-white'
@@ -1752,7 +1980,7 @@ export default function Index({
                             <button
                                 type="button"
                                 onClick={() => setRosterWizardStep(2)}
-                                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                                     rosterWizardStep === 2
                                         ? 'bg-indigo-600 text-white shadow-md'
                                         : 'text-slate-400 hover:text-white'
@@ -1765,7 +1993,7 @@ export default function Index({
                                 <button
                                     type="button"
                                     onClick={() => setRosterWizardStep(3)}
-                                    className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                                         rosterWizardStep === 3
                                             ? 'bg-indigo-600 text-white shadow-md'
                                             : 'text-slate-400 hover:text-white'
@@ -1785,22 +2013,21 @@ export default function Index({
                             {/* STEP 1: Roster Identity & Horizon */}
                             {rosterWizardStep === 1 && (
                                 <div className="space-y-3.5">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                            Roster Name *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            required
-                                            value={newRosterForm.data.name}
-                                            onChange={(e) => newRosterForm.setData('name', e.target.value)}
-                                            placeholder="e.g. November 2026 - Operations Roster"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
+                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                                        <div className="md:col-span-7">
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Roster Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={newRosterForm.data.name}
+                                                onChange={(e) => newRosterForm.setData('name', e.target.value)}
+                                                placeholder="e.g. November 2026 - Operations Roster"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-5">
                                             <label className="block text-xs font-semibold text-slate-300 mb-1">
                                                 Roster Code
                                             </label>
@@ -1812,6 +2039,9 @@ export default function Index({
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
                                             />
                                         </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                         <div>
                                             <label className="block text-xs font-semibold text-slate-300 mb-1">
                                                 Department Scope
@@ -1829,9 +2059,6 @@ export default function Index({
                                                 ))}
                                             </select>
                                         </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
                                         <div>
                                             <label className="block text-xs font-semibold text-slate-300 mb-1">
                                                 Start Date *
@@ -1867,7 +2094,7 @@ export default function Index({
                                             value={newRosterForm.data.notes}
                                             onChange={(e) => newRosterForm.setData('notes', e.target.value)}
                                             placeholder="Staffing targets, seasonal remarks..."
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600"
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 placeholder-slate-600 resize-none"
                                         />
                                     </div>
 
@@ -1875,7 +2102,7 @@ export default function Index({
                                         <button
                                             type="button"
                                             onClick={() => setIsNewRosterModalOpen(false)}
-                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition"
                                         >
                                             Cancel
                                         </button>
@@ -1895,7 +2122,7 @@ export default function Index({
                             {rosterWizardStep === 2 && (
                                 <div className="space-y-4">
                                     {/* 4 Clean Strategy Cards */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                         {/* Option B: Auto-Stagger Multi-Squad Rotation (Primary) */}
                                         <div
                                             onClick={() => {
@@ -1905,24 +2132,26 @@ export default function Index({
                                                     squads: buildAutoStaggerSquads(newRosterForm.data.squad_count || 4, newRosterForm.data.stagger_days || 2),
                                                 });
                                             }}
-                                            className={`p-3.5 rounded-xl border cursor-pointer transition relative overflow-hidden ${
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition relative overflow-hidden flex flex-col justify-between ${
                                                 newRosterForm.data.generation_mode === 'auto_stagger_squads'
                                                     ? 'bg-indigo-600/20 border-indigo-500 ring-1 ring-indigo-500'
                                                     : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between mb-1.5">
-                                                <div className="flex items-center gap-2">
-                                                    <RefreshCw className="w-4 h-4 text-emerald-400" />
-                                                    <span className="font-bold text-xs text-white">Auto-Stagger Squads</span>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <RefreshCw className="w-4 h-4 text-emerald-400" />
+                                                        <span className="font-bold text-xs text-white">Auto-Stagger Squads</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 uppercase">
+                                                        24/7 Standard
+                                                    </span>
                                                 </div>
-                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 uppercase">
-                                                    24/7 Standard
-                                                </span>
+                                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                    Select 1 master pattern &amp; auto-generate Squads A, B, C, D with staggered shifts for continuous 24/7 coverage.
+                                                </p>
                                             </div>
-                                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Select 1 master pattern &amp; auto-generate Squads A, B, C, D with staggered shifts for continuous 24/7 coverage.
-                                            </p>
                                         </div>
 
                                         {/* Option A: Multi-Pattern Squad Selection */}
@@ -1941,78 +2170,84 @@ export default function Index({
                                                     squads: initialMulti,
                                                 });
                                             }}
-                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
                                                 newRosterForm.data.generation_mode === 'multi_pattern'
                                                     ? 'bg-indigo-600/20 border-indigo-500 ring-1 ring-indigo-500'
                                                     : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between mb-1.5">
-                                                <div className="flex items-center gap-2">
-                                                    <Layers className="w-4 h-4 text-sky-400" />
-                                                    <span className="font-bold text-xs text-white">Multi-Pattern Squads</span>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <Layers className="w-4 h-4 text-sky-400" />
+                                                        <span className="font-bold text-xs text-white">Multi-Pattern Squads</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 uppercase">
+                                                        Custom Mix
+                                                    </span>
                                                 </div>
-                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 uppercase">
-                                                    Custom Mix
-                                                </span>
+                                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                    Pick multiple existing shift patterns from library and assign to custom squads.
+                                                </p>
                                             </div>
-                                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Pick multiple existing shift patterns from library and assign to custom squads.
-                                            </p>
                                         </div>
 
                                         {/* Option C: Direct Single Pattern */}
                                         <div
                                             onClick={() => newRosterForm.setData('generation_mode', 'direct_pattern')}
-                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
                                                 newRosterForm.data.generation_mode === 'direct_pattern'
                                                     ? 'bg-indigo-600/20 border-indigo-500 ring-1 ring-indigo-500'
                                                     : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between mb-1.5">
-                                                <div className="flex items-center gap-2">
-                                                    <Sparkles className="w-4 h-4 text-purple-400" />
-                                                    <span className="font-bold text-xs text-white">Single Pattern</span>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <Sparkles className="w-4 h-4 text-purple-400" />
+                                                        <span className="font-bold text-xs text-white">Single Pattern</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 uppercase">
+                                                        Fixed Schedule
+                                                    </span>
                                                 </div>
-                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 uppercase">
-                                                    Office / Fixed
-                                                </span>
+                                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                    Apply a single pattern directly to all selected personnel (e.g. Mon–Fri 9-5).
+                                                </p>
                                             </div>
-                                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Apply a single pattern directly to all selected personnel (e.g. Mon–Fri 9-5).
-                                            </p>
                                         </div>
 
                                         {/* Option D: Blank Roster Shell */}
                                         <div
                                             onClick={() => newRosterForm.setData('generation_mode', 'blank')}
-                                            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+                                            className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
                                                 newRosterForm.data.generation_mode === 'blank'
                                                     ? 'bg-indigo-600/20 border-indigo-500 ring-1 ring-indigo-500'
                                                     : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between mb-1.5">
-                                                <div className="flex items-center gap-2">
-                                                    <CalendarDays className="w-4 h-4 text-amber-400" />
-                                                    <span className="font-bold text-xs text-white">Blank Shell</span>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <CalendarDays className="w-4 h-4 text-amber-400" />
+                                                        <span className="font-bold text-xs text-white">Blank Shell</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 uppercase">
+                                                        Manual
+                                                    </span>
                                                 </div>
-                                                <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 uppercase">
-                                                    Manual
-                                                </span>
+                                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                    Create an empty roster canvas to schedule ad-hoc or add squads later.
+                                                </p>
                                             </div>
-                                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                                Create an empty roster canvas to schedule ad-hoc or add squads later.
-                                            </p>
                                         </div>
                                     </div>
 
                                     {/* Strategy 1 Configuration: Option B (Auto-Stagger Multi-Squad) */}
                                     {newRosterForm.data.generation_mode === 'auto_stagger_squads' && (
                                         <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4">
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                                <div className="sm:col-span-1">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                <div>
                                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
                                                         Master Base Pattern *
                                                     </label>
@@ -2090,7 +2325,7 @@ export default function Index({
                                                             Cycle Length: {basePatternSteps.length} Days
                                                         </span>
                                                     </div>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                                                         {basePatternShifts.map((s) => {
                                                             const [h1, m1] = s.start_time.split(':').map(Number);
                                                             const [h2, m2] = s.end_time.split(':').map(Number);
@@ -2127,7 +2362,7 @@ export default function Index({
                                                 <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
                                                     Live Rotated Squad Rotation Phases (Daily Coverage Guarantee)
                                                 </span>
-                                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
                                                     {autoStaggerPreviews.map((sq) => (
                                                         <div
                                                             key={sq.letter}
@@ -2188,14 +2423,14 @@ export default function Index({
                                                         ];
                                                         newRosterForm.setData('squads', next);
                                                     }}
-                                                    className="px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-semibold flex items-center gap-1 border border-indigo-500/30"
+                                                    className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-semibold flex items-center gap-1 border border-indigo-500/30 transition"
                                                 >
                                                     <Plus className="w-3 h-3" />
                                                     <span>Add Squad</span>
                                                 </button>
                                             </div>
 
-                                            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                                                 {newRosterForm.data.squads.map((sq, idx) => (
                                                     <div
                                                         key={idx}
@@ -2221,7 +2456,7 @@ export default function Index({
                                                                     newRosterForm.setData('squads', updated);
                                                                 }}
                                                                 placeholder="Squad Name"
-                                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white"
+                                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-white"
                                                             />
                                                         </div>
 
@@ -2233,7 +2468,7 @@ export default function Index({
                                                                     updated[idx].pattern_id = e.target.value;
                                                                     newRosterForm.setData('squads', updated);
                                                                 }}
-                                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white"
+                                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-white"
                                                             >
                                                                 {patterns.map((p) => (
                                                                     <option key={p.id} value={p.id}>
@@ -2295,7 +2530,7 @@ export default function Index({
                                         <button
                                             type="button"
                                             onClick={() => setRosterWizardStep(1)}
-                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1 transition"
                                         >
                                             <ChevronLeft className="w-3.5 h-3.5" />
                                             <span>Back</span>
@@ -2355,13 +2590,13 @@ export default function Index({
                                                         const allIds = wizardEmployeePool.map((e) => e.id);
                                                         newRosterForm.setData('employee_ids', allIds);
                                                     }}
-                                                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 text-indigo-400 text-xs font-semibold"
+                                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition"
                                                 >
                                                     Select All
                                                 </button>
                                             </div>
 
-                                            <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-60 overflow-y-auto divide-y divide-slate-900 p-1">
+                                            <div className="bg-slate-950 rounded-xl border border-slate-800 h-[280px] lg:h-[320px] overflow-y-auto divide-y divide-slate-900 p-1">
                                                 {wizardEmployeePool
                                                     .filter((emp) => {
                                                         const matchesSearch =
@@ -2402,8 +2637,46 @@ export default function Index({
                                     ) : (
                                         // Multi-Squad Allocation (Option B & Option A)
                                         <div className="space-y-3">
+                                            {/* Pre-Defined Squad Loader Dropdown */}
+                                            {squads.length > 0 && (
+                                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
+                                                    <span className="text-slate-300 font-semibold flex items-center gap-1.5 shrink-0">
+                                                        <Users className="w-3.5 h-3.5 text-indigo-400" />
+                                                        <span>Load from Existing Squad:</span>
+                                                    </span>
+                                                    <select
+                                                        onChange={(e) => {
+                                                            const targetSquadId = e.target.value;
+                                                            if (!targetSquadId) return;
+                                                            const srcSquad = squads.find((s) => s.id === targetSquadId);
+                                                            if (srcSquad && srcSquad.employees) {
+                                                                const empIds = srcSquad.employees.map((em) => em.id);
+                                                                const currentSquads = [...newRosterForm.data.squads];
+                                                                // Exclusivity: remove imported employees from all other squads
+                                                                currentSquads.forEach((sq, sIdx) => {
+                                                                    if (sIdx !== activeSquadTabIndex) {
+                                                                        sq.employee_ids = sq.employee_ids.filter((id) => !empIds.includes(id));
+                                                                    }
+                                                                });
+                                                                currentSquads[activeSquadTabIndex].employee_ids = empIds;
+                                                                newRosterForm.setData('squads', currentSquads);
+                                                            }
+                                                            e.target.value = '';
+                                                        }}
+                                                        className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 w-full sm:w-auto sm:min-w-[280px] focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                                    >
+                                                        <option value="">-- Choose Squad to Import Members --</option>
+                                                        {squads.map((sq) => (
+                                                            <option key={sq.id} value={sq.id}>
+                                                                {sq.name} ({sq.employees?.length || 0} members)
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
                                             {/* Squad Tabs Bar & Distribute Evenly Action */}
-                                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-950 p-2 rounded-xl border border-slate-800">
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                                                 <div className="flex flex-wrap items-center gap-1.5">
                                                     {newRosterForm.data.squads.map((sq, sIdx) => {
                                                         const count = sq.employee_ids.length;
@@ -2468,7 +2741,7 @@ export default function Index({
                                             </div>
 
                                             {/* Staff Allocation Checkbox List */}
-                                            <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-56 overflow-y-auto divide-y divide-slate-900 p-1">
+                                            <div className="bg-slate-950 rounded-xl border border-slate-800 h-[280px] lg:h-[320px] overflow-y-auto divide-y divide-slate-900 p-1">
                                                 {wizardEmployeePool
                                                     .filter((emp) => {
                                                         const matchesSearch =
@@ -2483,6 +2756,8 @@ export default function Index({
                                                         const assignedOtherSquad = newRosterForm.data.squads.find(
                                                             (s, idx) => idx !== activeSquadTabIndex && s.employee_ids.includes(emp.id)
                                                         );
+                                                        const availInfo = available_employees.find((a) => a.id === emp.id);
+                                                        const hasOverlapConflict = availInfo && !availInfo.is_available;
 
                                                         return (
                                                             <div
@@ -2528,9 +2803,13 @@ export default function Index({
                                                                         >
                                                                             In {assignedOtherSquad.name}
                                                                         </span>
+                                                                    ) : hasOverlapConflict ? (
+                                                                        <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                                                                            {availInfo?.exclusion_reason || 'Roster Overlap'}
+                                                                        </span>
                                                                     ) : (
                                                                         <span className="text-[10px] text-slate-500 font-mono">
-                                                                            Unassigned
+                                                                            Available
                                                                         </span>
                                                                     )}
                                                                 </div>
@@ -2545,7 +2824,7 @@ export default function Index({
                                         <button
                                             type="button"
                                             onClick={() => setRosterWizardStep(2)}
-                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                                            className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white flex items-center gap-1 transition"
                                         >
                                             <ChevronLeft className="w-3.5 h-3.5" />
                                             <span>Back</span>
@@ -2659,11 +2938,12 @@ export default function Index({
 
             {/* MODAL 5: Manage Squad Members & Mid-Month Transfers */}
             {isManageMembersModalOpen && targetSquadForEnroll && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl md:max-w-2xl lg:max-w-3xl w-full p-5 md:p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
                         <button
+                            type="button"
                             onClick={() => setIsManageMembersModalOpen(false)}
-                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -2798,7 +3078,10 @@ export default function Index({
                                             const matchesSearch =
                                                 emp.full_name.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
                                                 emp.emp_no.toLowerCase().includes(memberSearchQuery.toLowerCase());
-                                            const matchesDept = memberDeptFilter === 'all' || emp.department_name === memberDeptFilter;
+                                            const matchesDept =
+                                                memberDeptFilter === 'all' ||
+                                                emp.department_id === memberDeptFilter ||
+                                                emp.department_name === memberDeptFilter;
                                             return matchesSearch && matchesDept;
                                         })
                                         .map((emp) => {
@@ -2891,179 +3174,772 @@ export default function Index({
             )}
 
             {/* MODAL 6: Create New Squad */}
-            {isNewSquadModalOpen && active_roster && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto">
+            {isNewSquadModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg md:max-w-3xl lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl p-5 md:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto flex flex-col">
                         <button
+                            type="button"
                             onClick={() => setIsNewSquadModalOpen(false)}
-                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
                         >
                             <X className="w-5 h-5" />
                         </button>
 
-                        <div>
+                        <div className="mb-4">
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                 Team Group Management
                             </span>
-                            <h3 className="text-base font-bold text-white mt-1">
-                                Add Squad to {active_roster.name}
+                            <h3 className="text-base md:text-lg font-bold text-white mt-1">
+                                {active_roster ? `Add Squad to ${active_roster.name}` : 'Create Permanent Squad / Crew'}
                             </h3>
                             <p className="text-xs text-slate-400">
-                                Create a rotating workforce squad, link its rotation pattern, and enroll members.
+                                {active_roster
+                                    ? 'Create a rotating workforce squad for this active roster, link its rotation pattern, and enroll members.'
+                                    : 'Create a permanent organizational squad / crew. You can import this squad when generating future monthly rosters.'}
                             </p>
                         </div>
 
-                        <form onSubmit={handleNewSquadSubmit} className="space-y-3.5">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Squad Name *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={newSquadForm.data.name}
-                                        onChange={(e) => newSquadForm.setData('name', e.target.value)}
-                                        placeholder="e.g. Group Alpha / Morning"
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Squad Code
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={newSquadForm.data.code}
-                                        onChange={(e) => newSquadForm.setData('code', e.target.value)}
-                                        placeholder="e.g. SQD-A"
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                </div>
-                            </div>
+                        <form onSubmit={handleNewSquadSubmit} className="space-y-4">
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6">
+                                {/* Left Column: Squad Configuration */}
+                                <div className="lg:col-span-5 space-y-3.5 flex flex-col justify-between">
+                                    <div className="space-y-3.5">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Squad Name *
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={newSquadForm.data.name}
+                                                    onChange={(e) => newSquadForm.setData('name', e.target.value)}
+                                                    placeholder="e.g. Group Alpha / Morning"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Squad Code
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={newSquadForm.data.code}
+                                                    onChange={(e) => newSquadForm.setData('code', e.target.value)}
+                                                    placeholder="e.g. SQD-A"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                        </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Squad Color Badge
-                                </label>
-                                <div className="flex items-center gap-2">
-                                    {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'].map((color) => (
-                                        <button
-                                            key={color}
-                                            type="button"
-                                            onClick={() => newSquadForm.setData('color', color)}
-                                            className={`w-6 h-6 rounded-full border-2 transition ${
-                                                newSquadForm.data.color === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
-                                            }`}
-                                            style={{ backgroundColor: color }}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Squad Color Badge
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'].map((color) => (
+                                                    <button
+                                                        key={color}
+                                                        type="button"
+                                                        onClick={() => newSquadForm.setData('color', color)}
+                                                        className={`w-6 h-6 rounded-full border-2 transition ${
+                                                            newSquadForm.data.color === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+                                                        }`}
+                                                        style={{ backgroundColor: color }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Assigned Rotation Pattern
-                                </label>
-                                <select
-                                    value={newSquadForm.data.roster_pattern_id}
-                                    onChange={(e) => newSquadForm.setData('roster_pattern_id', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                                >
-                                    <option value="">-- No Rotation Pattern (Manual Assign) --</option>
-                                    {patterns.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.name} ({p.cycle_length_days}d cycle)
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Assigned Rotation Pattern
+                                            </label>
+                                            <select
+                                                value={newSquadForm.data.roster_pattern_id}
+                                                onChange={(e) => newSquadForm.setData('roster_pattern_id', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                            >
+                                                <option value="">-- No Rotation Pattern (Manual Assign) --</option>
+                                                {patterns.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.name} ({p.cycle_length_days}d cycle)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Description / Responsibilities
-                                </label>
-                                <input
-                                    type="text"
-                                    value={newSquadForm.data.description}
-                                    onChange={(e) => newSquadForm.setData('description', e.target.value)}
-                                    placeholder="Operational notes, primary tasks..."
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
-                                />
-                            </div>
-
-                            {/* Member Enrollment Section */}
-                            <div>
-                                <div className="flex items-center justify-between mb-1.5">
-                                    <label className="block text-xs font-semibold text-slate-300">
-                                        Enroll Members ({newSquadForm.data.employee_ids.length} Selected)
-                                    </label>
-                                    <span className="text-[10px] text-slate-400">Optional</span>
-                                </div>
-                                <input
-                                    type="text"
-                                    value={squadEmpSearch}
-                                    onChange={(e) => setSquadEmpSearch(e.target.value)}
-                                    placeholder="Search staff to enroll..."
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 mb-2"
-                                />
-                                <div className="bg-slate-950 rounded-xl border border-slate-800 max-h-40 overflow-y-auto divide-y divide-slate-900 p-1">
-                                    {available_employees
-                                        .filter((emp) =>
-                                            emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
-                                            emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase())
-                                        )
-                                        .map((emp) => {
-                                            const isSelected = newSquadForm.data.employee_ids.includes(emp.id);
-                                            return (
-                                                <div
-                                                    key={emp.id}
-                                                    onClick={() => {
-                                                        const next = isSelected
-                                                            ? newSquadForm.data.employee_ids.filter((id) => id !== emp.id)
-                                                            : [...newSquadForm.data.employee_ids, emp.id];
-                                                        newSquadForm.setData('employee_ids', next);
-                                                    }}
-                                                    className={`p-2 rounded-lg flex items-center justify-between cursor-pointer transition ${
-                                                        isSelected ? 'bg-indigo-600/15' : 'hover:bg-slate-900/60'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
-                                                            isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
-                                                        }`}>
-                                                            {isSelected && <Check className="w-2.5 h-2.5" />}
-                                                        </div>
-                                                        <span className="font-medium text-xs text-white">
-                                                            {emp.full_name}
-                                                        </span>
-                                                        <span className="text-[10px] text-slate-400 font-mono">
-                                                            ({emp.emp_no})
-                                                        </span>
-                                                    </div>
+                                        {/* Live Shift Pattern Chips Preview */}
+                                        {selectedSquadPattern && squadPatternSteps.length > 0 && (
+                                            <div className="bg-slate-950 p-2.5 rounded-xl border border-indigo-500/20 space-y-1.5">
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span className="font-semibold text-indigo-300 flex items-center gap-1">
+                                                        <Clock className="w-3.5 h-3.5" />
+                                                        <span>Rotation Sequence Preview:</span>
+                                                    </span>
+                                                    <span className="text-slate-400 font-mono text-[10px]">
+                                                        {squadPatternSteps.length} Days Cycle
+                                                    </span>
                                                 </div>
-                                            );
-                                        })}
+                                                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                                                    {squadPatternSteps.map((st: any, sIdx: number) => {
+                                                        const shift = shifts.find((s) => s.id === st.shift_id);
+                                                        const isRest = Boolean(st.is_rest_day);
+                                                        return (
+                                                            <span
+                                                                key={sIdx}
+                                                                className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                                                                    isRest
+                                                                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                                                                        : 'text-white border'
+                                                                }`}
+                                                                style={{
+                                                                    backgroundColor: isRest ? undefined : (shift?.color ? `${shift.color}33` : '#3b82f633'),
+                                                                    borderColor: isRest ? undefined : (shift?.color || '#3b82f6'),
+                                                                    color: isRest ? undefined : (shift?.color || '#93c5fd'),
+                                                                }}
+                                                            >
+                                                                {isRest ? 'OFF' : shift?.code || `D${sIdx + 1}`}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Description / Responsibilities
+                                            </label>
+                                            <textarea
+                                                rows={2}
+                                                value={newSquadForm.data.description}
+                                                onChange={(e) => newSquadForm.setData('description', e.target.value)}
+                                                placeholder="Operational notes, primary tasks..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 resize-none focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Column: Member Enrollment */}
+                                <div className="lg:col-span-7 flex flex-col space-y-2">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                        <label className="block text-xs font-semibold text-slate-300">
+                                            Enroll Members ({newSquadForm.data.employee_ids.length} Selected)
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleSelectAllSquadAvailable}
+                                                className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold transition"
+                                            >
+                                                Select All Available
+                                            </button>
+                                            <span className="text-slate-600">&bull;</span>
+                                            <button
+                                                type="button"
+                                                onClick={handleDeselectAllSquad}
+                                                className="text-[10px] text-slate-400 hover:text-slate-300 transition"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Search & Dept Filter */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                            <input
+                                                type="text"
+                                                value={squadEmpSearch}
+                                                onChange={(e) => setSquadEmpSearch(e.target.value)}
+                                                placeholder="Search staff to enroll..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500"
+                                            />
+                                        </div>
+                                        <select
+                                            value={squadDeptFilter}
+                                            onChange={(e) => setSquadDeptFilter(e.target.value)}
+                                            className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300"
+                                        >
+                                            <option value="all">All Departments</option>
+                                            {departments.map((d) => (
+                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="bg-slate-950 rounded-xl border border-slate-800 h-[280px] lg:h-[320px] overflow-y-auto divide-y divide-slate-900 p-1">
+                                        {available_employees
+                                            .filter((emp) => {
+                                                const matchesSearch =
+                                                    emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
+                                                    emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase());
+                                                const matchesDept =
+                                                    squadDeptFilter === 'all' ||
+                                                    emp.department_id === squadDeptFilter ||
+                                                    emp.department_name === squadDeptFilter;
+                                                return matchesSearch && matchesDept;
+                                            })
+                                            .map((emp) => {
+                                                const isSelected = newSquadForm.data.employee_ids.includes(emp.id);
+                                                const isEnrolledElsewhere = emp.current_squad;
+                                                const hasConflict = !emp.is_available;
+
+                                                return (
+                                                    <div
+                                                        key={emp.id}
+                                                        onClick={() => {
+                                                            const next = isSelected
+                                                                ? newSquadForm.data.employee_ids.filter((id) => id !== emp.id)
+                                                                : [...newSquadForm.data.employee_ids, emp.id];
+                                                            newSquadForm.setData('employee_ids', next);
+                                                        }}
+                                                        className={`p-2 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                            isSelected
+                                                                ? 'bg-indigo-600/20 border border-indigo-500/30'
+                                                                : 'hover:bg-slate-900/60'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5">
+                                                            <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
+                                                                isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                            }`}>
+                                                                {isSelected && <Check className="w-2.5 h-2.5" />}
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-semibold text-xs text-white block">
+                                                                    {emp.full_name}
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                                    {emp.emp_no} &bull; {emp.department_name}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            {isEnrolledElsewhere ? (
+                                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded text-amber-300 bg-amber-500/10 border border-amber-500/20">
+                                                                    In {emp.current_squad?.name}
+                                                                </span>
+                                                            ) : hasConflict ? (
+                                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded text-rose-400 bg-rose-500/10 border border-rose-500/20">
+                                                                    {emp.exclusion_reason || 'Roster Overlap'}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] text-emerald-400 font-mono px-1.5 py-0.5 rounded bg-emerald-500/10">
+                                                                    Available
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
+                            <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-800">
                                 <button
                                     type="button"
                                     onClick={() => setIsNewSquadModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={newSquadForm.processing || !newSquadForm.data.name}
-                                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
                                 >
                                     {newSquadForm.processing ? 'Creating...' : 'Create Squad'}
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 6b: Edit Squad & Member Allocation */}
+            {isEditSquadModalOpen && editingSquad && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg md:max-w-3xl lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl p-5 md:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto flex flex-col">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsEditSquadModalOpen(false);
+                                setEditingSquad(null);
+                            }}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white transition"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="mb-4">
+                            <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    Edit Squad Settings
+                                </span>
+                                {editingSquad.roster_id ? (
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                        Roster-Scoped
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] text-purple-400 font-mono bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
+                                        Master Squad
+                                    </span>
+                                )}
+                            </div>
+                            <h3 className="text-base md:text-lg font-bold text-white mt-1">
+                                {editingSquad.name}
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                                Update squad profile, assigned rotational pattern, and add or remove team members.
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleEditSquadSubmit} className="space-y-4">
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6">
+                                {/* Left Column: Squad Configuration */}
+                                <div className="lg:col-span-5 space-y-3.5 flex flex-col justify-between">
+                                    <div className="space-y-3.5">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Squad Name *
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={editSquadForm.data.name}
+                                                    onChange={(e) => editSquadForm.setData('name', e.target.value)}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Squad Code
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={editSquadForm.data.code}
+                                                    onChange={(e) => editSquadForm.setData('code', e.target.value)}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Squad Color Badge
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'].map((color) => (
+                                                    <button
+                                                        key={color}
+                                                        type="button"
+                                                        onClick={() => editSquadForm.setData('color', color)}
+                                                        className={`w-6 h-6 rounded-full border-2 transition ${
+                                                            editSquadForm.data.color === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+                                                        }`}
+                                                        style={{ backgroundColor: color }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Assigned Rotation Pattern
+                                            </label>
+                                            <select
+                                                value={editSquadForm.data.roster_pattern_id}
+                                                onChange={(e) => editSquadForm.setData('roster_pattern_id', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                            >
+                                                <option value="">-- No Rotation Pattern (Manual Assign) --</option>
+                                                {patterns.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.name} ({p.cycle_length_days}d cycle)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        {/* Live Shift Pattern Chips Preview */}
+                                        {selectedEditSquadPattern && editSquadPatternSteps.length > 0 && (
+                                            <div className="bg-slate-950 p-2.5 rounded-xl border border-indigo-500/20 space-y-1.5">
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span className="font-semibold text-indigo-300 flex items-center gap-1">
+                                                        <Clock className="w-3.5 h-3.5" />
+                                                        <span>Pattern Cycle Preview:</span>
+                                                    </span>
+                                                    <span className="text-slate-400 font-mono text-[10px]">
+                                                        {editSquadPatternSteps.length} Days Cycle
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                                                    {editSquadPatternSteps.map((st: any, sIdx: number) => {
+                                                        const shift = shifts.find((s) => s.id === st.shift_id);
+                                                        const isRest = Boolean(st.is_rest_day);
+                                                        return (
+                                                            <span
+                                                                key={sIdx}
+                                                                className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                                                                    isRest
+                                                                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                                                                        : 'text-white border'
+                                                                }`}
+                                                                style={{
+                                                                    backgroundColor: isRest ? undefined : (shift?.color ? `${shift.color}33` : '#3b82f633'),
+                                                                    borderColor: isRest ? undefined : (shift?.color || '#3b82f6'),
+                                                                    color: isRest ? undefined : (shift?.color || '#93c5fd'),
+                                                                }}
+                                                            >
+                                                                {isRest ? 'OFF' : shift?.code || `D${sIdx + 1}`}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                Description / Responsibilities
+                                            </label>
+                                            <textarea
+                                                rows={2}
+                                                value={editSquadForm.data.description}
+                                                onChange={(e) => editSquadForm.setData('description', e.target.value)}
+                                                placeholder="Operational notes, primary tasks..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 resize-none focus:ring-1 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Column: Add / Remove Members Checklist */}
+                                <div className="lg:col-span-7 flex flex-col space-y-2">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                        <label className="block text-xs font-semibold text-slate-300">
+                                            Squad Members ({editSquadForm.data.employee_ids.length} Enrolled)
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleSelectAllEditSquadAvailable}
+                                                className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold transition"
+                                            >
+                                                Select All Available
+                                            </button>
+                                            <span className="text-slate-600">&bull;</span>
+                                            <button
+                                                type="button"
+                                                onClick={handleDeselectAllEditSquad}
+                                                className="text-[10px] text-slate-400 hover:text-slate-300 transition"
+                                            >
+                                                Clear All
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Search & Dept Filter */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                            <input
+                                                type="text"
+                                                value={squadEmpSearch}
+                                                onChange={(e) => setSquadEmpSearch(e.target.value)}
+                                                placeholder="Search staff to add/remove..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500"
+                                            />
+                                        </div>
+                                        <select
+                                            value={squadDeptFilter}
+                                            onChange={(e) => setSquadDeptFilter(e.target.value)}
+                                            className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300"
+                                        >
+                                            <option value="all">All Departments</option>
+                                            {departments.map((d) => (
+                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="bg-slate-950 rounded-xl border border-slate-800 h-[280px] lg:h-[320px] overflow-y-auto divide-y divide-slate-900 p-1">
+                                        {available_employees
+                                            .filter((emp) => {
+                                                const matchesSearch =
+                                                    emp.full_name.toLowerCase().includes(squadEmpSearch.toLowerCase()) ||
+                                                    emp.emp_no.toLowerCase().includes(squadEmpSearch.toLowerCase());
+                                                const matchesDept =
+                                                    squadDeptFilter === 'all' ||
+                                                    emp.department_id === squadDeptFilter ||
+                                                    emp.department_name === squadDeptFilter;
+                                                return matchesSearch && matchesDept;
+                                            })
+                                            .map((emp) => {
+                                                const isSelected = editSquadForm.data.employee_ids.includes(emp.id);
+                                                const isEnrolledInAnotherSquad = emp.current_squad && emp.current_squad.id !== editingSquad.id;
+                                                const hasConflict = !emp.is_available && !isSelected;
+
+                                                return (
+                                                    <div
+                                                        key={emp.id}
+                                                        onClick={() => {
+                                                            const next = isSelected
+                                                                ? editSquadForm.data.employee_ids.filter((id) => id !== emp.id)
+                                                                : [...editSquadForm.data.employee_ids, emp.id];
+                                                            editSquadForm.setData('employee_ids', next);
+                                                        }}
+                                                        className={`p-2 rounded-lg flex items-center justify-between cursor-pointer transition ${
+                                                            isSelected
+                                                                ? 'bg-indigo-600/20 border border-indigo-500/30'
+                                                                : 'hover:bg-slate-900/60'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5">
+                                                            <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
+                                                                isSelected ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 bg-slate-900'
+                                                            }`}>
+                                                                {isSelected && <Check className="w-2.5 h-2.5" />}
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-semibold text-xs text-white block">
+                                                                    {emp.full_name}
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                                    {emp.emp_no} &bull; {emp.department_name}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            {isSelected ? (
+                                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                                                                    Enrolled
+                                                                </span>
+                                                            ) : isEnrolledInAnotherSquad ? (
+                                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded text-amber-300 bg-amber-500/10 border border-amber-500/20">
+                                                                    In {emp.current_squad?.name}
+                                                                </span>
+                                                            ) : hasConflict ? (
+                                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded text-rose-400 bg-rose-500/10 border border-rose-500/20">
+                                                                    {emp.exclusion_reason || 'Roster Overlap'}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] text-slate-400 font-mono px-1.5 py-0.5 rounded bg-slate-800">
+                                                                    Available
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-3 flex items-center justify-between border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (confirm(`Are you sure you want to delete squad '${editingSquad.name}'?`)) {
+                                            handleDeleteSquad(editingSquad);
+                                            setIsEditSquadModalOpen(false);
+                                            setEditingSquad(null);
+                                        }
+                                    }}
+                                    className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 border border-rose-800/40 text-xs font-semibold flex items-center gap-1.5 transition"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Delete Squad</span>
+                                </button>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsEditSquadModalOpen(false);
+                                            setEditingSquad(null);
+                                        }}
+                                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={editSquadForm.processing || !editSquadForm.data.name}
+                                        className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md transition disabled:opacity-50"
+                                    >
+                                        {editSquadForm.processing ? 'Saving...' : 'Save Changes'}
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL 6c: Squads & Crews Directory */}
+            {isSquadDirectoryModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto">
+                        <button
+                            type="button"
+                            onClick={() => setIsSquadDirectoryModalOpen(false)}
+                            className="absolute top-5 right-5 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center justify-between pr-8">
+                            <div>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    Organizational Structure
+                                </span>
+                                <h3 className="text-base font-bold text-white mt-1">
+                                    Squads & Crews Directory
+                                </h3>
+                                <p className="text-xs text-slate-400">
+                                    View and manage all rotating operational squads, rotation rules, and enrolled personnel.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsSquadDirectoryModalOpen(false);
+                                    openNewSquadModal();
+                                }}
+                                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>New Squad</span>
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 pt-2">
+                            {squads.length === 0 ? (
+                                <div className="p-8 text-center bg-slate-950 rounded-xl border border-slate-800 text-slate-400 text-xs">
+                                    <Users className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                                    <p className="font-semibold text-slate-300">No Squads Configured Yet</p>
+                                    <p className="text-slate-500 mt-1">
+                                        Click "+ New Squad" above to define your first operational crew.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {squads.map((sq) => {
+                                        const memberCount = sq.employees ? sq.employees.length : 0;
+                                        return (
+                                            <div
+                                                key={sq.id}
+                                                className="p-4 bg-slate-950 rounded-xl border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between space-y-3"
+                                            >
+                                                <div>
+                                                    <div className="flex items-start justify-between">
+                                                        <div className="flex items-center gap-2.5">
+                                                            <span
+                                                                className="w-3.5 h-3.5 rounded-full shrink-0"
+                                                                style={{ backgroundColor: sq.color || '#3b82f6' }}
+                                                            />
+                                                            <div>
+                                                                <h4 className="text-sm font-bold text-white">
+                                                                    {sq.name}
+                                                                </h4>
+                                                                <span className="text-[10px] font-mono text-slate-400">
+                                                                    {sq.code || 'NO-CODE'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-1">
+                                                            {sq.roster_id ? (
+                                                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                                                    Roster Squad
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                                                                    Master Squad
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {sq.pattern && (
+                                                        <div className="mt-2.5 text-xs text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                                                            <div className="flex items-center justify-between text-[11px]">
+                                                                <span className="text-indigo-400 font-semibold">
+                                                                    {sq.pattern.name}
+                                                                </span>
+                                                                <span className="text-[10px] font-mono text-slate-400">
+                                                                    {sq.pattern.cycle_length_days}d cycle
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mt-2 flex items-center justify-between text-xs">
+                                                        <span className="text-slate-400 text-[11px]">
+                                                            Personnel Enrolled:
+                                                        </span>
+                                                        <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                                            {memberCount} Staff
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="pt-2 border-t border-slate-800 flex items-center justify-end gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setIsSquadDirectoryModalOpen(false);
+                                                            openManageMembers(sq);
+                                                        }}
+                                                        className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1 transition"
+                                                    >
+                                                        <UserPlus className="w-3 h-3" />
+                                                        <span>Staff ({memberCount})</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setIsSquadDirectoryModalOpen(false);
+                                                            openEditSquadModal(sq);
+                                                        }}
+                                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1 transition"
+                                                    >
+                                                        <Settings className="w-3 h-3" />
+                                                        <span>Edit</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteSquad(sq)}
+                                                        className="p-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-800/40 transition"
+                                                        title="Delete Squad"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-3 flex justify-end border-t border-slate-800">
+                            <button
+                                type="button"
+                                onClick={() => setIsSquadDirectoryModalOpen(false)}
+                                className="px-4 py-2 rounded-xl text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 font-semibold"
+                            >
+                                Close Directory
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

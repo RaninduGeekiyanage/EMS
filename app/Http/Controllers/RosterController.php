@@ -70,13 +70,17 @@ final class RosterController extends Controller
             'squads.*.employee_ids.*' => ['string', 'exists:employees,id'],
         ]);
 
-        $roster = $this->rosterService->createRoster($validated);
+        try {
+            $roster = $this->rosterService->createRoster($validated);
 
-        return redirect()->route('roster.index', [
-            'roster_id' => $roster->id,
-            'year' => Carbon::parse($roster->start_date)->year,
-            'month' => Carbon::parse($roster->start_date)->month,
-        ])->with('success', "Roster '{$roster->name}' created successfully.");
+            return redirect()->route('roster.index', [
+                'roster_id' => $roster->id,
+                'year' => Carbon::parse($roster->start_date)->year,
+                'month' => Carbon::parse($roster->start_date)->month,
+            ])->with('success', "Roster '{$roster->name}' created successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -178,6 +182,30 @@ final class RosterController extends Controller
     }
 
     /**
+     * Create a new Master Company Squad (without a specific roster).
+     */
+    public function storeSquadStandalone(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'code' => ['nullable', 'string', 'max:50'],
+            'color' => ['nullable', 'string', 'max:20'],
+            'roster_pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
+            'description' => ['nullable', 'string'],
+            'employee_ids' => ['nullable', 'array'],
+            'employee_ids.*' => ['string', 'exists:employees,id'],
+        ]);
+
+        try {
+            $this->rosterService->createSquad(null, $validated);
+
+            return redirect()->back()->with('success', "Master squad '{$validated['name']}' created successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
      * Create a new Squad under a Roster.
      */
     public function storeSquad(Request $request, Roster $roster): RedirectResponse
@@ -192,9 +220,13 @@ final class RosterController extends Controller
             'employee_ids.*' => ['string', 'exists:employees,id'],
         ]);
 
-        $this->rosterService->createSquad($roster, $validated);
+        try {
+            $this->rosterService->createSquad($roster, $validated);
 
-        return redirect()->back()->with('success', 'Squad created successfully.');
+            return redirect()->back()->with('success', 'Squad created successfully.');
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -208,11 +240,17 @@ final class RosterController extends Controller
             'color' => ['nullable', 'string', 'max:20'],
             'roster_pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
             'description' => ['nullable', 'string'],
+            'employee_ids' => ['nullable', 'array'],
+            'employee_ids.*' => ['string', 'exists:employees,id'],
         ]);
 
-        $this->rosterService->updateSquad($squad, $validated);
+        try {
+            $this->rosterService->updateSquad($squad, $validated);
 
-        return redirect()->back()->with('success', "Squad '{$squad->name}' updated successfully.");
+            return redirect()->back()->with('success', "Squad '{$squad->name}' updated successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -220,9 +258,14 @@ final class RosterController extends Controller
      */
     public function destroySquad(RosterGroup $squad): RedirectResponse
     {
-        $this->rosterService->deleteSquad($squad);
+        try {
+            $name = $squad->name;
+            $this->rosterService->deleteSquad($squad);
 
-        return redirect()->back()->with('success', 'Squad deleted successfully.');
+            return redirect()->back()->with('success', "Squad '{$name}' deleted successfully.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**

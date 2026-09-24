@@ -141,6 +141,7 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/roster/rosters/{roster}/sync', [RosterController::class, 'syncRoster'])->middleware('can:roster.create')->name('roster.rosters.sync');
 
         // Squads & Member Enrollment
+        Route::post('/roster/squads', [RosterController::class, 'storeSquadStandalone'])->middleware('can:roster.create')->name('roster.squads.store-standalone');
         Route::post('/roster/rosters/{roster}/squads', [RosterController::class, 'storeSquad'])->middleware('can:roster.create')->name('roster.squads.store');
         Route::put('/roster/squads/{squad}', [RosterController::class, 'updateSquad'])->middleware('can:roster.update')->name('roster.squads.update');
         Route::delete('/roster/squads/{squad}', [RosterController::class, 'destroySquad'])->middleware('can:roster.delete')->name('roster.squads.destroy');

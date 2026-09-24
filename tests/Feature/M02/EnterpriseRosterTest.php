@@ -463,5 +463,103 @@ final class EnterpriseRosterTest extends TestCase
         $entriesCount = RosterEntry::where('roster_id', $roster->id)->count();
         $this->assertEquals(56, $entriesCount);
     }
+
+    public function test_roster_creation_prevents_assigning_same_employee_to_multiple_squads_in_same_roster(): void
+    {
+        $this->actingAs($this->admin);
+
+        $pat = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'General Pattern',
+            'code' => 'PAT-GEN',
+            'pattern_type' => 'daily',
+            'cycle_length_days' => 1,
+            'pattern_data' => ['shift_id' => $this->morningShift->id, 'rest_days' => ['sun']],
+            'is_active' => true,
+        ]);
+
+        $response = $this->from('/roster')->post(route('roster.rosters.store'), [
+            'name' => 'March 2027 Conflict Test',
+            'code' => 'RST-2027-03-CONF',
+            'start_date' => '2027-03-01',
+            'end_date' => '2027-03-31',
+            'status' => 'draft',
+            'generation_mode' => 'multi_pattern',
+            'squads' => [
+                [
+                    'name' => 'Squad Red',
+                    'code' => 'SQD-RED',
+                    'color' => '#ef4444',
+                    'pattern_id' => $pat->id,
+                    'employee_ids' => [$this->emp1->id],
+                ],
+                [
+                    'name' => 'Squad Blue',
+                    'code' => 'SQD-BLUE',
+                    'color' => '#3b82f6',
+                    'pattern_id' => $pat->id,
+                    'employee_ids' => [$this->emp1->id], // Duplicate employee in Squad Blue
+                ],
+            ],
+        ]);
+
+        $response->assertSessionHas('error');
+        $this->assertDatabaseMissing('rosters', ['code' => 'RST-2027-03-CONF']);
+    }
+
+    public function test_roster_creation_prevents_overlapping_active_roster_assignments_for_same_employee(): void
+    {
+        $this->actingAs($this->admin);
+
+        $pat = RosterPattern::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'General Pattern 2',
+            'code' => 'PAT-GEN2',
+            'pattern_type' => 'daily',
+            'cycle_length_days' => 1,
+            'pattern_data' => ['shift_id' => $this->morningShift->id, 'rest_days' => ['sun']],
+            'is_active' => true,
+        ]);
+
+        // 1. Create first roster for April 01 - 30 with emp1 in a squad
+        $r1 = $this->post(route('roster.rosters.store'), [
+            'name' => 'April 2027 Primary Roster',
+            'code' => 'RST-2027-04-PRI',
+            'start_date' => '2027-04-01',
+            'end_date' => '2027-04-30',
+            'status' => 'draft',
+            'generation_mode' => 'multi_pattern',
+            'squads' => [
+                [
+                    'name' => 'Alpha Squad',
+                    'code' => 'SQD-ALP',
+                    'pattern_id' => $pat->id,
+                    'employee_ids' => [$this->emp1->id],
+                ],
+            ],
+        ]);
+        $r1->assertRedirect();
+
+        // 2. Try creating a second overlapping roster (April 15 - May 15) with emp1
+        $r2 = $this->from('/roster')->post(route('roster.rosters.store'), [
+            'name' => 'April-May 2027 Overlapping Roster',
+            'code' => 'RST-2027-04-OVER',
+            'start_date' => '2027-04-15',
+            'end_date' => '2027-05-15',
+            'status' => 'draft',
+            'generation_mode' => 'multi_pattern',
+            'squads' => [
+                [
+                    'name' => 'Beta Squad',
+                    'code' => 'SQD-BET',
+                    'pattern_id' => $pat->id,
+                    'employee_ids' => [$this->emp1->id],
+                ],
+            ],
+        ]);
+
+        $r2->assertSessionHas('error');
+        $this->assertDatabaseMissing('rosters', ['code' => 'RST-2027-04-OVER']);
+    }
 }
 

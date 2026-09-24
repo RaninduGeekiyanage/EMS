@@ -62,7 +62,7 @@ class DatabaseSeeder extends Seeder
 
         // 3b. Seed requested Company Admin wasansl@gmail.com
         $wasanAdmin = User::updateOrCreate(
-            ['email' => 'wasansl@gmail.com'],
+            ['email' => 'wasanasl@gmail.com'],
             [
                 'name' => 'Wasan (Company Admin)',
                 'password' => Hash::make('123123123'),

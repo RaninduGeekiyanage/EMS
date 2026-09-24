@@ -78,7 +78,21 @@ final class RosterService
             ])->where('status', '!=', 'archived')->forMonth($year, $month)->first() ?? $allRosters->first();
         }
 
-        $squads = $activeRoster ? $activeRoster->groups : collect();
+        $squads = RosterGroup::query()
+            ->with([
+                'pattern:id,name,code,cycle_length_days,pattern_type',
+                'employees' => function ($q) {
+                    $q->select('employees.id', 'emp_no', 'full_name', 'department_id')
+                        ->with('department:id,name');
+                },
+            ])
+            ->where(function ($q) use ($activeRoster) {
+                $q->whereNull('roster_id');
+                if ($activeRoster) {
+                    $q->orWhere('roster_id', $activeRoster->id);
+                }
+            })
+            ->get();
 
         // 1. Generate Days list for headers
         $days = [];
@@ -963,6 +977,27 @@ final class RosterService
 
         $this->ensureNotLockedInRange($startDate, $endDate);
 
+        // Pre-validate cross-squad duplicates and overlapping roster enrollments
+        $assignedMap = [];
+        if (! empty($data['squads'])) {
+            foreach ($data['squads'] as $squadDef) {
+                $squadName = $squadDef['name'] ?? 'Squad';
+                foreach ($squadDef['employee_ids'] ?? [] as $empId) {
+                    if (isset($assignedMap[$empId])) {
+                        $emp = Employee::find($empId);
+                        $empName = $emp?->full_name ?? $empId;
+                        throw new DomainException("Employee '{$empName}' cannot be assigned to multiple squads ('{$assignedMap[$empId]}' and '{$squadName}') in the same roster period.");
+                    }
+                    $assignedMap[$empId] = $squadName;
+                }
+            }
+        }
+
+        $allEmpIds = ! empty($assignedMap) ? array_keys($assignedMap) : ($data['employee_ids'] ?? []);
+        if (! empty($allEmpIds)) {
+            $this->validateNoRosterOverlap($allEmpIds, $startDate->toDateString(), $endDate->toDateString());
+        }
+
         $code = ! empty($data['code'])
             ? strtoupper(trim($data['code']))
             : 'RST-' . $startDate->format('Y-m') . '-' . strtoupper(Str::random(4));
@@ -1265,13 +1300,13 @@ final class RosterService
     }
 
     /**
-     * Create a new Shift Squad under a Roster.
+     * Create a new Shift Squad under a Roster or as a Master Company Squad (roster_id = null).
      *
      * @param  array<string, mixed>  $data
      */
-    public function createSquad(Roster $roster, array $data): RosterGroup
+    public function createSquad(?Roster $roster, array $data): RosterGroup
     {
-        if ($roster->status === 'locked') {
+        if ($roster && $roster->status === 'locked') {
             throw new DomainException("Roster '{$roster->name}' is locked and cannot be modified.");
         }
 
@@ -1279,7 +1314,7 @@ final class RosterService
             $code = strtoupper(trim($data['code'] ?? 'SQD-' . strtoupper(Str::random(4))));
 
             $squad = RosterGroup::create([
-                'roster_id' => $roster->id,
+                'roster_id' => $roster?->id,
                 'roster_pattern_id' => ! empty($data['roster_pattern_id']) ? $data['roster_pattern_id'] : null,
                 'name' => trim($data['name']),
                 'code' => $code,
@@ -1288,9 +1323,31 @@ final class RosterService
             ]);
 
             if (! empty($data['employee_ids'])) {
-                $this->enrollEmployees($squad, (array) $data['employee_ids']);
-                if ($squad->roster_pattern_id) {
-                    $this->syncRosterDates($roster);
+                if ($roster) {
+                    $this->validateNoRosterOverlap(
+                        (array) $data['employee_ids'],
+                        $roster->start_date instanceof \Carbon\CarbonInterface ? $roster->start_date->toDateString() : (string) $roster->start_date,
+                        $roster->end_date instanceof \Carbon\CarbonInterface ? $roster->end_date->toDateString() : (string) $roster->end_date,
+                        $roster->id
+                    );
+                    $this->enrollEmployees($squad, (array) $data['employee_ids']);
+                    if ($squad->roster_pattern_id) {
+                        $this->syncRosterDates($roster);
+                    }
+                } else {
+                    // Master Squad enrollment
+                    foreach ((array) $data['employee_ids'] as $empId) {
+                        RosterGroupMember::updateOrCreate(
+                            [
+                                'roster_group_id' => $squad->id,
+                                'employee_id' => $empId,
+                            ],
+                            [
+                                'start_date' => null,
+                                'end_date' => null,
+                            ]
+                        );
+                    }
                 }
             }
 
@@ -1299,35 +1356,127 @@ final class RosterService
     }
 
     /**
-     * Update an existing Shift Squad.
+     * Update an existing Shift Squad, its details, and its enrolled members.
      *
      * @param  array<string, mixed>  $data
      */
     public function updateSquad(RosterGroup $squad, array $data): RosterGroup
     {
-        $squad->update([
-            'name' => isset($data['name']) ? trim($data['name']) : $squad->name,
-            'code' => isset($data['code']) ? strtoupper(trim($data['code'])) : $squad->code,
-            'color' => $data['color'] ?? $squad->color,
-            'roster_pattern_id' => array_key_exists('roster_pattern_id', $data)
-                ? (! empty($data['roster_pattern_id']) ? $data['roster_pattern_id'] : null)
-                : $squad->roster_pattern_id,
-            'description' => array_key_exists('description', $data) ? $data['description'] : $squad->description,
-        ]);
+        return DB::transaction(function () use ($squad, $data): RosterGroup {
+            $squad->update([
+                'name' => isset($data['name']) ? trim($data['name']) : $squad->name,
+                'code' => isset($data['code']) ? strtoupper(trim($data['code'])) : $squad->code,
+                'color' => $data['color'] ?? $squad->color,
+                'roster_pattern_id' => array_key_exists('roster_pattern_id', $data)
+                    ? (! empty($data['roster_pattern_id']) ? $data['roster_pattern_id'] : null)
+                    : $squad->roster_pattern_id,
+                'description' => array_key_exists('description', $data) ? $data['description'] : $squad->description,
+            ]);
 
-        return $squad->fresh(['pattern']);
+            if (isset($data['employee_ids']) && is_array($data['employee_ids'])) {
+                $newEmpIds = $data['employee_ids'];
+                $currentEmpIds = $squad->memberEnrollments()->pluck('employee_id')->all();
+
+                $toAdd = array_diff($newEmpIds, $currentEmpIds);
+                $toRemove = array_diff($currentEmpIds, $newEmpIds);
+
+                if (! empty($toRemove)) {
+                    $squad->memberEnrollments()->whereIn('employee_id', $toRemove)->delete();
+                    if ($squad->roster_id) {
+                        RosterEntry::where('roster_group_id', $squad->id)
+                            ->whereIn('employee_id', $toRemove)
+                            ->delete();
+                    }
+                }
+
+                if (! empty($toAdd)) {
+                    if ($squad->roster) {
+                        $this->enrollEmployees($squad, array_values($toAdd));
+                    } else {
+                        foreach ($toAdd as $empId) {
+                            RosterGroupMember::updateOrCreate(
+                                [
+                                    'roster_group_id' => $squad->id,
+                                    'employee_id' => $empId,
+                                ],
+                                [
+                                    'start_date' => null,
+                                    'end_date' => null,
+                                ]
+                            );
+                        }
+                    }
+                }
+
+                if ($squad->roster && $squad->roster_pattern_id) {
+                    $this->syncRosterDates($squad->roster);
+                }
+            }
+
+            return $squad->fresh(['pattern', 'employees']);
+        });
     }
 
     /**
-     * Delete a Shift Squad and its members.
+     * Delete a Shift Squad, its members, and associated entries with safety validations.
      */
     public function deleteSquad(RosterGroup $squad): bool
     {
         return DB::transaction(function () use ($squad): bool {
+            if ($squad->roster && $squad->roster->status === 'locked') {
+                throw new DomainException("Cannot delete squad '{$squad->name}' because its parent roster is locked for finalized payroll.");
+            }
+
             RosterEntry::where('roster_group_id', $squad->id)->delete();
+            RosterGroupMember::where('roster_group_id', $squad->id)->delete();
 
             return (bool) $squad->delete();
         });
+    }
+
+    /**
+     * Validate that none of the given employee IDs are scheduled in another active (non-archived) roster with overlapping dates.
+     *
+     * @param  array<int, string>  $employeeIds
+     */
+    public function validateNoRosterOverlap(
+        array $employeeIds,
+        string $startDate,
+        string $endDate,
+        ?string $excludeRosterId = null
+    ): void {
+        if (empty($employeeIds)) {
+            return;
+        }
+
+        $start = Carbon::parse($startDate)->toDateString();
+        $end = Carbon::parse($endDate)->toDateString();
+
+        $overlappingMemberships = RosterGroupMember::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereHas('group.roster', function ($q) use ($start, $end, $excludeRosterId) {
+                $q->where('start_date', '<=', $end)
+                    ->where('end_date', '>=', $start)
+                    ->where('status', '!=', 'archived');
+                if ($excludeRosterId) {
+                    $q->where('id', '!=', $excludeRosterId);
+                }
+            })
+            ->with(['group.roster:id,name,start_date,end_date', 'employee:id,full_name,emp_no'])
+            ->get();
+
+        if ($overlappingMemberships->isNotEmpty()) {
+            $first = $overlappingMemberships->first();
+            $empName = $first->employee?->full_name ?? 'Unknown';
+            $empNo = $first->employee?->emp_no ?? '';
+            $rosterName = $first->group?->roster?->name ?? 'Another Roster';
+            $rosterStart = $first->group?->roster?->start_date;
+            $rosterEnd = $first->group?->roster?->end_date;
+
+            throw new DomainException(
+                "Conflict: Employee '{$empName}' ({$empNo}) is already scheduled in active roster '{$rosterName}' ({$rosterStart} to {$rosterEnd}). Overlapping roster assignments are not permitted."
+            );
+        }
     }
 
     /**
@@ -1407,6 +1556,7 @@ final class RosterService
                 'id' => $emp->id,
                 'emp_no' => $emp->emp_no,
                 'full_name' => $emp->full_name,
+                'department_id' => $emp->department_id,
                 'date_of_joining' => $emp->date_of_joining?->toDateString(),
                 'hire_date' => $emp->date_of_joining?->toDateString(),
                 'department_name' => $emp->department?->name ?? 'General',
