@@ -94,15 +94,6 @@ final class Roster extends Model
         return $this->belongsTo(Department::class, 'department_id');
     }
 
-    /**
-     * Shift squads / groups belonging to this roster.
-     *
-     * @return HasMany<RosterGroup, $this>
-     */
-    public function groups(): HasMany
-    {
-        return $this->hasMany(RosterGroup::class, 'roster_id')->orderBy('name');
-    }
 
     /**
      * Daily roster entries belonging to this roster.

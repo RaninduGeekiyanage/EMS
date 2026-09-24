@@ -296,37 +296,6 @@ final class RosterPatternManagementTest extends TestCase
         $response->assertRedirect('/roster');
     }
 
-    public function test_can_auto_generate_complementary_squads_from_cyclical_pattern(): void
-    {
-        $basePattern = RosterPattern::create([
-            'tenant_id' => $this->tenant->id,
-            'name' => 'Support Team - Group A',
-            'code' => 'SUP-GRP-A',
-            'pattern_type' => 'cyclical',
-            'cycle_length_days' => 3,
-            'pattern_data' => [
-                'steps' => [
-                    ['step' => 1, 'shift_id' => $this->shift->id, 'is_rest_day' => false],
-                    ['step' => 2, 'shift_id' => $this->shift->id, 'is_rest_day' => false],
-                    ['step' => 3, 'shift_id' => '', 'is_rest_day' => true],
-                ],
-            ],
-            'is_active' => true,
-        ]);
-
-        $response = $this->actingAs($this->hrManager)
-            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
-            ->from('/roster/patterns')
-            ->post("/roster/patterns/{$basePattern->id}/generate-squads");
-
-        $response->assertRedirect('/roster/patterns');
-        $response->assertSessionHas('success');
-
-        // Groups B and C must be generated
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'SUP-GRP-B', 'cycle_length_days' => 3]);
-        $this->assertDatabaseHas('roster_patterns', ['code' => 'SUP-GRP-C', 'cycle_length_days' => 3]);
-    }
-
     public function test_can_discard_pure_draft_roster(): void
     {
         $roster = Roster::create([

@@ -193,17 +193,6 @@ final class Employee extends Model
         return $this->hasMany(RosterEntry::class, 'employee_id');
     }
 
-    /**
-     * Squad groups this employee belongs to.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<RosterGroup, $this>
-     */
-    public function rosterGroups(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
-    {
-        return $this->belongsToMany(RosterGroup::class, 'roster_group_members', 'employee_id', 'roster_group_id')
-            ->withPivot(['id', 'start_date', 'end_date'])
-            ->withTimestamps();
-    }
 
     /**
      * Get the organizational Job Grade (OC Grade) of the employee.

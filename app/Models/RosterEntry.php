@@ -30,7 +30,6 @@ final class RosterEntry extends Model
     protected $fillable = [
         'tenant_id',
         'roster_id',
-        'roster_group_id',
         'roster_pattern_id',
         'employee_id',
         'roster_date',
@@ -66,16 +65,6 @@ final class RosterEntry extends Model
     public function roster(): BelongsTo
     {
         return $this->belongsTo(Roster::class, 'roster_id');
-    }
-
-    /**
-     * Squad group assignment.
-     *
-     * @return BelongsTo<RosterGroup, $this>
-     */
-    public function group(): BelongsTo
-    {
-        return $this->belongsTo(RosterGroup::class, 'roster_group_id');
     }
 
     /**

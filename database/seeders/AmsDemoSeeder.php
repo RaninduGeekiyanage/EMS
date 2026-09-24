@@ -7,11 +7,7 @@ namespace Database\Seeders;
 use App\Models\Department;
 use App\Models\Designation;
 use App\Models\Employee;
-use App\Models\RosterPattern;
-use App\Models\Shift;
 use App\Models\Tenant;
-use App\Services\RosterService;
-use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 
 final class AmsDemoSeeder extends Seeder
@@ -30,68 +26,7 @@ final class AmsDemoSeeder extends Seeder
         app()->instance('current_tenant', $tenant);
         app()->instance('current_tenant_id', $tenant->id);
 
-        // 1. Ensure Standard Shifts exist
-        // $mornShift = Shift::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'ROT-MORN'],
-        //     [
-        //         'name' => 'Morning Shift (A)',
-        //         'shift_type' => 'regular',
-        //         'start_time' => '06:00:00',
-        //         'end_time' => '14:00:00',
-        //         'break_minutes' => 45,
-        //         'grace_minutes' => 15,
-        //         'ot_threshold_minutes' => 480,
-        //         'is_night_shift' => false,
-        //         'color' => '#3b82f6',
-        //     ]
-        // );
-
-        // $eveShift = Shift::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'ROT-EVE'],
-        //     [
-        //         'name' => 'Evening Shift (B)',
-        //         'shift_type' => 'regular',
-        //         'start_time' => '14:00:00',
-        //         'end_time' => '22:00:00',
-        //         'break_minutes' => 45,
-        //         'grace_minutes' => 15,
-        //         'ot_threshold_minutes' => 480,
-        //         'is_night_shift' => false,
-        //         'color' => '#8b5cf6',
-        //     ]
-        // );
-
-        // $nightShift = Shift::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'ROT-NIGHT'],
-        //     [
-        //         'name' => 'Night Shift (C)',
-        //         'shift_type' => 'regular',
-        //         'start_time' => '22:00:00',
-        //         'end_time' => '06:00:00',
-        //         'break_minutes' => 45,
-        //         'grace_minutes' => 15,
-        //         'ot_threshold_minutes' => 480,
-        //         'is_night_shift' => true,
-        //         'color' => '#ec4899',
-        //     ]
-        // );
-
-        // $genShift = Shift::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'GEN-DAY'],
-        //     [
-        //         'name' => 'General Day Shift',
-        //         'shift_type' => 'regular',
-        //         'start_time' => '08:30:00',
-        //         'end_time' => '17:00:00',
-        //         'break_minutes' => 60,
-        //         'grace_minutes' => 15,
-        //         'ot_threshold_minutes' => 480,
-        //         'is_night_shift' => false,
-        //         'color' => '#10b981',
-        //     ]
-        // );
-
-        // 2. Departments
+        // 1. Departments
         $secDept = Department::firstOrCreate(
             ['tenant_id' => $tenant->id, 'code' => 'SEC'],
             ['name' => 'Security & Plant Operations', 'is_active' => true]
@@ -107,7 +42,7 @@ final class AmsDemoSeeder extends Seeder
             ['name' => 'Corporate Administration', 'is_active' => true]
         );
 
-        // 3. Designations
+        // 2. Designations
         $desigManager = Designation::firstOrCreate(
             ['tenant_id' => $tenant->id, 'title' => 'Shift Operations Manager'],
             ['grade' => 'MGR-1', 'is_active' => true]
@@ -123,16 +58,15 @@ final class AmsDemoSeeder extends Seeder
             ['grade' => 'EXEC-2', 'is_active' => true]
         );
 
-        // 4. Employees for 24/7 Security Operations (4 Employees: 3 Shifts + 1 OFF)
+        // 3. Employees for 24/7 Security Operations
         $secStaff = [
             ['emp_no' => 'EMP-1001', 'full_name' => 'Saman Kumara', 'nic' => '198810203040'],
             ['emp_no' => 'EMP-1002', 'full_name' => 'Nimal Perera', 'nic' => '199020304050'],
             ['emp_no' => 'EMP-1003', 'full_name' => 'Sunil Shantha', 'nic' => '199230405060'],
             ['emp_no' => 'EMP-1004', 'full_name' => 'Anura Silva', 'nic' => '199440506070'],
         ];
-        $secEmployees = [];
         foreach ($secStaff as $st) {
-            $secEmployees[] = Employee::updateOrCreate(
+            Employee::updateOrCreate(
                 ['tenant_id' => $tenant->id, 'emp_no' => $st['emp_no']],
                 [
                     'full_name' => $st['full_name'],
@@ -146,15 +80,14 @@ final class AmsDemoSeeder extends Seeder
             );
         }
 
-        // 5. Employees for 2-Shift BPO Support (3 Employees: 2 Shifts + 1 OFF)
+        // 4. Employees for 2-Shift BPO Support
         $bpoStaff = [
             ['emp_no' => 'EMP-2001', 'full_name' => 'Dilani Fernando', 'nic' => '199550607080'],
             ['emp_no' => 'EMP-2002', 'full_name' => 'Kavindi Jayasinghe', 'nic' => '199660708090'],
             ['emp_no' => 'EMP-2003', 'full_name' => 'Chathura Bandara', 'nic' => '199770809010'],
         ];
-        $bpoEmployees = [];
         foreach ($bpoStaff as $st) {
-            $bpoEmployees[] = Employee::updateOrCreate(
+            Employee::updateOrCreate(
                 ['tenant_id' => $tenant->id, 'emp_no' => $st['emp_no']],
                 [
                     'full_name' => $st['full_name'],
@@ -168,15 +101,14 @@ final class AmsDemoSeeder extends Seeder
             );
         }
 
-        // 6. Employees for Corporate General Shift (3 Employees: Mon-Fri Fixed)
+        // 5. Employees for Corporate General Shift
         $corpStaff = [
             ['emp_no' => 'EMP-3001', 'full_name' => 'Roshan Wickramasinghe', 'nic' => '198911223344'],
             ['emp_no' => 'EMP-3002', 'full_name' => 'Pavithra De Silva', 'nic' => '199122334455'],
             ['emp_no' => 'EMP-3003', 'full_name' => 'Kasun Madushanka', 'nic' => '199333445566'],
         ];
-        $corpEmployees = [];
         foreach ($corpStaff as $st) {
-            $corpEmployees[] = Employee::updateOrCreate(
+            Employee::updateOrCreate(
                 ['tenant_id' => $tenant->id, 'emp_no' => $st['emp_no']],
                 [
                     'full_name' => $st['full_name'],
@@ -189,293 +121,5 @@ final class AmsDemoSeeder extends Seeder
                 ]
             );
         }
-
-        // 7. Seed Option 2 Roster Patterns (Shift Group Cards)
-        // $startDate = Carbon::now()->startOfMonth()->toDateString();
-        // $endDate = Carbon::now()->addYear()->endOfMonth()->toDateString();
-
-        // 24/7 Security: 4 Shift Groups (A, B, C, D)
-        // $secGroups = [
-        //     [
-        //         'code' => 'SEC-GRP-A',
-        //         'name' => 'Security - Group A (Morn Start)',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => '', 'is_rest_day' => true],
-        //         ],
-        //         'emp' => $secEmployees[0],
-        //     ],
-        //     [
-        //         'code' => 'SEC-GRP-B',
-        //         'name' => 'Security - Group B (Eve Start)',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 4, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[1],
-        //     ],
-        //     [
-        //         'code' => 'SEC-GRP-C',
-        //         'name' => 'Security - Group C (Night Start)',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 3, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[2],
-        //     ],
-        //     [
-        //         'code' => 'SEC-GRP-D',
-        //         'name' => 'Security - Group D (Off Start)',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 2, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[3],
-        //     ],
-        // ];
-
-        // 7. Seed Enterprise Named Rosters, Squads & Enrollments
-        // $startDate = Carbon::now()->startOfMonth()->toDateString();
-        // $endDate = Carbon::now()->addYear()->endOfMonth()->toDateString();
-        // $currMonthStart = Carbon::now()->startOfMonth()->toDateString();
-        // $currMonthEnd = Carbon::now()->endOfMonth()->toDateString();
-        // $rosterService = app(RosterService::class);
-
-        // ROSTER 1: 24/7 Security & Plant Operations
-        // $secRoster = \App\Models\Roster::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-SEC'],
-        //     [
-        //         'name' => Carbon::now()->format('F Y') . ' - Security & Plant Operations',
-        //         'department_id' => $secDept->id,
-        //         'start_date' => $currMonthStart,
-        //         'end_date' => $currMonthEnd,
-        //         'status' => 'published',
-        //         'published_at' => now(),
-        //         'notes' => 'Continuous 24/7 rotational coverage across 4 squads.',
-        //     ]
-        // );
-
-        // $secSquadConfigs = [
-        //     [
-        //         'code' => 'SEC-SQD-A',
-        //         'name' => 'Squad A - Morning Rotation',
-        //         'color' => '#3b82f6',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => '', 'is_rest_day' => true],
-        //         ],
-        //         'emp' => $secEmployees[0],
-        //     ],
-        //     [
-        //         'code' => 'SEC-SQD-B',
-        //         'name' => 'Squad B - Evening Rotation',
-        //         'color' => '#8b5cf6',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 4, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[1],
-        //     ],
-        //     [
-        //         'code' => 'SEC-SQD-C',
-        //         'name' => 'Squad C - Night Rotation',
-        //         'color' => '#ec4899',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 3, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[2],
-        //     ],
-        //     [
-        //         'code' => 'SEC-SQD-D',
-        //         'name' => 'Squad D - Reliever / Off Start',
-        //         'color' => '#10b981',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 2, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 4, 'shift_id' => $nightShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $secEmployees[3],
-        //     ],
-        // ];
-
-        // foreach ($secSquadConfigs as $sc) {
-        //     $pat = RosterPattern::updateOrCreate(
-        //         ['tenant_id' => $tenant->id, 'code' => $sc['code'] . '-PAT'],
-        //         [
-        //             'name' => "Security Pattern: {$sc['name']}",
-        //             'pattern_type' => 'cyclical',
-        //             'start_date' => $startDate,
-        //             'end_date' => $endDate,
-        //             'cycle_length_days' => 4,
-        //             'pattern_data' => ['steps' => $sc['steps']],
-        //             'is_active' => true,
-        //         ]
-        //     );
-
-        //     $squad = \App\Models\RosterGroup::firstOrCreate(
-        //         ['tenant_id' => $tenant->id, 'roster_id' => $secRoster->id, 'code' => $sc['code']],
-        //         [
-        //             'roster_pattern_id' => $pat->id,
-        //             'name' => $sc['name'],
-        //             'color' => $sc['color'],
-        //         ]
-        //     );
-
-        //     $rosterService->enrollEmployees($squad, [$sc['emp']->id]);
-        // }
-
-        // Add a realistic sample override to verify audit logging:
-        // Day 14: Sunil Shantha (Night) replaced by Anura Silva (Reliever) with reason 'Sick Cover'
-        // $sampleDate = Carbon::now()->startOfMonth()->addDays(13)->toDateString();
-        // $rosterService->updateEntry(
-        //     $secEmployees[3]->id,
-        //     $sampleDate,
-        //     $nightShift->id,
-        //     'shift',
-        //     'Covered emergency sick leave for Sunil',
-        //     'published',
-        //     'Sick Cover'
-        // );
-
-        // // ROSTER 2: Customer Care & BPO Support
-        // $bpoRoster = \App\Models\Roster::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-BPO'],
-        //     [
-        //         'name' => Carbon::now()->format('F Y') . ' - Customer Care & BPO Support',
-        //         'department_id' => $bpoDept->id,
-        //         'start_date' => $currMonthStart,
-        //         'end_date' => $currMonthEnd,
-        //         'status' => 'published',
-        //         'published_at' => now(),
-        //         'notes' => '2-Shift 7-day customer service coverage.',
-        //     ]
-        // );
-
-        // $bpoSquadConfigs = [
-        //     [
-        //         'code' => 'BPO-SQD-A',
-        //         'name' => 'BPO Squad A - Morning Start',
-        //         'color' => '#3b82f6',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => '', 'is_rest_day' => true],
-        //         ],
-        //         'emp' => $bpoEmployees[0],
-        //     ],
-        //     [
-        //         'code' => 'BPO-SQD-B',
-        //         'name' => 'BPO Squad B - Evening Start',
-        //         'color' => '#8b5cf6',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //             ['step' => 2, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 3, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $bpoEmployees[1],
-        //     ],
-        //     [
-        //         'code' => 'BPO-SQD-C',
-        //         'name' => 'BPO Squad C - Off Start',
-        //         'color' => '#10b981',
-        //         'steps' => [
-        //             ['step' => 1, 'shift_id' => '', 'is_rest_day' => true],
-        //             ['step' => 2, 'shift_id' => $mornShift->id, 'is_rest_day' => false],
-        //             ['step' => 3, 'shift_id' => $eveShift->id, 'is_rest_day' => false],
-        //         ],
-        //         'emp' => $bpoEmployees[2],
-        //     ],
-        // ];
-
-        // foreach ($bpoSquadConfigs as $bc) {
-        //     $pat = RosterPattern::updateOrCreate(
-        //         ['tenant_id' => $tenant->id, 'code' => $bc['code'] . '-PAT'],
-        //         [
-        //             'name' => "BPO Pattern: {$bc['name']}",
-        //             'pattern_type' => 'cyclical',
-        //             'start_date' => $startDate,
-        //             'end_date' => $endDate,
-        //             'cycle_length_days' => 3,
-        //             'pattern_data' => ['steps' => $bc['steps']],
-        //             'is_active' => true,
-        //         ]
-        //     );
-
-        //     $squad = \App\Models\RosterGroup::firstOrCreate(
-        //         ['tenant_id' => $tenant->id, 'roster_id' => $bpoRoster->id, 'code' => $bc['code']],
-        //         [
-        //             'roster_pattern_id' => $pat->id,
-        //             'name' => $bc['name'],
-        //             'color' => $bc['color'],
-        //         ]
-        //     );
-
-        //     $rosterService->enrollEmployees($squad, [$bc['emp']->id]);
-        // }
-
-        // // ROSTER 3: Corporate Administration (Mon-Fri Fixed)
-        // $corpRoster = \App\Models\Roster::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'RST-' . Carbon::now()->format('Y-m') . '-CORP'],
-        //     [
-        //         'name' => Carbon::now()->format('F Y') . ' - Corporate Administration',
-        //         'department_id' => $corpDept->id,
-        //         'start_date' => $currMonthStart,
-        //         'end_date' => $currMonthEnd,
-        //         'status' => 'published',
-        //         'published_at' => now(),
-        //         'notes' => 'Fixed Mon-Fri commercial day schedule.',
-        //     ]
-        // );
-
-        // $corpPattern = RosterPattern::updateOrCreate(
-        //     ['tenant_id' => $tenant->id, 'code' => 'CORP-GEN'],
-        //     [
-        //         'name' => 'Corporate - General Day (Mon-Fri)',
-        //         'pattern_type' => 'weekly',
-        //         'start_date' => $startDate,
-        //         'end_date' => $endDate,
-        //         'cycle_length_days' => 7,
-        //         'pattern_data' => [
-        //             ['day' => 0, 'day_name' => 'Mon', 'shift_id' => $genShift->id, 'is_rest_day' => false],
-        //             ['day' => 1, 'day_name' => 'Tue', 'shift_id' => $genShift->id, 'is_rest_day' => false],
-        //             ['day' => 2, 'day_name' => 'Wed', 'shift_id' => $genShift->id, 'is_rest_day' => false],
-        //             ['day' => 3, 'day_name' => 'Thu', 'shift_id' => $genShift->id, 'is_rest_day' => false],
-        //             ['day' => 4, 'day_name' => 'Fri', 'shift_id' => $genShift->id, 'is_rest_day' => false],
-        //             ['day' => 5, 'day_name' => 'Sat', 'shift_id' => '', 'is_rest_day' => true],
-        //             ['day' => 6, 'day_name' => 'Sun', 'shift_id' => '', 'is_rest_day' => true],
-        //         ],
-        //         'is_active' => true,
-        //     ]
-        // );
-
-        // $corpSquad = \App\Models\RosterGroup::firstOrCreate(
-        //     ['tenant_id' => $tenant->id, 'roster_id' => $corpRoster->id, 'code' => 'CORP-SQD-GEN'],
-        //     [
-        //         'roster_pattern_id' => $corpPattern->id,
-        //         'name' => 'Corporate General Squad',
-        //         'color' => '#10b981',
-        //     ]
-        // );
-
-        // $rosterService->enrollEmployees(
-        //     $corpSquad,
-        //     array_map(fn ($e) => $e->id, $corpEmployees)
-        // );
     }
 }
