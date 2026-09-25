@@ -57,6 +57,10 @@ final class RosterController extends Controller
             'pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
             'employee_ids' => ['nullable', 'array'],
             'employee_ids.*' => ['string', 'exists:employees,id'],
+            'pattern_allocations' => ['nullable', 'array'],
+            'pattern_allocations.*.pattern_id' => ['required_with:pattern_allocations', 'string', 'exists:roster_patterns,id'],
+            'pattern_allocations.*.employee_ids' => ['required_with:pattern_allocations', 'array'],
+            'pattern_allocations.*.employee_ids.*' => ['string', 'exists:employees,id'],
         ]);
 
         try {

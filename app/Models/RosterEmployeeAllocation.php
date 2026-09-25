@@ -29,6 +29,7 @@ final class RosterEmployeeAllocation extends Model
     protected $fillable = [
         'tenant_id',
         'roster_id',
+        'roster_pattern_id',
         'employee_id',
         'effective_from',
         'effective_to',
@@ -61,6 +62,16 @@ final class RosterEmployeeAllocation extends Model
     }
 
     /**
+     * Shift Rotation Pattern assigned to this allocation (nullable).
+     *
+     * @return BelongsTo<RosterPattern, $this>
+     */
+    public function pattern(): BelongsTo
+    {
+        return $this->belongsTo(RosterPattern::class, 'roster_pattern_id');
+    }
+
+    /**
      * Allocated Employee.
      *
      * @return BelongsTo<Employee, $this>
@@ -80,3 +91,4 @@ final class RosterEmployeeAllocation extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 }
+

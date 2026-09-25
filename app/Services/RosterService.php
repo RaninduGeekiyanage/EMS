@@ -100,12 +100,17 @@ final class RosterService
         $employees = collect();
         $targetDeptId = $departmentId ?? $activeRoster?->department_id;
 
+        $allocationsMap = collect();
         if ($activeRoster !== null) {
-            $allocatedEmpIds = RosterEmployeeAllocation::query()
+            $allocations = RosterEmployeeAllocation::query()
                 ->where('roster_id', $activeRoster->id)
                 ->where('effective_from', '<=', $endDate->toDateString())
                 ->where('effective_to', '>=', $startDate->toDateString())
-                ->pluck('employee_id');
+                ->with('pattern:id,name,code,pattern_type')
+                ->get();
+
+            $allocationsMap = $allocations->keyBy('employee_id');
+            $allocatedEmpIds = $allocations->pluck('employee_id');
 
             $entryEmpIds = RosterEntry::query()
                 ->where('roster_id', $activeRoster->id)
@@ -126,6 +131,26 @@ final class RosterService
             }
 
             $employees = $employeeQuery->get();
+        } else {
+            // Backward-compatibility: load employees if entries exist for this month without active roster
+            $entryEmpIds = RosterEntry::query()
+                ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+                ->pluck('employee_id');
+
+            if ($entryEmpIds->isNotEmpty()) {
+                $employeeQuery = Employee::query()
+                    ->select('id', 'emp_no', 'full_name', 'department_id', 'date_of_joining')
+                    ->with(['department:id,name'])
+                    ->where('employment_status', 'active')
+                    ->whereIn('id', $entryEmpIds->unique()->values()->all())
+                    ->orderBy('emp_no');
+
+                if ($targetDeptId !== null && $targetDeptId !== '' && $targetDeptId !== 'all') {
+                    $employeeQuery->where('department_id', $targetDeptId);
+                }
+
+                $employees = $employeeQuery->get();
+            }
         }
 
         $employeeIds = $employees->pluck('id')->all();
@@ -139,6 +164,7 @@ final class RosterService
                 'shift:id,name,code,color,start_time,end_time,is_night_shift',
                 'originalShift:id,name,code,color',
                 'overriddenBy:id,name',
+                'pattern:id,name,code,pattern_type',
             ])
             ->get()
             ->groupBy('employee_id');
@@ -295,6 +321,12 @@ final class RosterService
                         'code' => $entry->originalShift->code,
                         'color' => $entry->originalShift->color,
                     ] : null,
+                    'pattern' => (! $isPreHire && $entry?->pattern) ? [
+                        'id' => $entry->pattern->id,
+                        'name' => $entry->pattern->name,
+                        'code' => $entry->pattern->code,
+                        'pattern_type' => $entry->pattern->pattern_type,
+                    ] : null,
                     'status' => $isPreHire ? null : ($entry?->status ?? null),
                     'is_overridden' => $isPreHire ? false : ($entry ? (bool) $entry->is_overridden : false),
                     'override_reason' => $isPreHire ? null : $entry?->override_reason,
@@ -310,6 +342,27 @@ final class RosterService
                 $dailyCells[$dateString] = $cellData;
             }
 
+            $empAllocation = $allocationsMap->get($emp->id);
+            $firstPattern = null;
+            if ($empAllocation?->pattern) {
+                $firstPattern = [
+                    'id' => $empAllocation->pattern->id,
+                    'name' => $empAllocation->pattern->name,
+                    'code' => $empAllocation->pattern->code,
+                    'pattern_type' => $empAllocation->pattern->pattern_type,
+                ];
+            } else {
+                $firstValidEntry = $empEntries->first(fn ($e) => $e->pattern !== null);
+                if ($firstValidEntry && $firstValidEntry->pattern) {
+                    $firstPattern = [
+                        'id' => $firstValidEntry->pattern->id,
+                        'name' => $firstValidEntry->pattern->name,
+                        'code' => $firstValidEntry->pattern->code,
+                        'pattern_type' => $firstValidEntry->pattern->pattern_type,
+                    ];
+                }
+            }
+
             $matrix[] = [
                 'employee' => [
                     'id' => $emp->id,
@@ -319,6 +372,7 @@ final class RosterService
                         'id' => $emp->department->id,
                         'name' => $emp->department->name,
                     ] : null,
+                    'pattern' => $firstPattern,
                 ],
                 'cells' => $dailyCells,
                 'stats' => [
@@ -903,16 +957,40 @@ final class RosterService
 
         $this->ensureNotLockedInRange($startDate, $endDate);
 
-        $empIds = $data['employee_ids'] ?? [];
-        if (! empty($empIds)) {
-            $this->validateNoRosterOverlap($empIds, $startDate->toDateString(), $endDate->toDateString());
+        $patternAllocations = $data['pattern_allocations'] ?? [];
+        if (empty($patternAllocations) && ! empty($data['pattern_id'])) {
+            $targetIds = $data['employee_ids'] ?? [];
+            if (! empty($targetIds)) {
+                $patternAllocations = [
+                    [
+                        'pattern_id' => $data['pattern_id'],
+                        'employee_ids' => $targetIds,
+                    ],
+                ];
+            }
+        }
+
+        $allAllocatedEmpIds = [];
+        foreach ($patternAllocations as $pa) {
+            if (! empty($pa['employee_ids'])) {
+                $allAllocatedEmpIds = array_merge($allAllocatedEmpIds, (array) $pa['employee_ids']);
+            }
+        }
+        $allAllocatedEmpIds = array_values(array_unique(array_filter($allAllocatedEmpIds)));
+
+        if (! empty($allAllocatedEmpIds)) {
+            $this->validateNoRosterOverlap($allAllocatedEmpIds, $startDate->toDateString(), $endDate->toDateString());
         }
 
         $code = ! empty($data['code'])
             ? strtoupper(trim($data['code']))
             : 'RST-' . $startDate->format('Y-m') . '-' . strtoupper(Str::random(4));
 
-        return DB::transaction(function () use ($data, $startDate, $endDate, $code, $empIds): Roster {
+        return DB::transaction(function () use ($data, $startDate, $endDate, $code, $patternAllocations): Roster {
+            $tenantId = session('tenant_id')
+                ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null)
+                ?? Auth::user()?->tenant_id;
+
             $roster = Roster::create([
                 'name' => trim($data['name']),
                 'code' => $code,
@@ -926,22 +1004,67 @@ final class RosterService
                 'created_by' => Auth::id(),
             ]);
 
-            // If an initial pattern is selected, immediately generate entries for target employees
-            if (! empty($data['pattern_id'])) {
-                $targetEmpIds = $empIds;
-                if (empty($targetEmpIds) && ! empty($roster->department_id)) {
-                    $targetEmpIds = Employee::where('department_id', $roster->department_id)
-                        ->where('employment_status', 'active')
-                        ->pluck('id')
-                        ->all();
-                }
+            // If pattern allocations are present, allocate personnel and generate their respective schedules
+            if (! empty($patternAllocations)) {
+                foreach ($patternAllocations as $alloc) {
+                    $patternId = $alloc['pattern_id'] ?? null;
+                    $crewEmpIds = (array) ($alloc['employee_ids'] ?? []);
 
-                if (! empty($targetEmpIds)) {
+                    if (empty($crewEmpIds) || empty($patternId)) {
+                        continue;
+                    }
+
+                    // 1. Record RosterEmployeeAllocation for each crew member with pattern assignment
+                    foreach ($crewEmpIds as $empId) {
+                        RosterEmployeeAllocation::create([
+                            'tenant_id' => $tenantId,
+                            'roster_id' => $roster->id,
+                            'roster_pattern_id' => $patternId,
+                            'employee_id' => $empId,
+                            'effective_from' => $startDate->toDateString(),
+                            'effective_to' => $endDate->toDateString(),
+                            'notes' => 'Allocated during roster creation',
+                            'created_by' => Auth::id(),
+                        ]);
+                    }
+
+                    // 2. Generate Roster Entries for this specific pattern crew
+                    $this->generateRoster([
+                        'pattern_id' => $patternId,
+                        'start_date' => $startDate->toDateString(),
+                        'end_date' => $endDate->toDateString(),
+                        'employee_ids' => $crewEmpIds,
+                        'conflict_mode' => 'overwrite',
+                        'status' => $roster->status === 'published' ? 'published' : 'draft',
+                        'preserve_leaves' => true,
+                        'roster_id' => $roster->id,
+                    ]);
+                }
+            } elseif (! empty($data['department_id']) && ! empty($data['pattern_id'])) {
+                // Fallback: If department scope with a single pattern and no explicit employees
+                $deptEmpIds = Employee::where('department_id', $data['department_id'])
+                    ->where('employment_status', 'active')
+                    ->pluck('id')
+                    ->all();
+
+                if (! empty($deptEmpIds)) {
+                    foreach ($deptEmpIds as $empId) {
+                        RosterEmployeeAllocation::create([
+                            'tenant_id' => $tenantId,
+                            'roster_id' => $roster->id,
+                            'roster_pattern_id' => $data['pattern_id'],
+                            'employee_id' => $empId,
+                            'effective_from' => $startDate->toDateString(),
+                            'effective_to' => $endDate->toDateString(),
+                            'created_by' => Auth::id(),
+                        ]);
+                    }
+
                     $this->generateRoster([
                         'pattern_id' => $data['pattern_id'],
                         'start_date' => $startDate->toDateString(),
                         'end_date' => $endDate->toDateString(),
-                        'employee_ids' => $targetEmpIds,
+                        'employee_ids' => $deptEmpIds,
                         'conflict_mode' => 'overwrite',
                         'status' => $roster->status === 'published' ? 'published' : 'draft',
                         'preserve_leaves' => true,
@@ -1394,6 +1517,7 @@ final class RosterService
                 RosterEmployeeAllocation::create([
                     'tenant_id' => $tenantId,
                     'roster_id' => $roster->id,
+                    'roster_pattern_id' => ! empty($patternId) ? $patternId : null,
                     'employee_id' => $empId,
                     'effective_from' => $effectiveFrom,
                     'effective_to' => $effectiveTo,
@@ -1483,7 +1607,14 @@ final class RosterService
             $targetRoster = Roster::findOrFail($targetRosterId);
 
             if ($sourceRosterId === $targetRosterId) {
-                // Same Roster Shift Pattern Switch: Apply pattern starting from transferDate
+                // Same Roster Shift Pattern Switch: Update allocation's pattern_id and regenerate shifts
+                $alloc = RosterEmployeeAllocation::where('roster_id', $targetRosterId)
+                    ->where('employee_id', $employeeId)
+                    ->first();
+                if ($alloc) {
+                    $alloc->update(['roster_pattern_id' => ! empty($patternId) ? $patternId : null]);
+                }
+
                 if ($patternId !== null && $patternId !== '') {
                     $this->generateRoster([
                         'roster_id' => $targetRosterId,
