@@ -144,6 +144,7 @@ Route::middleware(['tenant'])->group(function (): void {
 
         // Departmentalized Shift Swap Requests
         Route::get('/roster/shift-swaps', [ShiftSwapController::class, 'index'])->middleware('can:shift_swap.view')->name('roster.shift-swaps.index');
+        Route::post('/roster/shift-swaps/preview', [ShiftSwapController::class, 'preview'])->middleware('can:shift_swap.view')->name('roster.shift-swaps.preview');
         Route::post('/roster/shift-swaps', [ShiftSwapController::class, 'store'])->middleware('can:shift_swap.request')->name('roster.shift-swaps.store');
         Route::post('/roster/shift-swaps/{swap}/approve', [ShiftSwapController::class, 'approve'])->name('roster.shift-swaps.approve');
         Route::post('/roster/shift-swaps/{swap}/reject', [ShiftSwapController::class, 'reject'])->name('roster.shift-swaps.reject');

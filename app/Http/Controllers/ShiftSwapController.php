@@ -9,6 +9,7 @@ use App\Models\Employee;
 use App\Models\ShiftSwapRequest;
 use App\Services\ShiftSwapService;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -70,22 +71,50 @@ final class ShiftSwapController extends Controller
     }
 
     /**
-     * Propose a shift swap.
+     * Preview shift swap schedules, warnings and feasibility.
      */
-    public function store(Request $request): RedirectResponse
+    public function preview(Request $request): JsonResponse
     {
         $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
 
         $validated = $request->validate([
             'requesting_employee_id' => ['required', 'string', 'exists:employees,id'],
             'target_employee_id' => ['required', 'string', 'exists:employees,id', 'different:requesting_employee_id'],
-            'shift_date' => ['required', 'date', 'after_or_equal:today'],
-            'reason' => ['nullable', 'string', 'max:500'],
+            'shift_date' => ['required', 'date'],
+            'target_date' => ['nullable', 'date'],
+            'swap_type' => ['nullable', 'string', 'in:same_day,cross_day'],
         ]);
 
-        $this->shiftSwapService->requestSwap($validated, $tenantId);
+        $result = $this->shiftSwapService->previewSwap($validated, (string) $tenantId);
 
-        return redirect()->back()->with('success', 'Shift swap proposal submitted successfully.');
+        return response()->json($result);
+    }
+
+    /**
+     * Propose or directly execute a shift swap.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'requesting_employee_id' => ['required', 'string', 'exists:employees,id'],
+            'target_employee_id' => ['required', 'string', 'exists:employees,id', 'different:requesting_employee_id'],
+            'shift_date' => ['required', 'date'],
+            'target_date' => ['nullable', 'date'],
+            'swap_type' => ['nullable', 'string', 'in:same_day,cross_day'],
+            'reason' => ['nullable', 'string', 'max:500'],
+            'auto_approve' => ['nullable', 'boolean'],
+        ]);
+
+        $swap = $this->shiftSwapService->requestSwap($validated, (string) $tenantId, $user);
+
+        $message = $swap->status === 'approved'
+            ? 'Shift swap executed and duty roster automatically updated.'
+            : 'Shift swap proposal submitted successfully.';
+
+        return redirect()->back()->with('success', $message);
     }
 
     /**

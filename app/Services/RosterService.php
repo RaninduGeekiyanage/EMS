@@ -899,11 +899,12 @@ final class RosterService
         ?string $notes = null,
         string $status = 'published',
         ?string $overrideReason = null,
-        ?string $rosterId = null
+        ?string $rosterId = null,
+        ?int $overriddenById = null
     ): RosterEntry {
         $this->ensureNotLocked($date);
 
-        return DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason, $rosterId): RosterEntry {
+        return DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason, $rosterId, $overriddenById): RosterEntry {
             $entry = RosterEntry::where('employee_id', $employeeId)
                 ->whereDate('roster_date', $date)
                 ->first();
@@ -920,6 +921,8 @@ final class RosterService
                     ->value('id');
             }
 
+            $effectiveOverriddenBy = $overriddenById ?? Auth::id();
+
             $attributes = [
                 'roster_id' => $targetRosterId,
                 'shift_id' => $newShiftId,
@@ -928,7 +931,7 @@ final class RosterService
                 'is_overridden' => true,
                 'original_shift_id' => $originalShiftId,
                 'override_reason' => $overrideReason ?? ($entry ? 'Supervisor Operational Reassignment' : 'Direct Manual Allocation'),
-                'overridden_by' => Auth::id(),
+                'overridden_by' => $effectiveOverriddenBy,
                 'notes' => $notes,
             ];
 
@@ -941,7 +944,7 @@ final class RosterService
             return RosterEntry::create(array_merge($attributes, [
                 'employee_id' => $employeeId,
                 'roster_date' => $date,
-                'created_by' => Auth::id(),
+                'created_by' => $effectiveOverriddenBy,
             ]))->load(['shift:id,name,code,color,start_time,end_time,is_night_shift', 'originalShift:id,name,code,color', 'overriddenBy:id,name']);
         });
     }
@@ -963,49 +966,171 @@ final class RosterService
     }
 
     /**
-     * Mutual shift swap between two employees on a designated operational date.
+     * Mutual shift swap between two employees on a designated operational date (same-date)
+     * or across two distinct operational dates (cross-date exchange).
      *
-     * @return array{employee_a: RosterEntry, employee_b: RosterEntry}
+     * @return array<string, mixed>
      */
-    public function swapShift(string $employeeAId, string $employeeBId, string $date, ?string $reason = null): array
-    {
-        $this->ensureNotLocked($date);
+    public function swapShift(
+        string $employeeAId,
+        string $employeeBId,
+        string $dateA,
+        ?string $dateB = null,
+        ?string $reason = null,
+        ?int $authorizedBy = null
+    ): array {
+        $this->ensureNotLocked($dateA);
+        if ($dateB !== null && $dateB !== $dateA) {
+            $this->ensureNotLocked($dateB);
+        }
 
-        return DB::transaction(function () use ($employeeAId, $employeeBId, $date, $reason): array {
-            $entryA = RosterEntry::where('employee_id', $employeeAId)->whereDate('roster_date', $date)->first();
-            $entryB = RosterEntry::where('employee_id', $employeeBId)->whereDate('roster_date', $date)->first();
-
-            $shiftAId = $entryA?->shift_id;
-            $typeA = $entryA?->schedule_type ?? 'rest_day';
-
-            $shiftBId = $entryB?->shift_id;
-            $typeB = $entryB?->schedule_type ?? 'rest_day';
-
+        return DB::transaction(function () use ($employeeAId, $employeeBId, $dateA, $dateB, $reason, $authorizedBy): array {
+            $isCrossDay = ($dateB !== null && $dateB !== $dateA);
             $swapReason = $reason ?? 'Mutual Operational Shift Swap';
+            $authorizerId = $authorizedBy ?? Auth::id();
 
-            $updatedA = $this->updateEntry(
+            // 1. Resolve employee models
+            $empA = Employee::findOrFail($employeeAId);
+            $empB = Employee::findOrFail($employeeBId);
+            $shiftService = app(ShiftService::class);
+
+            // 2. Fetch existing entries or resolve baseline schedules on Date A
+            $entryA1 = RosterEntry::where('employee_id', $employeeAId)->whereDate('roster_date', $dateA)->first();
+            $entryB1 = RosterEntry::where('employee_id', $employeeBId)->whereDate('roster_date', $dateA)->first();
+
+            $shiftA1Id = $entryA1?->shift_id;
+            $typeA1 = $entryA1?->schedule_type;
+            if ($typeA1 === null) {
+                $effectiveA1 = $shiftService->getEffectiveShiftForEmployee($empA, Carbon::parse($dateA));
+                $typeA1 = $effectiveA1 ? 'shift' : 'rest_day';
+                $shiftA1Id = $effectiveA1?->id;
+            }
+
+            $shiftB1Id = $entryB1?->shift_id;
+            $typeB1 = $entryB1?->schedule_type;
+            if ($typeB1 === null) {
+                $effectiveB1 = $shiftService->getEffectiveShiftForEmployee($empB, Carbon::parse($dateA));
+                $typeB1 = $effectiveB1 ? 'shift' : 'rest_day';
+                $shiftB1Id = $effectiveB1?->id;
+            }
+
+            if (! $isCrossDay) {
+                // Same-Date Swap on Date A:
+                // Employee A receives Employee B's shift & schedule type
+                // Employee B receives Employee A's shift & schedule type
+                $updatedA = $this->updateEntry(
+                    $employeeAId,
+                    $dateA,
+                    $shiftB1Id,
+                    $typeB1,
+                    "Swapped shift with employee #{$empB->emp_no}",
+                    'published',
+                    $swapReason,
+                    null,
+                    $authorizerId
+                );
+
+                $updatedB = $this->updateEntry(
+                    $employeeBId,
+                    $dateA,
+                    $shiftA1Id,
+                    $typeA1,
+                    "Swapped shift with employee #{$empA->emp_no}",
+                    'published',
+                    $swapReason,
+                    null,
+                    $authorizerId
+                );
+
+                return [
+                    'employee_a' => $updatedA,
+                    'employee_b' => $updatedB,
+                    'swap_type' => 'same_day',
+                    'date_a' => $dateA,
+                ];
+            }
+
+            // Cross-Date Swap:
+            // Fetch existing entries or resolve baseline schedules on Date B
+            $entryA2 = RosterEntry::where('employee_id', $employeeAId)->whereDate('roster_date', $dateB)->first();
+            $entryB2 = RosterEntry::where('employee_id', $employeeBId)->whereDate('roster_date', $dateB)->first();
+
+            $shiftA2Id = $entryA2?->shift_id;
+            $typeA2 = $entryA2?->schedule_type;
+            if ($typeA2 === null) {
+                $effectiveA2 = $shiftService->getEffectiveShiftForEmployee($empA, Carbon::parse($dateB));
+                $typeA2 = $effectiveA2 ? 'shift' : 'rest_day';
+                $shiftA2Id = $effectiveA2?->id;
+            }
+
+            $shiftB2Id = $entryB2?->shift_id;
+            $typeB2 = $entryB2?->schedule_type;
+            if ($typeB2 === null) {
+                $effectiveB2 = $shiftService->getEffectiveShiftForEmployee($empB, Carbon::parse($dateB));
+                $typeB2 = $effectiveB2 ? 'shift' : 'rest_day';
+                $shiftB2Id = $effectiveB2?->id;
+            }
+
+            // On Date A: Employee B takes Employee A's schedule; Employee A takes Employee B's schedule
+            $updatedA1 = $this->updateEntry(
                 $employeeAId,
-                $date,
-                $shiftBId,
-                $typeB,
-                "Swapped shift with employee #{$employeeBId}",
+                $dateA,
+                $shiftB1Id,
+                $typeB1,
+                "Cross-day swap with employee #{$empB->emp_no} (exchange for {$dateB})",
                 'published',
-                $swapReason
+                $swapReason,
+                null,
+                $authorizerId
             );
 
-            $updatedB = $this->updateEntry(
+            $updatedB1 = $this->updateEntry(
                 $employeeBId,
-                $date,
-                $shiftAId,
-                $typeA,
-                "Swapped shift with employee #{$employeeAId}",
+                $dateA,
+                $shiftA1Id,
+                $typeA1,
+                "Cross-day swap with employee #{$empA->emp_no} (exchange for {$dateB})",
                 'published',
-                $swapReason
+                $swapReason,
+                null,
+                $authorizerId
+            );
+
+            // On Date B: Employee A takes Employee B's schedule; Employee B takes Employee A's schedule
+            $updatedA2 = $this->updateEntry(
+                $employeeAId,
+                $dateB,
+                $shiftB2Id,
+                $typeB2,
+                "Cross-day swap with employee #{$empB->emp_no} (exchange for {$dateA})",
+                'published',
+                $swapReason,
+                null,
+                $authorizerId
+            );
+
+            $updatedB2 = $this->updateEntry(
+                $employeeBId,
+                $dateB,
+                $shiftA2Id,
+                $typeA2,
+                "Cross-day swap with employee #{$empA->emp_no} (exchange for {$dateA})",
+                'published',
+                $swapReason,
+                null,
+                $authorizerId
             );
 
             return [
-                'employee_a' => $updatedA,
-                'employee_b' => $updatedB,
+                'employee_a' => $updatedA1,
+                'employee_b' => $updatedB1,
+                'swap_type' => 'cross_day',
+                'date_a' => $dateA,
+                'date_b' => $dateB,
+                'cross_day' => [
+                    'date_a' => ['employee_a' => $updatedA1, 'employee_b' => $updatedB1],
+                    'date_b' => ['employee_a' => $updatedA2, 'employee_b' => $updatedB2],
+                ],
             ];
         });
     }
@@ -1776,17 +1901,25 @@ final class RosterService
     }
 
     /**
+     * Check if a date belongs to a finalized and locked payroll period.
+     */
+    public function isPeriodLocked(string|CarbonInterface $date): bool
+    {
+        $carbonDate = $date instanceof CarbonInterface ? $date : Carbon::parse($date);
+
+        return PayrollRun::where('period_year', $carbonDate->year)
+            ->where('period_month', $carbonDate->month)
+            ->where('status', 'locked')
+            ->exists();
+    }
+
+    /**
      * Ensure date is not part of a finalized & locked M03 Payroll period.
      */
     private function ensureNotLocked(string|CarbonInterface $date): void
     {
         $carbonDate = $date instanceof CarbonInterface ? $date : Carbon::parse($date);
-        $isLocked = PayrollRun::where('period_year', $carbonDate->year)
-            ->where('period_month', $carbonDate->month)
-            ->where('status', 'locked')
-            ->exists();
-
-        if ($isLocked) {
+        if ($this->isPeriodLocked($carbonDate)) {
             throw new DomainException("Cannot modify roster schedules for {$carbonDate->format('F Y')} because payroll has been finalized and locked.");
         }
     }

@@ -32,14 +32,19 @@ final class ShiftSwapRequest extends Model
         'requesting_employee_id',
         'target_employee_id',
         'shift_date',
+        'target_date',
+        'swap_type',
         'requesting_shift_id',
         'target_shift_id',
+        'requesting_schedule_type',
+        'target_schedule_type',
         'reason',
         'target_status',
         'status',
         'approved_by',
         'approved_at',
         'admin_notes',
+        'metadata',
     ];
 
     /**
@@ -51,7 +56,9 @@ final class ShiftSwapRequest extends Model
     {
         return [
             'shift_date' => 'date',
+            'target_date' => 'date',
             'approved_at' => 'datetime',
+            'metadata' => 'array',
         ];
     }
 

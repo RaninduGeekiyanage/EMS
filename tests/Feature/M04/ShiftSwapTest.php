@@ -7,6 +7,8 @@ namespace Tests\Feature\M04;
 use App\Models\Department;
 use App\Models\DepartmentHead;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
+use App\Models\LeaveType;
 use App\Models\RosterEntry;
 use App\Models\Shift;
 use App\Models\ShiftSwapRequest;
@@ -302,6 +304,246 @@ final class ShiftSwapTest extends TestCase
         $service->approveSwap($swap, $this->admin, $this->tenant->id, 'Admin approved for unassigned department');
         $swap->refresh();
         $this->assertEquals('approved', $swap->status);
+    }
+
+    public function test_can_propose_and_approve_cross_date_shift_swap(): void
+    {
+        $dateA = Carbon::parse('2026-10-05');
+        $dateB = Carbon::parse('2026-10-10');
+
+        // On Date A (5th): Emp A1 has Morning Shift, Emp A2 is Rest Day
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $dateA->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'roster_date' => $dateA->toDateString(),
+            'shift_id' => null,
+            'schedule_type' => 'rest_day',
+            'status' => 'published',
+        ]);
+
+        // On Date B (10th): Emp A1 is Rest Day, Emp A2 has Night Shift
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $dateB->toDateString(),
+            'shift_id' => null,
+            'schedule_type' => 'rest_day',
+            'status' => 'published',
+        ]);
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'roster_date' => $dateB->toDateString(),
+            'shift_id' => $this->nightShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        /** @var ShiftSwapService $service */
+        $service = app(ShiftSwapService::class);
+        $swap = $service->requestSwap([
+            'requesting_employee_id' => $this->empA1->id,
+            'target_employee_id' => $this->empA2->id,
+            'shift_date' => $dateA->toDateString(),
+            'target_date' => $dateB->toDateString(),
+            'swap_type' => 'cross_day',
+            'reason' => 'Cross-date exchange: 5th morning for 10th night',
+        ], $this->tenant->id);
+
+        $this->assertEquals('cross_day', $swap->swap_type);
+        $this->assertEquals($dateB->toDateString(), $swap->target_date->toDateString());
+        $this->assertEquals('pending', $swap->status);
+
+        // HOD approves
+        $service->approveSwap($swap, $this->hodUser, $this->tenant->id, 'Cross-date trade approved');
+        $swap->refresh();
+        $this->assertEquals('approved', $swap->status);
+
+        // Verify Date A: Emp A1 now has Rest Day, Emp A2 now has Morning Shift
+        $entryA1DateA = RosterEntry::where('employee_id', $this->empA1->id)->whereDate('roster_date', $dateA)->first();
+        $entryA2DateA = RosterEntry::where('employee_id', $this->empA2->id)->whereDate('roster_date', $dateA)->first();
+        $this->assertEquals('rest_day', $entryA1DateA->schedule_type);
+        $this->assertNull($entryA1DateA->shift_id);
+        $this->assertEquals('shift', $entryA2DateA->schedule_type);
+        $this->assertEquals($this->morningShift->id, $entryA2DateA->shift_id);
+
+        // Verify Date B: Emp A1 now has Night Shift, Emp A2 now has Rest Day
+        $entryA1DateB = RosterEntry::where('employee_id', $this->empA1->id)->whereDate('roster_date', $dateB)->first();
+        $entryA2DateB = RosterEntry::where('employee_id', $this->empA2->id)->whereDate('roster_date', $dateB)->first();
+        $this->assertEquals('shift', $entryA1DateB->schedule_type);
+        $this->assertEquals($this->nightShift->id, $entryA1DateB->shift_id);
+        $this->assertEquals('rest_day', $entryA2DateB->schedule_type);
+        $this->assertNull($entryA2DateB->shift_id);
+    }
+
+    public function test_cannot_swap_into_pre_approved_leave(): void
+    {
+        $date = Carbon::parse('2026-10-15');
+
+        $leaveType = LeaveType::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Annual Leave',
+            'code' => 'ANN',
+            'days_per_year' => 14,
+            'is_paid' => true,
+            'is_active' => true,
+        ]);
+
+        LeaveRequest::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'leave_type_id' => $leaveType->id,
+            'start_date' => $date->toDateString(),
+            'end_date' => $date->toDateString(),
+            'days_count' => 1.0,
+            'reason' => 'Annual vacation',
+            'status' => 'approved',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        /** @var ShiftSwapService $service */
+        $service = app(ShiftSwapService::class);
+        $service->requestSwap([
+            'requesting_employee_id' => $this->empA1->id,
+            'target_employee_id' => $this->empA2->id,
+            'shift_date' => $date->toDateString(),
+            'swap_type' => 'same_day',
+        ], $this->tenant->id);
+    }
+
+    public function test_cannot_propose_identical_shifts_on_same_date(): void
+    {
+        $date = Carbon::parse('2026-10-18');
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        /** @var ShiftSwapService $service */
+        $service = app(ShiftSwapService::class);
+        $service->requestSwap([
+            'requesting_employee_id' => $this->empA1->id,
+            'target_employee_id' => $this->empA2->id,
+            'shift_date' => $date->toDateString(),
+            'swap_type' => 'same_day',
+        ], $this->tenant->id);
+    }
+
+    public function test_manager_direct_auto_approve_executes_immediately(): void
+    {
+        $date = Carbon::parse('2026-10-20');
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'roster_date' => $date->toDateString(),
+            'shift_id' => $this->nightShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        /** @var ShiftSwapService $service */
+        $service = app(ShiftSwapService::class);
+        $swap = $service->requestSwap([
+            'requesting_employee_id' => $this->empA1->id,
+            'target_employee_id' => $this->empA2->id,
+            'shift_date' => $date->toDateString(),
+            'swap_type' => 'same_day',
+            'auto_approve' => true,
+        ], $this->tenant->id, $this->admin);
+
+        $this->assertEquals('approved', $swap->status);
+        $this->assertEquals('accepted', $swap->target_status);
+        $this->assertEquals($this->admin->id, $swap->approved_by);
+
+        // Verify roster was mutated immediately
+        $entryA1 = RosterEntry::where('employee_id', $this->empA1->id)->whereDate('roster_date', $date)->first();
+        $this->assertEquals($this->nightShift->id, $entryA1->shift_id);
+    }
+
+    public function test_preview_endpoint_returns_accurate_schedule_differences(): void
+    {
+        $dateA = Carbon::parse('2026-10-25');
+        $dateB = Carbon::parse('2026-10-28');
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA1->id,
+            'roster_date' => $dateA->toDateString(),
+            'shift_id' => $this->morningShift->id,
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->empA2->id,
+            'roster_date' => $dateA->toDateString(),
+            'shift_id' => null,
+            'schedule_type' => 'rest_day',
+            'status' => 'published',
+        ]);
+
+        $response = $this->actingAs($this->admin)->postJson('/roster/shift-swaps/preview', [
+            'requesting_employee_id' => $this->empA1->id,
+            'target_employee_id' => $this->empA2->id,
+            'shift_date' => $dateA->toDateString(),
+            'target_date' => $dateB->toDateString(),
+            'swap_type' => 'cross_day',
+        ]);
+
+        $response->assertOk();
+        $data = $response->json();
+
+        $this->assertTrue($data['can_swap']);
+        $this->assertEquals('cross_day', $data['swap_type']);
+        $this->assertArrayHasKey('date_a', $data);
+        $this->assertArrayHasKey('date_b', $data);
+        $this->assertEquals($this->morningShift->name, $data['date_a']['requesting']['current']['shift']['name']);
+        $this->assertEquals('rest_day', $data['date_a']['target']['current']['schedule_type']);
     }
 }
 
