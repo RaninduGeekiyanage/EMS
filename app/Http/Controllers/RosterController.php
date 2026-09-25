@@ -267,16 +267,20 @@ final class RosterController extends Controller
     {
         $validated = $request->validated();
 
-        $count = $this->rosterService->allocateEmployee(
-            $roster->id,
-            $validated['employee_ids'],
-            $validated['effective_from'],
-            $validated['effective_to'],
-            $validated['pattern_id'] ?? null,
-            $validated['notes'] ?? null
-        );
+        try {
+            $count = $this->rosterService->allocateEmployee(
+                $roster->id,
+                $validated['employee_ids'],
+                $validated['effective_from'],
+                $validated['effective_to'],
+                $validated['pattern_id'] ?? null,
+                $validated['notes'] ?? null
+            );
 
-        return redirect()->back()->with('success', "{$count} employee(s) successfully allocated to roster '{$roster->name}'.");
+            return redirect()->back()->with('success', "{$count} employee(s) successfully allocated to roster '{$roster->name}'.");
+        } catch (\DomainException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 
     /**

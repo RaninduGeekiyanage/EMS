@@ -1336,6 +1336,7 @@ final class RosterService
         $start = Carbon::parse($startDate)->toDateString();
         $end = Carbon::parse($endDate)->toDateString();
 
+        // 1. Check existing RosterEntry records in other active rosters
         $overlappingEntry = RosterEntry::query()
             ->whereIn('employee_id', $employeeIds)
             ->whereBetween('roster_date', [$start, $end])
@@ -1357,6 +1358,30 @@ final class RosterService
                 "Conflict: Employee '{$empName}' ({$empNo}) is already scheduled in active roster '{$rosterName}'. Overlapping roster assignments are not permitted."
             );
         }
+
+        // 2. Check existing RosterEmployeeAllocation records in other active rosters
+        $overlappingAlloc = RosterEmployeeAllocation::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->where('effective_from', '<=', $end)
+            ->where('effective_to', '>=', $start)
+            ->whereHas('roster', function ($q) use ($excludeRosterId) {
+                $q->where('status', '!=', 'archived');
+                if ($excludeRosterId) {
+                    $q->where('id', '!=', $excludeRosterId);
+                }
+            })
+            ->with(['roster:id,name,start_date,end_date', 'employee:id,full_name,emp_no'])
+            ->first();
+
+        if ($overlappingAlloc) {
+            $empName = $overlappingAlloc->employee?->full_name ?? 'Employee';
+            $empNo = $overlappingAlloc->employee?->emp_no ?? '';
+            $rosterName = $overlappingAlloc->roster?->name ?? 'Another Roster';
+
+            throw new DomainException(
+                "Conflict: Employee '{$empName}' ({$empNo}) is already allocated to active roster '{$rosterName}'. Overlapping roster assignments are not permitted."
+            );
+        }
     }
 
     /**
@@ -1373,7 +1398,7 @@ final class RosterService
         $start = Carbon::parse($startDate)->toDateString();
         $end = Carbon::parse($endDate)->toDateString();
 
-        // 1. Find all active entries in overlapping active rosters
+        // 1. Find all active entries in overlapping active rosters (excluding current roster)
         $activeEntries = RosterEntry::query()
             ->with(['roster:id,name,code,status'])
             ->whereBetween('roster_date', [$start, $end])
@@ -1386,7 +1411,40 @@ final class RosterService
             ->get()
             ->groupBy('employee_id');
 
-        // 2. Query active employees
+        // 2. Find all active allocations in other active rosters
+        $activeAllocs = RosterEmployeeAllocation::query()
+            ->with(['roster:id,name,code,status'])
+            ->where('effective_from', '<=', $end)
+            ->where('effective_to', '>=', $start)
+            ->whereHas('roster', function ($q) use ($excludeRosterId) {
+                $q->where('status', '!=', 'archived');
+                if ($excludeRosterId) {
+                    $q->where('id', '!=', $excludeRosterId);
+                }
+            })
+            ->get()
+            ->groupBy('employee_id');
+
+        // 3. Track employees already allocated or entered in the current roster
+        $currentRosterMembers = collect();
+        if ($excludeRosterId) {
+            $currentAllocMembers = RosterEmployeeAllocation::query()
+                ->where('roster_id', $excludeRosterId)
+                ->where('effective_from', '<=', $end)
+                ->where('effective_to', '>=', $start)
+                ->pluck('employee_id')
+                ->flip();
+
+            $currentEntryMembers = RosterEntry::query()
+                ->where('roster_id', $excludeRosterId)
+                ->whereBetween('roster_date', [$start, $end])
+                ->pluck('employee_id')
+                ->flip();
+
+            $currentRosterMembers = $currentAllocMembers->union($currentEntryMembers);
+        }
+
+        // 4. Query active employees
         $query = Employee::query()
             ->select('id', 'emp_no', 'full_name', 'department_id', 'designation_id', 'date_of_joining')
             ->with(['department:id,name,code', 'designation:id,title'])
@@ -1399,10 +1457,12 @@ final class RosterService
 
         $allEmployees = $query->get();
 
-        return $allEmployees->map(function ($emp) use ($activeEntries) {
+        return $allEmployees->map(function ($emp) use ($activeEntries, $activeAllocs, $currentRosterMembers) {
             $entries = $activeEntries->get($emp->id);
-            $firstRoster = $entries?->first()?->roster;
+            $allocs = $activeAllocs->get($emp->id);
+            $firstRoster = $entries?->first()?->roster ?? $allocs?->first()?->roster;
             $isEnrolledElsewhere = $firstRoster !== null;
+            $isInCurrentRoster = $currentRosterMembers->has($emp->id);
 
             return [
                 'id' => $emp->id,
@@ -1413,10 +1473,12 @@ final class RosterService
                 'hire_date' => $emp->date_of_joining?->toDateString(),
                 'department_name' => $emp->department?->name ?? 'General',
                 'designation_title' => $emp->designation?->title ?? 'Staff',
-                'is_available' => ! $isEnrolledElsewhere,
-                'exclusion_reason' => $isEnrolledElsewhere
-                    ? "Assigned to {$firstRoster->name}"
-                    : null,
+                'is_available' => ! $isEnrolledElsewhere && ! $isInCurrentRoster,
+                'is_enrolled_elsewhere' => $isEnrolledElsewhere,
+                'is_in_current_roster' => $isInCurrentRoster,
+                'exclusion_reason' => $isInCurrentRoster
+                    ? 'Already assigned to this roster'
+                    : ($isEnrolledElsewhere ? "Assigned to {$firstRoster->name}" : null),
                 'current_roster' => $firstRoster ? [
                     'id' => $firstRoster->id,
                     'name' => $firstRoster->name,
@@ -1562,6 +1624,9 @@ final class RosterService
         if (empty($empIds)) {
             return 0;
         }
+
+        // Validate that no employee is double-booked into another active roster during overlapping dates
+        $this->validateNoRosterOverlap($empIds, $effectiveFrom, $effectiveTo, $roster->id);
 
         $userId = Auth::id();
         $tenantId = session('tenant_id')

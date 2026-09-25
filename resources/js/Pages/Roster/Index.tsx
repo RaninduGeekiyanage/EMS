@@ -84,6 +84,8 @@ interface AvailableEmployee {
     department_name: string;
     designation_title: string;
     is_available: boolean;
+    is_enrolled_elsewhere?: boolean;
+    is_in_current_roster?: boolean;
     exclusion_reason?: string | null;
     current_roster?: {
         id: string;
@@ -264,6 +266,7 @@ export default function Index({
     const [quickPatternEmpSearch, setQuickPatternEmpSearch] = useState('');
     const [quickPatternDeptFilter, setQuickPatternDeptFilter] = useState('all');
     const [addEmpSearch, setAddEmpSearch] = useState('');
+    const [showOnlyAvailableAddEmp, setShowOnlyAvailableAddEmp] = useState(true);
 
     const [selectedCell, setSelectedCell] = useState<{
         employeeId: string;
@@ -349,6 +352,32 @@ export default function Index({
             designation_title: 'Staff',
         }));
     }, [all_employees, matrix]);
+
+    // Employees eligible for assignment to active roster:
+    // Strictly exclude employees who are already members of this active roster
+    const unallocatedCandidateEmployees = useMemo(() => {
+        return available_employees.filter((emp) => {
+            const isInActive = emp.is_in_current_roster || matrix.some((r) => r.employee.id === emp.id);
+            return !isInActive;
+        });
+    }, [available_employees, matrix]);
+
+    // Count of truly available unallocated employees
+    const availableCandidatesCount = useMemo(() => {
+        return unallocatedCandidateEmployees.filter((e) => e.is_available).length;
+    }, [unallocatedCandidateEmployees]);
+
+    // Personnel currently belonging to active roster for applying patterns
+    const activeRosterPersonnel = useMemo(() => {
+        return matrix.map((r) => ({
+            id: r.employee.id,
+            emp_no: r.employee.emp_no,
+            full_name: r.employee.full_name,
+            department_id: r.employee.department?.id || '',
+            department_name: r.employee.department?.name || 'General',
+            designation_title: 'Staff',
+        }));
+    }, [matrix]);
 
     // Navigation & Month Switchers
     const handleRosterChange = (rosterId: string) => {
@@ -705,6 +734,7 @@ export default function Index({
             notes: '',
         });
         setAddEmpSearch('');
+        setShowOnlyAvailableAddEmp(true);
         setIsAddEmployeeModalOpen(true);
     };
 
@@ -2282,7 +2312,9 @@ export default function Index({
                                                             emp.full_name.toLowerCase().includes(wizardEmpSearch.toLowerCase()) ||
                                                             emp.emp_no.toLowerCase().includes(wizardEmpSearch.toLowerCase());
                                                         const matchesDept = wizardDeptFilter === 'all' || emp.department_id === wizardDeptFilter;
-                                                        return matchesSearch && matchesDept;
+                                                        const availInfo = available_employees.find((a) => a.id === emp.id);
+                                                        const hasExternalConflict = availInfo && !availInfo.is_available;
+                                                        return matchesSearch && matchesDept && !hasExternalConflict;
                                                     });
                                                     const filteredIds = filtered.map((e) => e.id);
                                                     const nextAllocations = { ...newRosterForm.data.pattern_allocations };
@@ -2335,7 +2367,10 @@ export default function Index({
                                                 );
                                                 const isUnallocated = !currentPatternAlloc;
 
-                                                if (wizardAllocFilter === 'unallocated' && !isUnallocated) {
+                                                const availInfo = available_employees.find((a) => a.id === emp.id);
+                                                const hasExternalConflict = availInfo && !availInfo.is_available;
+
+                                                if (wizardAllocFilter === 'unallocated' && (!isUnallocated || hasExternalConflict)) {
                                                     return false;
                                                 }
 
@@ -2591,7 +2626,7 @@ export default function Index({
 
                                 {/* Employee Checkbox List */}
                                 <div className="max-h-56 overflow-y-auto border border-slate-800 rounded-xl p-2 bg-slate-950/60 divide-y divide-slate-800/50">
-                                    {employeePool
+                                    {activeRosterPersonnel
                                         .filter((e) => {
                                             const mSearch =
                                                 !quickPatternEmpSearch ||
@@ -2632,6 +2667,11 @@ export default function Index({
                                                 </label>
                                             );
                                         })}
+                                    {activeRosterPersonnel.length === 0 && (
+                                        <div className="py-6 text-center text-slate-400 text-xs">
+                                            No personnel allocated to this roster yet. Use "Add Employees" first.
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -2811,44 +2851,91 @@ export default function Index({
                             </div>
 
                             <div>
-                                <label className="block text-slate-400 font-medium mb-1">
-                                    Select Available Employees ({available_employees.length} available)
-                                </label>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-slate-400 font-medium">
+                                        Select Staff ({availableCandidatesCount} available)
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowOnlyAvailableAddEmp(!showOnlyAvailableAddEmp)}
+                                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold transition"
+                                    >
+                                        {showOnlyAvailableAddEmp ? 'Show All Unassigned' : 'Show Available Only'}
+                                    </button>
+                                </div>
                                 <input
                                     type="text"
                                     value={addEmpSearch}
                                     onChange={(e) => setAddEmpSearch(e.target.value)}
-                                    placeholder="Search available staff..."
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-white mb-2"
+                                    placeholder="Search staff name or employee ID..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-white mb-2 focus:ring-1 focus:ring-indigo-500"
                                 />
                                 <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-xl p-2 bg-slate-950/60 divide-y divide-slate-800/50">
-                                    {available_employees
-                                        .filter((e) => !addEmpSearch || e.full_name.toLowerCase().includes(addEmpSearch.toLowerCase()) || e.emp_no.toLowerCase().includes(addEmpSearch.toLowerCase()))
+                                    {unallocatedCandidateEmployees
+                                        .filter((e) => {
+                                            if (showOnlyAvailableAddEmp && !e.is_available) return false;
+                                            if (!addEmpSearch) return true;
+                                            const q = addEmpSearch.toLowerCase();
+                                            return e.full_name.toLowerCase().includes(q) || e.emp_no.toLowerCase().includes(q);
+                                        })
                                         .map((emp) => {
                                             const isSelected = addEmployeeForm.data.employee_ids.includes(emp.id);
+                                            const isAvailable = emp.is_available;
                                             return (
-                                                <label key={emp.id} className="flex items-center justify-between px-2.5 py-1.5 hover:bg-slate-800/40 rounded-lg cursor-pointer">
+                                                <label
+                                                    key={emp.id}
+                                                    className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg transition ${
+                                                        !isAvailable
+                                                            ? 'opacity-60 bg-slate-950/40 cursor-not-allowed'
+                                                            : 'hover:bg-slate-800/40 cursor-pointer'
+                                                    }`}
+                                                >
                                                     <div className="flex items-center gap-2.5">
                                                         <input
                                                             type="checkbox"
+                                                            disabled={!isAvailable}
                                                             checked={isSelected}
                                                             onChange={(e) => {
+                                                                if (!isAvailable) return;
                                                                 if (e.target.checked) {
                                                                     addEmployeeForm.setData('employee_ids', [...addEmployeeForm.data.employee_ids, emp.id]);
                                                                 } else {
                                                                     addEmployeeForm.setData('employee_ids', addEmployeeForm.data.employee_ids.filter((id) => id !== emp.id));
                                                                 }
                                                             }}
-                                                            className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                                                            className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500 disabled:opacity-40"
                                                         />
                                                         <div>
                                                             <div className="font-semibold text-white">{emp.full_name}</div>
                                                             <div className="text-[10px] text-slate-400 font-mono">{emp.emp_no} &bull; {emp.department_name}</div>
                                                         </div>
                                                     </div>
+
+                                                    {!isAvailable ? (
+                                                        <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20" title="Must be transferred to move to this roster">
+                                                            {emp.exclusion_reason || 'Roster Overlap'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] text-emerald-400 font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                                                            Available
+                                                        </span>
+                                                    )}
                                                 </label>
                                             );
                                         })}
+
+                                    {unallocatedCandidateEmployees.filter((e) => {
+                                        if (showOnlyAvailableAddEmp && !e.is_available) return false;
+                                        if (!addEmpSearch) return true;
+                                        const q = addEmpSearch.toLowerCase();
+                                        return e.full_name.toLowerCase().includes(q) || e.emp_no.toLowerCase().includes(q);
+                                    }).length === 0 && (
+                                        <div className="py-6 text-center text-slate-400 text-xs">
+                                            {showOnlyAvailableAddEmp
+                                                ? 'No available unallocated staff found for this period.'
+                                                : 'No unassigned staff found matching your query.'}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

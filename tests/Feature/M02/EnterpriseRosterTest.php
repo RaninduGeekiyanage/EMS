@@ -479,4 +479,82 @@ final class EnterpriseRosterTest extends TestCase
         $this->assertEquals(21, $empRowB['stats']['roster_work_days']);
         $this->assertEquals(168.0, $empRowB['stats']['roster_hours']);
     }
+
+    public function test_allocating_already_assigned_employee_to_overlapping_roster_is_rejected(): void
+    {
+        $this->actingAs($this->admin);
+        $rosterService = app(RosterService::class);
+
+        $rosterA = $rosterService->createRoster([
+            'name' => 'Sept 2027 Roster A',
+            'start_date' => '2027-09-01',
+            'end_date' => '2027-09-30',
+            'status' => 'draft',
+        ]);
+
+        $rosterB = $rosterService->createRoster([
+            'name' => 'Sept 2027 Roster B',
+            'start_date' => '2027-09-01',
+            'end_date' => '2027-09-30',
+            'status' => 'draft',
+        ]);
+
+        // Allocate emp1 to Roster A
+        $rosterService->allocateEmployee($rosterA->id, [$this->emp1->id], '2027-09-01', '2027-09-30');
+
+        // Attempting to allocate emp1 to Roster B via allocations.store should fail with conflict
+        $res = $this->from(route('roster.index'))->post(route('roster.allocations.store', $rosterB->id), [
+            'employee_ids' => [$this->emp1->id],
+            'effective_from' => '2027-09-01',
+            'effective_to' => '2027-09-30',
+        ]);
+
+        $res->assertSessionHas('error');
+        $this->assertDatabaseMissing('roster_employee_allocations', [
+            'roster_id' => $rosterB->id,
+            'employee_id' => $this->emp1->id,
+        ]);
+    }
+
+    public function test_get_available_employees_flags_current_roster_members_and_cross_roster_conflicts(): void
+    {
+        $rosterService = app(RosterService::class);
+
+        $rosterA = $rosterService->createRoster([
+            'name' => 'Oct 2027 Roster A',
+            'start_date' => '2027-10-01',
+            'end_date' => '2027-10-31',
+            'status' => 'draft',
+        ]);
+
+        $rosterB = $rosterService->createRoster([
+            'name' => 'Oct 2027 Roster B',
+            'start_date' => '2027-10-01',
+            'end_date' => '2027-10-31',
+            'status' => 'draft',
+        ]);
+
+        // Allocate emp1 to Roster A
+        $rosterService->allocateEmployee($rosterA->id, [$this->emp1->id], '2027-10-01', '2027-10-31');
+
+        // Check availability when viewing Roster A
+        $availA = $rosterService->getAvailableEmployees('2027-10-01', '2027-10-31', null, $rosterA->id);
+        $emp1InA = $availA->firstWhere('id', $this->emp1->id);
+        $emp2InA = $availA->firstWhere('id', $this->emp2->id);
+
+        $this->assertFalse($emp1InA['is_available']);
+        $this->assertTrue($emp1InA['is_in_current_roster']);
+        $this->assertEquals('Already assigned to this roster', $emp1InA['exclusion_reason']);
+
+        $this->assertTrue($emp2InA['is_available']);
+        $this->assertFalse($emp2InA['is_in_current_roster']);
+
+        // Check availability when viewing Roster B
+        $availB = $rosterService->getAvailableEmployees('2027-10-01', '2027-10-31', null, $rosterB->id);
+        $emp1InB = $availB->firstWhere('id', $this->emp1->id);
+
+        $this->assertFalse($emp1InB['is_available']);
+        $this->assertTrue($emp1InB['is_enrolled_elsewhere']);
+        $this->assertEquals('Assigned to Oct 2027 Roster A', $emp1InB['exclusion_reason']);
+    }
 }
