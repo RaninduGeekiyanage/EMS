@@ -68,6 +68,8 @@ final class RolesAndPermissionsSeeder extends Seeder
         'attendance.import',
         'attendance.view',
         'attendance.correct',
+        'biometric-device.view',
+        'biometric-device.manage',
 
         // 6. Leave & Absence Management (M02 - AMS)
         'leave.apply',
@@ -169,6 +171,8 @@ final class RolesAndPermissionsSeeder extends Seeder
             'attendance.import',
             'attendance.view',
             'attendance.correct',
+            'biometric-device.view',
+            'biometric-device.manage',
             'leave.apply',
             'leave.approve',
             'leave.manage-types',
@@ -205,6 +209,7 @@ final class RolesAndPermissionsSeeder extends Seeder
             'work-calendar.view',
             'attendance.import',
             'attendance.view',
+            'biometric-device.view',
             'leave.apply',
             'leave.approve',
             'payroll.view',

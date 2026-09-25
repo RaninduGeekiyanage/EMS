@@ -29,7 +29,11 @@ import {
     Check,
     X,
     Loader2,
+    Settings,
+    Edit2,
+    Plus,
 } from 'lucide-react';
+import BiometricProfileModal, { BiometricDeviceProfile } from '@/Components/BiometricProfileModal';
 
 interface MatchedEmployee {
     id: string;
@@ -64,6 +68,8 @@ interface AttendanceImportRecord {
     tenant_id: string;
     filename: string;
     adapter_type: string;
+    profile_id?: string | null;
+    profile?: { id: string; name: string; device_brand: string; model_name: string | null } | null;
     total_rows: number;
     processed_rows: number;
     failed_rows: number;
@@ -111,10 +117,16 @@ interface Props {
     };
     employees: EmployeeItem[];
     adapters: AdapterOption[];
+    profiles?: BiometricDeviceProfile[];
+    canManageProfiles?: boolean;
 }
 
-export default function Import({ imports, stats, employees, adapters }: Props) {
+export default function Import({ imports, stats, employees, adapters, profiles = [], canManageProfiles = false }: Props) {
     const [selectedAdapter, setSelectedAdapter] = useState<string>('zkteco');
+    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+    const [profilesList, setProfilesList] = useState<BiometricDeviceProfile[]>(profiles);
+    const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+    const [editingProfile, setEditingProfile] = useState<BiometricDeviceProfile | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [deviceIdInput, setDeviceIdInput] = useState<string>('');
     const [isDragging, setIsDragging] = useState(false);
@@ -137,6 +149,7 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
     const uploadForm = useForm({
         file: null as File | null,
         adapter_type: 'zkteco',
+        profile_id: '',
         device_id: '',
     });
 
@@ -171,6 +184,9 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
         const formData = new FormData();
         formData.append('file', selectedFile);
         formData.append('adapter_type', selectedAdapter);
+        if (selectedProfileId) {
+            formData.append('profile_id', selectedProfileId);
+        }
         if (deviceIdInput) {
             formData.append('device_id', deviceIdInput);
         }
@@ -208,6 +224,7 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
         uploadForm.setData({
             file: selectedFile,
             adapter_type: selectedAdapter,
+            profile_id: selectedProfileId || '',
             device_id: deviceIdInput,
         });
 
@@ -222,6 +239,45 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                 }
             },
         });
+    };
+
+    const handleProfileSaved = (saved: BiometricDeviceProfile) => {
+        setProfilesList((prev) => {
+            const exists = prev.some((p) => p.id === saved.id);
+            if (exists) {
+                return prev.map((p) => (p.id === saved.id ? saved : p));
+            }
+            return [saved, ...prev];
+        });
+        setSelectedAdapter('configurable');
+        setSelectedProfileId(saved.id);
+        setPreviewData(null);
+    };
+
+    const handleDeleteProfile = async (profileId: string, profileName: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm(`Are you sure you want to delete biometric profile "${profileName}"?`)) return;
+
+        const csrfToken = getCsrfToken();
+        try {
+            const res = await fetch(`/biometric-devices/${profileId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-XSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json',
+                },
+            });
+            if (res.ok) {
+                setProfilesList((prev) => prev.filter((p) => p.id !== profileId));
+                if (selectedProfileId === profileId) {
+                    setSelectedProfileId(null);
+                    setSelectedAdapter('zkteco');
+                }
+            }
+        } catch (err) {
+            console.error('Failed to delete profile:', err);
+        }
     };
 
     const handleDeleteImport = () => {
@@ -469,13 +525,25 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                         </div>
 
                         {/* Format template download shortcut */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <span className="text-xs text-slate-400">Sample Templates:</span>
                             <a
                                 href="/attendance/import/template/zkteco"
                                 className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
                             >
                                 <Download className="w-3 h-3 text-cyan-400" /> ZKTeco (.dat)
+                            </a>
+                            <a
+                                href="/attendance/import/template/hikvision"
+                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                            >
+                                <Download className="w-3 h-3 text-blue-400" /> Hikvision (.txt)
+                            </a>
+                            <a
+                                href="/attendance/import/template/realand"
+                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                            >
+                                <Download className="w-3 h-3 text-indigo-400" /> Realand (.txt)
                             </a>
                             <a
                                 href="/attendance/import/template/csv"
@@ -486,49 +554,161 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                         </div>
                     </div>
 
-                    {/* Step 1: Choose Biometric Adapter Format */}
-                    <div className="mt-6 space-y-3">
-                        <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                            Step 1: Select Terminal / File Format Adapter
-                        </label>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {adapters.map((adapter) => {
-                                const isSelected = selectedAdapter === adapter.key;
-                                return (
-                                    <div
-                                        key={adapter.key}
-                                        onClick={() => {
-                                            setSelectedAdapter(adapter.key);
-                                            setPreviewData(null);
-                                        }}
-                                        className={`p-4 rounded-2xl border transition cursor-pointer relative ${
-                                            isSelected
-                                                ? 'bg-gradient-to-br from-indigo-950/60 to-slate-900 border-indigo-500/80 shadow-lg shadow-indigo-500/10 ring-1 ring-indigo-500/50'
-                                                : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-900/70'
-                                        }`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                                                {adapter.badge}
-                                            </span>
-                                            {isSelected && (
-                                                <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white">
-                                                    <Check className="w-3 h-3" />
+                    {/* Step 1: Choose Biometric Adapter / Saved Device Profile */}
+                    <div className="mt-6 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                    <Cpu className="w-4 h-4 text-cyan-400" />
+                                    Step 1: Select Biometric Device or Ingestion Format
+                                </label>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                    Choose from standard adapters or your organization's custom configured hardware profiles (Hikvision, Realand, ZKTeco)
+                                </p>
+                            </div>
+
+                            {canManageProfiles && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setEditingProfile(null);
+                                        setIsProfileModalOpen(true);
+                                    }}
+                                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl shadow-md shadow-blue-500/10 transition flex items-center gap-1.5 self-start sm:self-auto"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Configure Biometric Device
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Section A: Configured Device Profiles */}
+                        {profilesList.length > 0 && (
+                            <div className="space-y-2">
+                                <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                                    <span>Configured Biometric Devices</span>
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                        {profilesList.length} Active
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {profilesList.map((prof) => {
+                                        const isSelected = selectedProfileId === prof.id;
+                                        return (
+                                            <div
+                                                key={prof.id}
+                                                onClick={() => {
+                                                    setSelectedAdapter('configurable');
+                                                    setSelectedProfileId(prof.id);
+                                                    setPreviewData(null);
+                                                }}
+                                                className={`p-4 rounded-2xl border transition cursor-pointer relative group ${
+                                                    isSelected
+                                                        ? 'bg-gradient-to-br from-blue-950/70 via-slate-900 to-indigo-950/60 border-blue-500/80 shadow-lg shadow-blue-500/15 ring-1 ring-blue-500/50'
+                                                        : 'bg-slate-900/50 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase">
+                                                        {prof.device_brand}
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {canManageProfiles && (
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setEditingProfile(prof);
+                                                                        setIsProfileModalOpen(true);
+                                                                    }}
+                                                                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                                                                    title="Edit profile configuration"
+                                                                >
+                                                                    <Edit2 className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleDeleteProfile(prof.id, prof.name, e)}
+                                                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                                                                    title="Delete profile"
+                                                                >
+                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        {isSelected && (
+                                                            <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                                                                <Check className="w-3 h-3" />
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            )}
+                                                <h3 className="text-sm font-bold text-white mt-2.5 line-clamp-1">
+                                                    {prof.name}
+                                                </h3>
+                                                <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
+                                                    {prof.model_name ? `${prof.model_name} • ` : ''}
+                                                    {prof.delimiter_type.toUpperCase()} Delimited
+                                                </p>
+                                                <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-cyan-400">
+                                                    <span>.{prof.file_extension}</span>
+                                                    <span className="text-slate-500 text-[10px] font-sans">
+                                                        {prof.date_mode === 'separate' ? 'Split Date+Time' : 'Combined DateTime'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Section B: Standard Format Adapters */}
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold text-slate-400">
+                                Standard Formats
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {adapters.map((adapter) => {
+                                    const isSelected = selectedProfileId === null && selectedAdapter === adapter.key;
+                                    return (
+                                        <div
+                                            key={adapter.key}
+                                            onClick={() => {
+                                                setSelectedAdapter(adapter.key);
+                                                setSelectedProfileId(null);
+                                                setPreviewData(null);
+                                            }}
+                                            className={`p-4 rounded-2xl border transition cursor-pointer relative ${
+                                                isSelected
+                                                    ? 'bg-gradient-to-br from-indigo-950/60 to-slate-900 border-indigo-500/80 shadow-lg shadow-indigo-500/10 ring-1 ring-indigo-500/50'
+                                                    : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-900/70'
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                                                    {adapter.badge}
+                                                </span>
+                                                {isSelected && (
+                                                    <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                                                        <Check className="w-3 h-3" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <h3 className="text-sm font-bold text-white mt-2.5">
+                                                {adapter.name}
+                                            </h3>
+                                            <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                                                {adapter.description}
+                                            </p>
+                                            <div className="mt-3 text-[11px] font-mono text-indigo-400">
+                                                {adapter.extension}
+                                            </div>
                                         </div>
-                                        <h3 className="text-sm font-bold text-white mt-2.5">
-                                            {adapter.name}
-                                        </h3>
-                                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                                            {adapter.description}
-                                        </p>
-                                        <div className="mt-3 text-[11px] font-mono text-indigo-400">
-                                            {adapter.extension}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
 
@@ -854,11 +1034,18 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                                     {imports.data.map((item) => (
                                         <tr key={item.id} className="hover:bg-slate-900/30 transition">
                                             <td className="py-3 px-4">
-                                                <div className="font-semibold text-slate-200">
-                                                    {item.filename}
+                                                <div className="font-semibold text-slate-200 flex items-center gap-1.5">
+                                                    {item.profile ? (
+                                                        <span className="text-cyan-400 flex items-center gap-1">
+                                                            <Cpu className="w-3.5 h-3.5" />
+                                                            {item.profile.name}
+                                                        </span>
+                                                    ) : (
+                                                        item.filename
+                                                    )}
                                                 </div>
                                                 <div className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">
-                                                    {item.adapter_type}
+                                                    {item.profile ? item.filename : item.adapter_type}
                                                 </div>
                                             </td>
                                             <td className="py-3 px-4 text-slate-400">
@@ -1032,6 +1219,14 @@ export default function Import({ imports, stats, employees, adapters }: Props) {
                     <p className="text-xs text-slate-400 mt-1">Safely inserting punch logs in chunked database transactions...</p>
                 </div>
             )}
+
+            {/* Configurable Biometric Device Profile Wizard Modal */}
+            <BiometricProfileModal
+                isOpen={isProfileModalOpen}
+                onClose={() => setIsProfileModalOpen(false)}
+                onSaved={handleProfileSaved}
+                editingProfile={editingProfile}
+            />
             </div>
         </AuthenticatedLayout>
     );

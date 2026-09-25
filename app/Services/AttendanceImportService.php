@@ -7,7 +7,9 @@ namespace App\Services;
 use App\Contracts\BiometricImportAdapterInterface;
 use App\Models\AttendanceImport;
 use App\Models\AttendanceLog;
+use App\Models\BiometricDeviceProfile;
 use App\Models\Employee;
+use App\Services\Biometric\ConfigurableTextAdapter;
 use App\Services\Biometric\ExcelAdapter;
 use App\Services\Biometric\GenericCsvAdapter;
 use App\Services\Biometric\ZKTecoAdapter;
@@ -24,13 +26,24 @@ final class AttendanceImportService
 {
     /**
      * Resolve the adapter instance based on format type.
+     *
+     * @param  array<string, mixed>  $config
      */
-    public function getAdapter(string $type): BiometricImportAdapterInterface
+    public function getAdapter(string $type, array $config = []): BiometricImportAdapterInterface
     {
+        if (isset($config['profile']) || isset($config['profile_id']) || in_array(strtolower($type), ['configurable', 'profile'], true)) {
+            return new ConfigurableTextAdapter;
+        }
+
+        if (strlen($type) === 26 && BiometricDeviceProfile::where('id', $type)->exists()) {
+            return new ConfigurableTextAdapter;
+        }
+
         return match (strtolower($type)) {
             'zkteco', 'zk', 'dat' => new ZKTecoAdapter,
             'generic_csv', 'csv' => new GenericCsvAdapter,
             'excel', 'xlsx', 'xls' => new ExcelAdapter,
+            'configurable', 'profile' => new ConfigurableTextAdapter,
             default => throw new Exception("Unsupported biometric adapter type: '{$type}'"),
         };
     }
@@ -43,11 +56,20 @@ final class AttendanceImportService
      */
     public function previewImport(UploadedFile $file, string $adapterType, array $config = []): array
     {
-        $adapter = $this->getAdapter($adapterType);
+        $profileId = $config['profile_id'] ?? (strlen($adapterType) === 26 ? $adapterType : null);
+        if ($profileId) {
+            $profile = BiometricDeviceProfile::find($profileId);
+            if ($profile) {
+                $config['profile'] = $profile;
+                $config['date_format'] = $config['date_format'] ?? $profile->date_format;
+            }
+        }
+
+        $adapter = $this->getAdapter($adapterType, $config);
         $tempPath = $file->getRealPath();
 
         $rawRecords = $adapter->parse($tempPath, $config);
-        $validation = $adapter->validate($rawRecords);
+        $validation = $adapter->validate($rawRecords, $config);
 
         // Preload tenant employees mapped by biometric_device_id and emp_no
         $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
@@ -142,13 +164,23 @@ final class AttendanceImportService
         ?int $userId = null,
         array $config = []
     ): AttendanceImport {
-        $adapter = $this->getAdapter($adapterType);
+        $profile = null;
+        $profileId = $config['profile_id'] ?? (strlen($adapterType) === 26 ? $adapterType : null);
+        if ($profileId) {
+            $profile = BiometricDeviceProfile::find($profileId);
+            if ($profile) {
+                $config['profile'] = $profile;
+                $config['date_format'] = $config['date_format'] ?? $profile->date_format;
+            }
+        }
+
+        $adapter = $this->getAdapter($adapterType, $config);
         $originalFilename = $file->getClientOriginalName();
         $tempPath = $file->getRealPath();
 
         // 1. Parse and validate
         $rawRecords = $adapter->parse($tempPath, $config);
-        $validation = $adapter->validate($rawRecords);
+        $validation = $adapter->validate($rawRecords, $config);
 
         // 2. Resolve tenant
         $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
@@ -182,6 +214,7 @@ final class AttendanceImportService
             $originalFilename,
             $storagePath,
             $adapterType,
+            $profile,
             $userId,
             $validation,
             $employeeByBioId,
@@ -192,6 +225,7 @@ final class AttendanceImportService
                 'filename' => $originalFilename,
                 'file_path' => $storagePath,
                 'adapter_type' => $adapterType,
+                'profile_id' => $profile?->id,
                 'total_rows' => $validation['summary']['total'],
                 'processed_rows' => 0,
                 'failed_rows' => 0,
@@ -280,7 +314,10 @@ final class AttendanceImportService
     public function listImports(int $perPage = 15): LengthAwarePaginator
     {
         return AttendanceImport::query()
-            ->with(['importedBy:id,name,email'])
+            ->with([
+                'importedBy:id,name,email',
+                'profile:id,name,device_brand,model_name',
+            ])
             ->withCount('logs')
             ->orderByDesc('created_at')
             ->paginate($perPage);
@@ -356,8 +393,17 @@ final class AttendanceImportService
                 'filename' => 'zkteco_sample_attendance.dat',
                 'mime' => 'text/plain',
             ],
+            'hikvision', 'hik' => [
+                'content' => "No.\tTime\tCard No.\tName\tDevice\tEvent\n1\t2026-03-01 08:30:00\t1001\tSunil Perera\tMain Gate Turnstile\tCheck-In\n2\t2026-03-01 17:05:00\t1001\tSunil Perera\tMain Gate Turnstile\tCheck-Out\n3\t2026-03-01 08:45:00\t1002\tKamal Silva\tMain Gate Turnstile\tCheck-In\n",
+                'filename' => 'hikvision_sample_attendance.txt',
+                'mime' => 'text/plain',
+            ],
+            'realand' => [
+                'content' => "1001 2026-03-01 08:30:00 0 1\n1001 2026-03-01 17:05:00 1 1\n1002 2026-03-01 08:45:00 0 1\n",
+                'filename' => 'realand_sample_attendance.txt',
+                'mime' => 'text/plain',
+            ],
             'excel', 'xlsx' => [
-                // Minimal valid CSV format that Excel opens natively
                 'content' => "biometric_id,punch_datetime,punch_type,device_id\n1001,2026-03-01 08:30:00,in,DEV-01\n1001,2026-03-01 17:00:00,out,DEV-01\n1002,2026-03-01 08:45:00,in,DEV-01\n1002,2026-03-01 17:15:00,out,DEV-01\n",
                 'filename' => 'attendance_import_template.csv',
                 'mime' => 'text/csv',

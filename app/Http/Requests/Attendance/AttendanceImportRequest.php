@@ -25,7 +25,8 @@ final class AttendanceImportRequest extends FormRequest
     {
         return [
             'file' => ['required', 'file', 'max:10240'],
-            'adapter_type' => ['required', 'string', 'in:zkteco,generic_csv,excel,dat,csv,xlsx'],
+            'adapter_type' => ['required', 'string'],
+            'profile_id' => ['nullable', 'string', 'exists:biometric_device_profiles,id'],
             'device_id' => ['nullable', 'string', 'max:50'],
             'config' => ['nullable', 'array'],
         ];
@@ -41,8 +42,8 @@ final class AttendanceImportRequest extends FormRequest
         return [
             'file.required' => 'Please select an attendance file to upload.',
             'file.max' => 'The attendance file may not be greater than 10 megabytes.',
-            'adapter_type.required' => 'Please select a biometric file format adapter.',
-            'adapter_type.in' => 'Selected adapter must be ZKTeco DAT, Generic CSV, or Excel XLSX.',
+            'adapter_type.required' => 'Please select a biometric file format adapter or saved device profile.',
+            'profile_id.exists' => 'The selected biometric device profile does not exist.',
         ];
     }
 }

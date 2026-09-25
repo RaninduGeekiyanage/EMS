@@ -32,6 +32,7 @@ final class AttendanceImport extends Model
         'filename',
         'file_path',
         'adapter_type',
+        'profile_id',
         'total_rows',
         'processed_rows',
         'failed_rows',
@@ -61,6 +62,14 @@ final class AttendanceImport extends Model
     public function importedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'imported_by');
+    }
+
+    /**
+     * Get the biometric device profile used for this import (if any).
+     */
+    public function profile(): BelongsTo
+    {
+        return $this->belongsTo(BiometricDeviceProfile::class, 'profile_id');
     }
 
     /**

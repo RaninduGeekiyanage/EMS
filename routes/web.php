@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
+use App\Http\Controllers\BiometricDeviceProfileController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
@@ -162,13 +163,22 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::delete('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'destroyHoliday'])->name('work-calendar.holidays.destroy');
         Route::post('/work-calendar/seed-holidays', [WorkCalendarController::class, 'seedHolidays'])->name('work-calendar.holidays.seed');
 
-        // Biometric Attendance Ingestion
+        // Biometric Attendance Ingestion & Device Profiles
         Route::get('/attendance/import', [AttendanceImportController::class, 'index'])->name('attendance.import.index');
         Route::post('/attendance/import/preview', [AttendanceImportController::class, 'preview'])->name('attendance.import.preview');
         Route::post('/attendance/import', [AttendanceImportController::class, 'store'])->name('attendance.import.store');
         Route::delete('/attendance/import/{import}', [AttendanceImportController::class, 'destroy'])->name('attendance.import.destroy');
         Route::get('/attendance/import/template/{type}', [AttendanceImportController::class, 'downloadTemplate'])->name('attendance.import.template');
         Route::post('/attendance/import/map-employee', [AttendanceImportController::class, 'mapEmployee'])->name('attendance.import.map-employee');
+
+        // Configurable Biometric Device Profiles
+        Route::get('/biometric-devices', [BiometricDeviceProfileController::class, 'index'])->name('biometric-devices.index');
+        Route::post('/biometric-devices/test-parse', [BiometricDeviceProfileController::class, 'testParse'])->name('biometric-devices.test-parse');
+        Route::middleware('can:biometric-device.manage')->group(function () {
+            Route::post('/biometric-devices', [BiometricDeviceProfileController::class, 'store'])->name('biometric-devices.store');
+            Route::put('/biometric-devices/{profile}', [BiometricDeviceProfileController::class, 'update'])->name('biometric-devices.update');
+            Route::delete('/biometric-devices/{profile}', [BiometricDeviceProfileController::class, 'destroy'])->name('biometric-devices.destroy');
+        });
 
         // Attendance Daily Ledger & Overtime Engine
         Route::get('/attendance/daily', [AttendanceDailyController::class, 'index'])->name('attendance.daily.index');

@@ -44,10 +44,18 @@ final class AttendanceImportController extends Controller
 
         $employees = $employeesQuery->get();
 
+        $profilesQuery = \App\Models\BiometricDeviceProfile::query()->active()->orderBy('name');
+        if ($tenantId !== null) {
+            $profilesQuery->where('tenant_id', $tenantId);
+        }
+        $profiles = $profilesQuery->get();
+
         return Inertia::render('Attendance/Import', [
             'imports' => $imports,
             'stats' => $stats,
             'employees' => $employees,
+            'profiles' => $profiles,
+            'canManageProfiles' => auth()->user()?->can('biometric-device.manage') ?? false,
             'adapters' => [
                 [
                     'key' => 'zkteco',
@@ -82,6 +90,9 @@ final class AttendanceImportController extends Controller
         $file = $request->file('file');
         $adapterType = (string) $request->input('adapter_type');
         $config = $request->input('config', []);
+        if ($request->filled('profile_id')) {
+            $config['profile_id'] = $request->input('profile_id');
+        }
         if ($request->filled('device_id')) {
             $config['device_id'] = $request->input('device_id');
         }
@@ -109,6 +120,9 @@ final class AttendanceImportController extends Controller
         $file = $request->file('file');
         $adapterType = (string) $request->input('adapter_type');
         $config = $request->input('config', []);
+        if ($request->filled('profile_id')) {
+            $config['profile_id'] = $request->input('profile_id');
+        }
         if ($request->filled('device_id')) {
             $config['device_id'] = $request->input('device_id');
         }
