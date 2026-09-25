@@ -137,13 +137,20 @@ interface MatrixCell {
         is_half_day: boolean;
     } | null;
     is_pre_hire?: boolean;
+    is_current_roster?: boolean;
+    is_allocated_here?: boolean;
+    other_roster?: {
+        id: string;
+        name: string;
+        code: string;
+    } | null;
 }
 
 const PATTERN_PALETTE = [
     { bg: 'bg-orange-500', border: 'border-orange-500', text: 'text-orange-400', hex: '#f97316', lightBg: 'rgba(249, 115, 22, 0.08)' },
     { bg: 'bg-cyan-500', border: 'border-cyan-500', text: 'text-cyan-400', hex: '#06b6d4', lightBg: 'rgba(6, 182, 212, 0.08)' },
     { bg: 'bg-purple-500', border: 'border-purple-500', text: 'text-purple-400', hex: '#a855f7', lightBg: 'rgba(168, 85, 247, 0.08)' },
-    { bg: 'bg-emerald-500', border: 'border-emerald-500', text: 'text-emerald-400', hex: '#10b981', lightBg: 'rgba(16, 185, 129, 0.08)' },
+    { bg: 'bg-emerald-500', border: 'border-emerald-500', text: 'text-emerald-400', hex: '#10b981', lightBg: 'rgba(168, 85, 247, 0.08)' },
     { bg: 'bg-pink-500', border: 'border-pink-500', text: 'text-pink-400', hex: '#ec4899', lightBg: 'rgba(236, 72, 153, 0.08)' },
     { bg: 'bg-amber-500', border: 'border-amber-500', text: 'text-amber-400', hex: '#f59e0b', lightBg: 'rgba(245, 158, 11, 0.08)' },
     { bg: 'bg-blue-500', border: 'border-blue-500', text: 'text-blue-400', hex: '#3b82f6', lightBg: 'rgba(59, 130, 246, 0.08)' },
@@ -176,6 +183,9 @@ interface MatrixRow {
         work_days: number;
         rest_days: number;
         total_hours: number;
+        roster_work_days?: number;
+        roster_rest_days?: number;
+        roster_hours?: number;
     };
 }
 
@@ -285,7 +295,7 @@ export default function Index({
         const counts: Record<string, { id: string; name: string; code: string; pattern_type: string; count: number }> = {};
         filteredMatrix.forEach((row) => {
             Object.values(row.cells).forEach((cell) => {
-                if (cell.pattern?.id) {
+                if (cell.pattern?.id && cell.is_current_roster !== false) {
                     if (!counts[cell.pattern.id]) {
                         counts[cell.pattern.id] = {
                             id: cell.pattern.id,
@@ -868,6 +878,41 @@ export default function Index({
                         );
                     }
 
+                    // Scheduled in another active roster (e.g. transferred to Gen Roster / 12H Roster)
+                    if (cell.other_roster) {
+                        return (
+                            <td
+                                key={d.date}
+                                onClick={() => {
+                                    if (cell.other_roster?.id) {
+                                        handleRosterChange(cell.other_roster.id);
+                                    }
+                                }}
+                                className="border-r border-slate-800/50 p-0.5 text-center relative bg-slate-950/40 select-none group/othercell transition hover:bg-slate-800/40 cursor-pointer"
+                                title={`Scheduled in: ${cell.other_roster.name} (${cell.other_roster.code})\nShift: ${cell.shift ? `${cell.shift.name} (${cell.shift.code})` : 'Rest Day (OFF)'}\nClick to view ${cell.other_roster.name}`}
+                            >
+                                <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[8px] font-mono font-medium text-slate-500 bg-slate-900/70 border border-slate-800 group-hover/othercell:border-sky-500/40 group-hover/othercell:text-sky-300 transition truncate max-w-full">
+                                    <span className="text-slate-600 font-sans">➔</span>
+                                    <span className="truncate">{cell.other_roster.code || cell.other_roster.name}</span>
+                                </span>
+                            </td>
+                        );
+                    }
+
+                    // Not allocated to this roster on this date and no shift scheduled
+                    if (cell.is_allocated_here === false && !cell.shift && !cell.schedule_type) {
+                        return (
+                            <td
+                                key={d.date}
+                                onClick={() => openCellDrawer(row.employee.id, row.employee.full_name, d.date, cell)}
+                                className="border-r border-slate-800/60 text-center p-0.5 bg-slate-950/20 hover:bg-indigo-600/20 cursor-pointer"
+                                title="Not allocated to this roster on this date • Click to add single shift"
+                            >
+                                <span className="text-[10px] text-slate-700">-</span>
+                            </td>
+                        );
+                    }
+
                     const isRest = cell.schedule_type === 'rest_day' || cell.schedule_type === 'off';
                     const hasLeave = cell.leave !== null;
                     const isOverridden = cell.is_overridden;
@@ -956,8 +1001,18 @@ export default function Index({
                 })}
 
                 {/* Summary Hours */}
-                <td className="px-2 py-2 text-center font-bold text-slate-300 font-mono text-xs">
-                    {row.stats.total_hours}h
+                <td 
+                    className="px-2 py-2 text-center font-bold text-slate-300 font-mono text-xs"
+                    title={active_roster && row.stats.roster_hours !== undefined && row.stats.roster_hours !== row.stats.total_hours
+                        ? `Month Combined: ${row.stats.total_hours}h across rosters (${row.stats.roster_hours}h in ${active_roster.name})`
+                        : `Month Total: ${row.stats.total_hours}h`}
+                >
+                    <div>{row.stats.total_hours}h</div>
+                    {active_roster && row.stats.roster_hours !== undefined && row.stats.roster_hours !== row.stats.total_hours && (
+                        <div className="text-[9px] font-normal text-slate-400 font-mono tracking-tight mt-0.5">
+                            ({row.stats.roster_hours}h in roster)
+                        </div>
+                    )}
                 </td>
             </tr>
         );

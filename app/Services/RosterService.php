@@ -109,7 +109,7 @@ final class RosterService
                 ->with('pattern:id,name,code,pattern_type')
                 ->get();
 
-            $allocationsMap = $allocations->keyBy('employee_id');
+            $allocationsMap = $allocations->groupBy('employee_id');
             $allocatedEmpIds = $allocations->pluck('employee_id');
 
             $entryEmpIds = RosterEntry::query()
@@ -161,6 +161,7 @@ final class RosterService
             ->whereIn('employee_id', $employeeIds)
             ->whereBetween('roster_date', [$prevMonthLastDay, $endDate->toDateString()])
             ->with([
+                'roster:id,name,code',
                 'shift:id,name,code,color,start_time,end_time,is_night_shift',
                 'originalShift:id,name,code,color',
                 'overriddenBy:id,name',
@@ -221,6 +222,9 @@ final class RosterService
             $scheduledWorkDays = 0;
             $scheduledRestDays = 0;
             $totalHours = 0.0;
+            $rosterWorkDays = 0;
+            $rosterRestDays = 0;
+            $rosterHours = 0.0;
 
             // Track previous shift end datetime for worker fatigue / turnaround checks
             $prevEntry = $empEntries->get($prevMonthLastDay);
@@ -234,6 +238,7 @@ final class RosterService
             }
 
             $empHireDate = $emp->date_of_joining ? Carbon::parse($emp->date_of_joining)->startOfDay() : null;
+            $empAllocs = $allocationsMap->get($emp->id, collect());
 
             for ($d = 1; $d <= $daysInMonth; $d++) {
                 $dateObj = Carbon::createFromDate($year, $month, $d);
@@ -245,21 +250,36 @@ final class RosterService
                 $fatigueWarning = false;
                 $restHours = null;
 
-                if ($leave !== null) {
+                // Determine whether this date's entry belongs to the current active roster or another roster
+                $isCurrentRoster = true;
+                $otherRoster = null;
+                if ($activeRoster !== null && $entry !== null) {
+                    if ($entry->roster_id !== null && $entry->roster_id !== $activeRoster->id) {
+                        $isCurrentRoster = false;
+                        $otherRoster = [
+                            'id' => $entry->roster_id,
+                            'name' => $entry->roster?->name ?? 'Other Roster',
+                            'code' => $entry->roster?->code ?? 'OTHER',
+                        ];
+                    }
+                }
+
+                $isAllocatedHere = $activeRoster === null || $empAllocs->contains(function ($a) use ($dateString) {
+                    $from = $a->effective_from instanceof CarbonInterface ? $a->effective_from->toDateString() : (string) $a->effective_from;
+                    $to = $a->effective_to instanceof CarbonInterface ? $a->effective_to->toDateString() : (string) $a->effective_to;
+                    return $from <= $dateString && $to >= $dateString;
+                });
+
+                if ($leave !== null && $isCurrentRoster) {
                     $coverageSummary[$dateString]['total_leave']++;
                 }
 
                 if ($entry !== null && ! $isPreHire) {
                     if ($entry->schedule_type === 'shift' && $entry->shift !== null) {
+                        // Combined Month Total calculations (across all rosters worked this month)
                         $scheduledWorkDays++;
-                        $totalScheduledShifts++;
 
-                        // Aggregate coverage headcount
-                        $code = $entry->shift->code;
-                        $coverageSummary[$dateString]['shifts'][$code] = ($coverageSummary[$dateString]['shifts'][$code] ?? 0) + 1;
-                        $coverageSummary[$dateString]['total_working']++;
-
-                        // Calculate shift length in hours
+                        // Calculate shift length in net hours
                         $start = Carbon::parse($entry->shift->start_time);
                         $end = Carbon::parse($entry->shift->end_time);
                         if ($end->lt($start)) {
@@ -268,6 +288,23 @@ final class RosterService
                         $diffMinutes = $start->diffInMinutes($end);
                         $netHours = max(0, ($diffMinutes - ($entry->shift->break_minutes ?? 0)) / 60);
                         $totalHours += $netHours;
+
+                        // Roster-specific calculations & daily coverage summary (only if in this active roster)
+                        if ($isCurrentRoster) {
+                            $rosterWorkDays++;
+                            $rosterHours += $netHours;
+                            $totalScheduledShifts++;
+
+                            $code = $entry->shift->code;
+                            $coverageSummary[$dateString]['shifts'][$code] = ($coverageSummary[$dateString]['shifts'][$code] ?? 0) + 1;
+                            $coverageSummary[$dateString]['total_working']++;
+
+                            if ($entry->status === 'draft') {
+                                $totalDraftEntries++;
+                            } elseif ($entry->status === 'published') {
+                                $totalPublishedEntries++;
+                            }
+                        }
 
                         // Fatigue Turnaround Check: interval between previous shift end and current shift start
                         $currentShiftStartDateTime = Carbon::parse("{$dateString} {$entry->shift->start_time}");
@@ -287,15 +324,19 @@ final class RosterService
                         $prevShiftEndDateTime = $currEnd;
                     } elseif ($entry->schedule_type === 'rest_day' || $entry->schedule_type === 'off') {
                         $scheduledRestDays++;
-                        $totalRestDays++;
-                        $coverageSummary[$dateString]['total_rest']++;
-                        $prevShiftEndDateTime = null; // Full rest day resets fatigue interval
-                    }
 
-                    if ($entry->status === 'draft') {
-                        $totalDraftEntries++;
-                    } elseif ($entry->status === 'published') {
-                        $totalPublishedEntries++;
+                        if ($isCurrentRoster) {
+                            $rosterRestDays++;
+                            $totalRestDays++;
+                            $coverageSummary[$dateString]['total_rest']++;
+
+                            if ($entry->status === 'draft') {
+                                $totalDraftEntries++;
+                            } elseif ($entry->status === 'published') {
+                                $totalPublishedEntries++;
+                            }
+                        }
+                        $prevShiftEndDateTime = null; // Full rest day resets fatigue interval
                     }
                 } else {
                     $prevShiftEndDateTime = null;
@@ -305,6 +346,9 @@ final class RosterService
                     'day' => $d,
                     'date' => $dateString,
                     'entry_id' => $isPreHire ? null : $entry?->id,
+                    'is_current_roster' => $isCurrentRoster,
+                    'is_allocated_here' => $isAllocatedHere,
+                    'other_roster' => $otherRoster,
                     'schedule_type' => $isPreHire ? null : ($entry?->schedule_type ?? ($leave ? 'leave' : null)),
                     'shift' => (! $isPreHire && $entry?->shift) ? [
                         'id' => $entry->shift->id,
@@ -342,7 +386,7 @@ final class RosterService
                 $dailyCells[$dateString] = $cellData;
             }
 
-            $empAllocation = $allocationsMap->get($emp->id);
+            $empAllocation = $empAllocs->first();
             $firstPattern = null;
             if ($empAllocation?->pattern) {
                 $firstPattern = [
@@ -379,6 +423,9 @@ final class RosterService
                     'work_days' => $scheduledWorkDays,
                     'rest_days' => $scheduledRestDays,
                     'total_hours' => round($totalHours, 1),
+                    'roster_work_days' => $rosterWorkDays,
+                    'roster_rest_days' => $rosterRestDays,
+                    'roster_hours' => round($rosterHours, 1),
                 ],
             ];
         }
@@ -554,6 +601,22 @@ final class RosterService
                 ->pluck('is_overridden', DB::raw("CONCAT(employee_id, ':', roster_date)"))
                 ->all();
 
+            $rosterId = $data['roster_id'] ?? null;
+            $rosterPatternId = $data['pattern_id'] ?? null;
+
+            // Preload entries belonging to other active (non-archived) rosters to protect them from overwrites
+            $otherRosterLookup = [];
+            if (! empty($rosterId)) {
+                $otherRosterLookup = RosterEntry::query()
+                    ->whereIn('employee_id', $empIds)
+                    ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+                    ->whereNotNull('roster_id')
+                    ->where('roster_id', '!=', $rosterId)
+                    ->whereHas('roster', fn ($q) => $q->where('status', '!=', 'archived'))
+                    ->pluck('roster_id', DB::raw("CONCAT(employee_id, ':', roster_date)"))
+                    ->all();
+            }
+
             // 4. Preload Copy Month Source entries if copy_month mode
             $sourceCopyEntries = null;
             if ($patternMode === 'copy_month' && ! empty($data['copy_config'])) {
@@ -584,9 +647,6 @@ final class RosterService
             $updatedCount = 0;
             $now = Carbon::now();
 
-            $rosterId = $data['roster_id'] ?? null;
-            $rosterPatternId = $data['pattern_id'] ?? null;
-
             foreach ($targetEmployees as $emp) {
                 $empSourceCopy = $sourceCopyEntries?->get($emp->id, collect());
                 $empHireDate = $emp->date_of_joining ? Carbon::parse($emp->date_of_joining)->startOfDay() : null;
@@ -600,6 +660,11 @@ final class RosterService
                     $dateString = $date->toDateString();
                     $lookupKey = "{$emp->id}:{$dateString}";
                     $hasExisting = isset($existingLookup[$lookupKey]);
+
+                    // Protect schedules that belong to another active roster
+                    if (! empty($otherRosterLookup[$lookupKey])) {
+                        continue;
+                    }
 
                     // Preserve existing if conflictMode is preserve
                     if ($hasExisting && $conflictMode === 'preserve') {

@@ -383,4 +383,100 @@ final class EnterpriseRosterTest extends TestCase
             'effective_to' => '2027-07-31',
         ]);
     }
+
+    public function test_transferred_employee_isolates_active_roster_shifts_while_calculating_combined_month_total_hours(): void
+    {
+        $this->actingAs($this->admin);
+        $rosterService = app(RosterService::class);
+
+        $rosterA = $rosterService->createRoster([
+            'name' => 'Aug 2027 Roster A',
+            'start_date' => '2027-08-01',
+            'end_date' => '2027-08-31',
+            'status' => 'draft',
+        ]);
+
+        $rosterB = $rosterService->createRoster([
+            'name' => 'Aug 2027 Roster B',
+            'start_date' => '2027-08-01',
+            'end_date' => '2027-08-31',
+            'status' => 'draft',
+        ]);
+
+        // Allocate to Roster A for full month
+        $rosterService->allocateEmployee($rosterA->id, [$this->emp1->id], '2027-08-01', '2027-08-31');
+
+        // Create entries in Roster A for Aug 1 to Aug 10
+        for ($d = 1; $d <= 10; $d++) {
+            RosterEntry::create([
+                'tenant_id' => $this->tenant->id,
+                'roster_id' => $rosterA->id,
+                'employee_id' => $this->emp1->id,
+                'roster_date' => sprintf('2027-08-%02d', $d),
+                'shift_id' => $this->morningShift->id,
+                'schedule_type' => 'shift',
+                'status' => 'published',
+            ]);
+        }
+
+        // Transfer to Roster B effective Aug 11
+        $this->post(route('roster.transfer', $rosterA->id), [
+            'employee_id' => $this->emp1->id,
+            'target_roster_id' => $rosterB->id,
+            'transfer_date' => '2027-08-11',
+        ]);
+
+        // Create entries in Roster B for Aug 11 to Aug 31 (21 days)
+        for ($d = 11; $d <= 31; $d++) {
+            RosterEntry::create([
+                'tenant_id' => $this->tenant->id,
+                'roster_id' => $rosterB->id,
+                'employee_id' => $this->emp1->id,
+                'roster_date' => sprintf('2027-08-%02d', $d),
+                'shift_id' => $this->nightShift->id,
+                'schedule_type' => 'shift',
+                'status' => 'published',
+            ]);
+        }
+
+        // 1. Check Matrix when viewing Roster A
+        $matrixA = $rosterService->getMonthMatrix(2027, 8, null, $rosterA->id);
+        $empRowA = collect($matrixA['matrix'])->firstWhere('employee.id', $this->emp1->id);
+
+        $this->assertNotNull($empRowA);
+        // Aug 1 to 10 is current roster
+        $this->assertTrue($empRowA['cells']['2027-08-05']['is_current_roster']);
+        $this->assertNull($empRowA['cells']['2027-08-05']['other_roster']);
+
+        // Aug 11 to 31 belongs to Roster B
+        $this->assertFalse($empRowA['cells']['2027-08-15']['is_current_roster']);
+        $this->assertEquals($rosterB->id, $empRowA['cells']['2027-08-15']['other_roster']['id']);
+
+        // Combined Month Total hours calculated across both rosters (31 days)
+        // Morning shift 08:00 to 16:00 = 8h (10 days = 80h)
+        // Night shift 20:00 to 04:00 = 8h (21 days = 168h) -> Total = 248h
+        $this->assertEquals(31, $empRowA['stats']['work_days']);
+        $this->assertEquals(248.0, $empRowA['stats']['total_hours']);
+        $this->assertEquals(10, $empRowA['stats']['roster_work_days']);
+        $this->assertEquals(80.0, $empRowA['stats']['roster_hours']);
+
+        // 2. Check Matrix when viewing Roster B
+        $matrixB = $rosterService->getMonthMatrix(2027, 8, null, $rosterB->id);
+        $empRowB = collect($matrixB['matrix'])->firstWhere('employee.id', $this->emp1->id);
+
+        $this->assertNotNull($empRowB);
+        // Aug 1 to 10 belongs to Roster A
+        $this->assertFalse($empRowB['cells']['2027-08-05']['is_current_roster']);
+        $this->assertEquals($rosterA->id, $empRowB['cells']['2027-08-05']['other_roster']['id']);
+
+        // Aug 11 to 31 is current roster
+        $this->assertTrue($empRowB['cells']['2027-08-15']['is_current_roster']);
+        $this->assertNull($empRowB['cells']['2027-08-15']['other_roster']);
+
+        // Combined Month Total hours is still 248h, but roster_hours is 168h
+        $this->assertEquals(31, $empRowB['stats']['work_days']);
+        $this->assertEquals(248.0, $empRowB['stats']['total_hours']);
+        $this->assertEquals(21, $empRowB['stats']['roster_work_days']);
+        $this->assertEquals(168.0, $empRowB['stats']['roster_hours']);
+    }
 }
