@@ -33,7 +33,7 @@ import {
     Edit2,
     Plus,
 } from 'lucide-react';
-import BiometricProfileModal, { BiometricDeviceProfile } from '@/Components/BiometricProfileModal';
+import type { BiometricDeviceProfile } from '@/Components/BiometricProfileModal';
 
 interface MatchedEmployee {
     id: string;
@@ -100,6 +100,12 @@ interface AdapterOption {
     badge: string;
 }
 
+interface ActiveConfig {
+    adapter_type: string;
+    profile_id: string | null;
+    profile?: BiometricDeviceProfile | null;
+}
+
 interface Props {
     imports: {
         data: AttendanceImportRecord[];
@@ -118,15 +124,25 @@ interface Props {
     employees: EmployeeItem[];
     adapters: AdapterOption[];
     profiles?: BiometricDeviceProfile[];
+    activeConfig?: ActiveConfig;
     canManageProfiles?: boolean;
 }
 
-export default function Import({ imports, stats, employees, adapters, profiles = [], canManageProfiles = false }: Props) {
-    const [selectedAdapter, setSelectedAdapter] = useState<string>('zkteco');
-    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-    const [profilesList, setProfilesList] = useState<BiometricDeviceProfile[]>(profiles);
-    const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-    const [editingProfile, setEditingProfile] = useState<BiometricDeviceProfile | null>(null);
+export default function Import({
+    imports,
+    stats,
+    employees,
+    adapters,
+    profiles = [],
+    activeConfig,
+    canManageProfiles = false,
+}: Props) {
+    const defaultAdapter = activeConfig?.adapter_type || (profiles.some((p) => p.is_default) ? 'configurable' : 'zkteco');
+    const defaultProfileId = activeConfig?.profile_id || (profiles.find((p) => p.is_default)?.id ?? null);
+
+    const [selectedAdapter, setSelectedAdapter] = useState<string>(defaultAdapter);
+    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(defaultProfileId);
+    const [showAdapterOverride, setShowAdapterOverride] = useState<boolean>(false);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [deviceIdInput, setDeviceIdInput] = useState<string>('');
     const [isDragging, setIsDragging] = useState(false);
@@ -148,8 +164,8 @@ export default function Import({ imports, stats, employees, adapters, profiles =
 
     const uploadForm = useForm({
         file: null as File | null,
-        adapter_type: 'zkteco',
-        profile_id: '',
+        adapter_type: defaultAdapter,
+        profile_id: defaultProfileId || '',
         device_id: '',
     });
 
@@ -241,44 +257,13 @@ export default function Import({ imports, stats, employees, adapters, profiles =
         });
     };
 
-    const handleProfileSaved = (saved: BiometricDeviceProfile) => {
-        setProfilesList((prev) => {
-            const exists = prev.some((p) => p.id === saved.id);
-            if (exists) {
-                return prev.map((p) => (p.id === saved.id ? saved : p));
-            }
-            return [saved, ...prev];
-        });
-        setSelectedAdapter('configurable');
-        setSelectedProfileId(saved.id);
-        setPreviewData(null);
-    };
+    const currentActiveProfile = selectedProfileId
+        ? profiles.find((p) => p.id === selectedProfileId) ?? activeConfig?.profile
+        : null;
 
-    const handleDeleteProfile = async (profileId: string, profileName: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!confirm(`Are you sure you want to delete biometric profile "${profileName}"?`)) return;
-
-        const csrfToken = getCsrfToken();
-        try {
-            const res = await fetch(`/biometric-devices/${profileId}`, {
-                method: 'DELETE',
-                headers: {
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-            });
-            if (res.ok) {
-                setProfilesList((prev) => prev.filter((p) => p.id !== profileId));
-                if (selectedProfileId === profileId) {
-                    setSelectedProfileId(null);
-                    setSelectedAdapter('zkteco');
-                }
-            }
-        } catch (err) {
-            console.error('Failed to delete profile:', err);
-        }
-    };
+    const currentStandardAdapter = selectedAdapter !== 'configurable'
+        ? adapters.find((a) => a.key === selectedAdapter)
+        : null;
 
     const handleDeleteImport = () => {
         if (!deletingImport) return;
@@ -401,29 +386,48 @@ export default function Import({ imports, stats, employees, adapters, profiles =
 
     return (
         <AuthenticatedLayout title="Biometric Attendance Ingestion" backUrl="/attendance/daily">
-            <div className="max-w-7xl mx-auto space-y-8">
+            <div className="max-w-7xl mx-auto space-y-4 md:space-y-5">
                 {/* Header Subnavigation Bar */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-slate-800/80">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
                             <Fingerprint className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <div className="flex items-center gap-2">
-                                <h1 className="text-xl font-bold tracking-tight text-white">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h1 className="text-lg font-bold tracking-tight text-white">
                                     Biometric Attendance Ingestion
                                 </h1>
-                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
                                     M02 Phase 2
                                 </span>
+                                {/* Simple Active Ingestion Configuration indicator */}
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    <span className="text-slate-400 font-normal">Active Config:</span>
+                                    <strong className="text-white font-semibold">
+                                        {currentActiveProfile
+                                            ? `${currentActiveProfile.name} (${currentActiveProfile.device_brand.toUpperCase()})`
+                                            : (currentStandardAdapter?.name ?? 'ZKTeco Standard DAT')}
+                                    </strong>
+                                </span>
                             </div>
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-slate-400 mt-0.5">
                                 Direct USB/CSV/Excel upload, ZKTeco biometric log parser, and punch validation pipeline
                             </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        {canManageProfiles && (
+                            <Link
+                                href="/settings/biometric"
+                                className="text-xs font-medium text-indigo-300 hover:text-white px-2.5 py-1.5 rounded-lg border border-indigo-500/30 hover:border-indigo-500/60 bg-indigo-950/40 transition flex items-center gap-1.5"
+                            >
+                                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                                Biometric Profiles
+                            </Link>
+                        )}
                         <Link
                             href="/attendance/daily"
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
@@ -453,272 +457,168 @@ export default function Import({ imports, stats, employees, adapters, profiles =
                         </Link>
                     </div>
                 </div>
-                {/* Metric Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group hover:border-indigo-500/50 transition">
-                        <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                            <span>Ingested Punch Records</span>
-                            <Database className="w-4 h-4 text-indigo-400" />
+
+                {/* Metric Summary Cards - Compact Single Line */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    <div className="px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm flex items-center justify-between gap-2 hover:border-slate-700 transition">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Database className="w-4 h-4 text-indigo-400 shrink-0" />
+                            <span className="text-xs text-slate-400 truncate">Ingested Punches</span>
                         </div>
-                        <div className="mt-2 text-3xl font-extrabold text-white tracking-tight">
-                            {stats.total_logs.toLocaleString()}
+                        <span className="text-sm font-bold text-white shrink-0">{stats.total_logs.toLocaleString()}</span>
+                    </div>
+
+                    <div className="px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm flex items-center justify-between gap-2 hover:border-slate-700 transition">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />
+                            <span className="text-xs text-slate-400 truncate">Import Batches</span>
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                            Stored in high-fidelity attendance log
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-sm font-bold text-white">{stats.total_imports}</span>
+                            {stats.last_import_status && stats.last_import_status !== 'none' && (
+                                <span className="text-[10px] text-slate-500">({stats.last_import_status})</span>
+                            )}
                         </div>
                     </div>
 
-                    <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group hover:border-cyan-500/50 transition">
-                        <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                            <span>Import Batches</span>
-                            <HardDrive className="w-4 h-4 text-cyan-400" />
+                    <div className="px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm flex items-center justify-between gap-2 hover:border-slate-700 transition">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Users className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="text-xs text-slate-400 truncate">Missing PINs</span>
                         </div>
-                        <div className="mt-2 text-3xl font-extrabold text-white tracking-tight">
-                            {stats.total_imports}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500 flex items-center gap-1">
-                            Status: {getStatusPill(stats.last_import_status)}
-                        </div>
-                    </div>
-
-                    <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group hover:border-amber-500/50 transition">
-                        <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                            <span>Missing Biometric Pins</span>
-                            <Users className="w-4 h-4 text-amber-400" />
-                        </div>
-                        <div className="mt-2 text-3xl font-extrabold text-amber-400 tracking-tight">
+                        <span className="text-sm font-bold text-amber-400 shrink-0">
                             {stats.unmapped_employees_count}
-                            <span className="text-sm font-normal text-slate-400 ml-1">
-                                / {stats.total_employees} staff
-                            </span>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                            {stats.unmapped_employees_count === 0 ? 'All employees mapped' : 'Need device ID allocation'}
-                        </div>
+                            <span className="text-xs text-slate-500 font-normal"> / {stats.total_employees}</span>
+                        </span>
                     </div>
 
-                    <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group hover:border-purple-500/50 transition">
-                        <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                            <span>Biometric Adapters</span>
-                            <Cpu className="w-4 h-4 text-purple-400" />
+                    <div className="px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm flex items-center justify-between gap-2 hover:border-slate-700 transition">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Cpu className="w-4 h-4 text-purple-400 shrink-0" />
+                            <span className="text-xs text-slate-400 truncate">Adapters</span>
                         </div>
-                        <div className="mt-2 text-3xl font-extrabold text-white tracking-tight">
-                            {adapters.length}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                            ZKTeco DAT • Generic CSV • Excel XLSX
-                        </div>
+                        <span className="text-sm font-bold text-white shrink-0">{adapters.length}</span>
                     </div>
                 </div>
 
                 {/* Import Workflow Container */}
-                <div className="p-6 md:p-8 rounded-3xl bg-slate-900/50 border border-slate-800/80 backdrop-blur-md shadow-2xl relative">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+                <div className="p-4 md:p-5 rounded-2xl bg-slate-900/50 border border-slate-800/80 backdrop-blur-md shadow-2xl relative">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
                         <div>
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <UploadCloud className="w-6 h-6 text-cyan-400" />
+                            <h2 className="text-base font-bold text-white flex items-center gap-2">
+                                <UploadCloud className="w-5 h-5 text-cyan-400" />
                                 Ingest Biometric Attendance Punch Log
                             </h2>
-                            <p className="text-xs text-slate-400 mt-1">
+                            <p className="text-xs text-slate-400 mt-0.5">
                                 Upload raw machine dumps, preview employee matching, and commit deduplicated logs into your attendance ledger.
                             </p>
                         </div>
 
-                        {/* Format template download shortcut */}
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs text-slate-400">Sample Templates:</span>
+                        {/* Format template download shortcut & format switcher */}
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                            <span className="text-[11px] text-slate-400">Templates:</span>
                             <a
                                 href="/attendance/import/template/zkteco"
-                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
                             >
-                                <Download className="w-3 h-3 text-cyan-400" /> ZKTeco (.dat)
+                                <Download className="w-3 h-3 text-cyan-400" /> ZKTeco
                             </a>
                             <a
                                 href="/attendance/import/template/hikvision"
-                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
                             >
-                                <Download className="w-3 h-3 text-blue-400" /> Hikvision (.txt)
+                                <Download className="w-3 h-3 text-blue-400" /> Hikvision
                             </a>
                             <a
                                 href="/attendance/import/template/realand"
-                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
                             >
-                                <Download className="w-3 h-3 text-indigo-400" /> Realand (.txt)
+                                <Download className="w-3 h-3 text-indigo-400" /> Realand
                             </a>
                             <a
                                 href="/attendance/import/template/csv"
-                                className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
                             >
-                                <Download className="w-3 h-3 text-emerald-400" /> CSV Template
+                                <Download className="w-3 h-3 text-emerald-400" /> CSV
                             </a>
+                            <button
+                                type="button"
+                                onClick={() => setShowAdapterOverride(!showAdapterOverride)}
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700 ml-1"
+                            >
+                                <Cpu className="w-3 h-3 text-indigo-400" />
+                                {showAdapterOverride ? 'Hide Formats' : 'Change Format'}
+                            </button>
                         </div>
                     </div>
 
-                    {/* Step 1: Choose Biometric Adapter / Saved Device Profile */}
-                    <div className="mt-6 space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div>
-                                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                                    <Cpu className="w-4 h-4 text-cyan-400" />
-                                    Step 1: Select Biometric Device or Ingestion Format
-                                </label>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                    Choose from standard adapters or your organization's custom configured hardware profiles (Hikvision, Realand, ZKTeco)
-                                </p>
+                    {/* Optional Ad-hoc Adapter Override */}
+                    {showAdapterOverride && (
+                        <div className="mt-3 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="font-semibold text-slate-300">Override Ingestion Format (Ad-hoc)</span>
+                                <span>Overrides default format for this upload only</span>
                             </div>
-
-                            {canManageProfiles && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setEditingProfile(null);
-                                        setIsProfileModalOpen(true);
-                                    }}
-                                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl shadow-md shadow-blue-500/10 transition flex items-center gap-1.5 self-start sm:self-auto"
-                                >
-                                    <Plus className="w-3.5 h-3.5" />
-                                    Configure Biometric Device
-                                </button>
-                            )}
-                        </div>
-
-                        {/* Section A: Configured Device Profiles */}
-                        {profilesList.length > 0 && (
-                            <div className="space-y-2">
-                                <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                                    <span>Configured Biometric Devices</span>
-                                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                        {profilesList.length} Active
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    {profilesList.map((prof) => {
-                                        const isSelected = selectedProfileId === prof.id;
-                                        return (
-                                            <div
-                                                key={prof.id}
-                                                onClick={() => {
-                                                    setSelectedAdapter('configurable');
-                                                    setSelectedProfileId(prof.id);
-                                                    setPreviewData(null);
-                                                }}
-                                                className={`p-4 rounded-2xl border transition cursor-pointer relative group ${
-                                                    isSelected
-                                                        ? 'bg-gradient-to-br from-blue-950/70 via-slate-900 to-indigo-950/60 border-blue-500/80 shadow-lg shadow-blue-500/15 ring-1 ring-blue-500/50'
-                                                        : 'bg-slate-900/50 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase">
-                                                        {prof.device_brand}
-                                                    </span>
-                                                    <div className="flex items-center gap-1.5">
-                                                        {canManageProfiles && (
-                                                            <>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setEditingProfile(prof);
-                                                                        setIsProfileModalOpen(true);
-                                                                    }}
-                                                                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                                                                    title="Edit profile configuration"
-                                                                >
-                                                                    <Edit2 className="w-3.5 h-3.5" />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => handleDeleteProfile(prof.id, prof.name, e)}
-                                                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                                                                    title="Delete profile"
-                                                                >
-                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                        {isSelected && (
-                                                            <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-white">
-                                                                <Check className="w-3 h-3" />
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <h3 className="text-sm font-bold text-white mt-2.5 line-clamp-1">
-                                                    {prof.name}
-                                                </h3>
-                                                <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
-                                                    {prof.model_name ? `${prof.model_name} • ` : ''}
-                                                    {prof.delimiter_type.toUpperCase()} Delimited
-                                                </p>
-                                                <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-cyan-400">
-                                                    <span>.{prof.file_extension}</span>
-                                                    <span className="text-slate-500 text-[10px] font-sans">
-                                                        {prof.date_mode === 'separate' ? 'Split Date+Time' : 'Combined DateTime'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Section B: Standard Format Adapters */}
-                        <div className="space-y-2">
-                            <div className="text-xs font-semibold text-slate-400">
-                                Standard Formats
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                {adapters.map((adapter) => {
-                                    const isSelected = selectedProfileId === null && selectedAdapter === adapter.key;
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                {profiles.map((prof) => {
+                                    const isSelected = selectedProfileId === prof.id;
                                     return (
                                         <div
-                                            key={adapter.key}
+                                            key={prof.id}
                                             onClick={() => {
-                                                setSelectedAdapter(adapter.key);
-                                                setSelectedProfileId(null);
+                                                setSelectedAdapter('configurable');
+                                                setSelectedProfileId(prof.id);
                                                 setPreviewData(null);
                                             }}
-                                            className={`p-4 rounded-2xl border transition cursor-pointer relative ${
+                                            className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
                                                 isSelected
-                                                    ? 'bg-gradient-to-br from-indigo-950/60 to-slate-900 border-indigo-500/80 shadow-lg shadow-indigo-500/10 ring-1 ring-indigo-500/50'
-                                                    : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-900/70'
+                                                    ? 'bg-blue-950/60 border-blue-500 text-white font-semibold'
+                                                    : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
                                             }`}
                                         >
                                             <div className="flex items-center justify-between">
-                                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                                                    {adapter.badge}
-                                                </span>
-                                                {isSelected && (
-                                                    <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white">
-                                                        <Check className="w-3 h-3" />
-                                                    </div>
-                                                )}
+                                                <span className="uppercase text-[10px] font-bold text-blue-400">{prof.device_brand}</span>
+                                                {isSelected && <Check className="w-3.5 h-3.5 text-blue-400" />}
                                             </div>
-                                            <h3 className="text-sm font-bold text-white mt-2.5">
-                                                {adapter.name}
-                                            </h3>
-                                            <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                                                {adapter.description}
-                                            </p>
-                                            <div className="mt-3 text-[11px] font-mono text-indigo-400">
-                                                {adapter.extension}
+                                            <div className="font-medium text-white truncate mt-1">{prof.name}</div>
+                                        </div>
+                                    );
+                                })}
+                                {adapters.map((adap) => {
+                                    const isSelected = selectedProfileId === null && selectedAdapter === adap.key;
+                                    return (
+                                        <div
+                                            key={adap.key}
+                                            onClick={() => {
+                                                setSelectedAdapter(adap.key);
+                                                setSelectedProfileId(null);
+                                                setPreviewData(null);
+                                            }}
+                                            className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
+                                                isSelected
+                                                    ? 'bg-indigo-950/60 border-indigo-500 text-white font-semibold'
+                                                    : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="uppercase text-[10px] font-bold text-indigo-400">{adap.badge}</span>
+                                                {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
                                             </div>
+                                            <div className="font-medium text-white truncate mt-1">{adap.name}</div>
                                         </div>
                                     );
                                 })}
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* Step 2: Upload File & Terminal ID */}
-                    <div className="mt-6 space-y-3">
+                    {/* Upload File & Ingestion Settings */}
+                    <div className="mt-4 space-y-2.5">
                         <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                            Step 2: Upload File & Ingestion Settings
+                            Upload File & Ingestion Settings
                         </label>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                             {/* Drag and drop dropzone */}
                             <div
                                 onDragOver={(e) => {
@@ -728,7 +628,7 @@ export default function Import({ imports, stats, employees, adapters, profiles =
                                 onDragLeave={() => setIsDragging(false)}
                                 onDrop={handleDrop}
                                 onClick={() => fileInputRef.current?.click()}
-                                className={`md:col-span-2 p-8 rounded-2xl border-2 border-dashed transition flex flex-col items-center justify-center cursor-pointer text-center relative overflow-hidden ${
+                                className={`md:col-span-2 p-5 md:p-6 rounded-2xl border-2 border-dashed transition flex flex-col items-center justify-center cursor-pointer text-center relative overflow-hidden ${
                                     isDragging
                                         ? 'border-indigo-500 bg-indigo-500/10'
                                         : selectedFile
@@ -1220,13 +1120,6 @@ export default function Import({ imports, stats, employees, adapters, profiles =
                 </div>
             )}
 
-            {/* Configurable Biometric Device Profile Wizard Modal */}
-            <BiometricProfileModal
-                isOpen={isProfileModalOpen}
-                onClose={() => setIsProfileModalOpen(false)}
-                onSaved={handleProfileSaved}
-                editingProfile={editingProfile}
-            />
             </div>
         </AuthenticatedLayout>
     );

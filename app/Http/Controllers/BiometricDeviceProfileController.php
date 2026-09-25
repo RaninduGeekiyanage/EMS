@@ -7,16 +7,149 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Biometric\StoreBiometricDeviceProfileRequest;
 use App\Http\Requests\Biometric\TestBiometricParseRequest;
 use App\Models\BiometricDeviceProfile;
+use App\Models\Tenant;
 use App\Services\Biometric\ConfigurableTextAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response as InertiaResponse;
 
 final class BiometricDeviceProfileController extends Controller
 {
+    public const STANDARD_ADAPTERS = [
+        [
+            'key' => 'zkteco',
+            'name' => 'ZKTeco Standard DAT',
+            'description' => 'Space/tab delimited raw terminal punch logs (.dat, .txt)',
+            'extension' => '.dat, .txt',
+            'badge' => 'Biometric Device',
+        ],
+        [
+            'key' => 'generic_csv',
+            'name' => 'Generic CSV Log',
+            'description' => 'Comma/semicolon delimited punch log with column detection (.csv)',
+            'extension' => '.csv',
+            'badge' => 'Standard Format',
+        ],
+        [
+            'key' => 'excel',
+            'name' => 'Excel Spreadsheet',
+            'description' => 'OpenXML workbook sheet with automated date parsing (.xlsx, .xls)',
+            'extension' => '.xlsx, .xls',
+            'badge' => 'Spreadsheet',
+        ],
+    ];
+
     public function __construct(
         private readonly ConfigurableTextAdapter $adapter
     ) {}
+
+    /**
+     * Display the dedicated Biometric Configuration page under Settings.
+     */
+    public function settingsPage(Request $request): InertiaResponse
+    {
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
+
+        $query = BiometricDeviceProfile::query()->with('createdBy:id,name,email');
+        if ($tenantId !== null) {
+            $query->where('tenant_id', $tenantId);
+        }
+        $profiles = $query->orderBy('name')->get();
+
+        $activeAdapter = $tenant?->getSetting('active_biometric_adapter') ?? 'zkteco';
+        $activeProfileId = $tenant?->getSetting('active_biometric_profile_id');
+
+        if ($activeAdapter === 'configurable' && ! $activeProfileId) {
+            $defaultProf = $profiles->firstWhere('is_default', true);
+            $activeProfileId = $defaultProf?->id;
+        }
+
+        $activeConfig = [
+            'adapter_type' => $activeAdapter,
+            'profile_id' => $activeProfileId,
+        ];
+
+        return Inertia::render('Settings/Biometric', [
+            'profiles' => $profiles,
+            'adapters' => self::STANDARD_ADAPTERS,
+            'activeConfig' => $activeConfig,
+            'canManage' => auth()->user()?->can('biometric-device.manage') ?? false,
+        ]);
+    }
+
+    /**
+     * Set the tenant default/active biometric configuration.
+     */
+    public function setDefault(Request $request): JsonResponse|RedirectResponse
+    {
+        if (! auth()->user()?->can('biometric-device.manage')) {
+            abort(403, 'Unauthorized to configure default biometric device.');
+        }
+
+        $validated = $request->validate([
+            'adapter_type' => ['required', 'string', 'in:configurable,zkteco,generic_csv,excel'],
+            'profile_id' => ['nullable', 'string', 'exists:biometric_device_profiles,id'],
+        ]);
+
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
+
+        if (! $tenant) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Active tenant is required.'], 400);
+            }
+
+            return back()->withErrors(['error' => 'Active tenant is required.']);
+        }
+
+        $adapterType = $validated['adapter_type'];
+        $profileId = $validated['profile_id'] ?? null;
+
+        if ($adapterType === 'configurable' && empty($profileId)) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Please select a valid biometric device profile.'], 422);
+            }
+
+            return back()->withErrors(['profile_id' => 'Please select a valid biometric device profile.']);
+        }
+
+        // Reset existing default profile flags for this tenant
+        BiometricDeviceProfile::where('tenant_id', $tenant->id)->update(['is_default' => false]);
+
+        if ($adapterType === 'configurable' && $profileId) {
+            $profile = BiometricDeviceProfile::where('tenant_id', $tenant->id)->findOrFail($profileId);
+            $profile->update(['is_default' => true]);
+            $tenant->setSetting('active_biometric_adapter', 'configurable');
+            $tenant->setSetting('active_biometric_profile_id', $profile->id);
+            $message = "Default biometric device set to '{$profile->name}'.";
+        } else {
+            $tenant->setSetting('active_biometric_adapter', $adapterType);
+            $tenant->setSetting('active_biometric_profile_id', null);
+            $label = match ($adapterType) {
+                'zkteco' => 'ZKTeco Standard DAT',
+                'generic_csv' => 'Generic CSV Log',
+                'excel' => 'Excel Spreadsheet',
+                default => strtoupper($adapterType),
+            };
+            $message = "Default biometric ingestion format set to '{$label}'.";
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'data' => [
+                    'adapter_type' => $adapterType,
+                    'profile_id' => $profileId,
+                ],
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
 
     /**
      * List all biometric device profiles for the current tenant.
@@ -52,7 +185,19 @@ final class BiometricDeviceProfileController extends Controller
         $validated['tenant_id'] = $tenantId;
         $validated['created_by'] = auth()->id();
 
+        // If this is the very first profile for the tenant, make it default automatically
+        $existingCount = BiometricDeviceProfile::where('tenant_id', $tenantId)->count();
+        if ($existingCount === 0) {
+            $validated['is_default'] = true;
+        }
+
         $profile = BiometricDeviceProfile::create($validated);
+
+        if ($validated['is_default'] ?? false) {
+            $tenant = app()->bound('current_tenant') ? app('current_tenant') : Tenant::find($tenantId);
+            $tenant?->setSetting('active_biometric_adapter', 'configurable');
+            $tenant?->setSetting('active_biometric_profile_id', $profile->id);
+        }
 
         if ($request->wantsJson()) {
             return response()->json([
@@ -92,8 +237,25 @@ final class BiometricDeviceProfileController extends Controller
             abort(403, 'Unauthorized to delete biometric device profiles.');
         }
 
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
+
         $name = $profile->name;
+        $wasDefault = $profile->is_default || ($tenant?->getSetting('active_biometric_profile_id') === $profile->id);
+
         $profile->delete();
+
+        if ($wasDefault && $tenant) {
+            $nextProfile = BiometricDeviceProfile::where('tenant_id', $tenant->id)->active()->first();
+            if ($nextProfile) {
+                $nextProfile->update(['is_default' => true]);
+                $tenant->setSetting('active_biometric_adapter', 'configurable');
+                $tenant->setSetting('active_biometric_profile_id', $nextProfile->id);
+            } else {
+                $tenant->setSetting('active_biometric_adapter', 'zkteco');
+                $tenant->setSetting('active_biometric_profile_id', null);
+            }
+        }
 
         if ($request->wantsJson()) {
             return response()->json([

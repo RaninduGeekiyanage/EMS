@@ -94,7 +94,7 @@ final class Tenant extends Model
         /** @var TenantSetting */
         return $this->settings()->updateOrCreate(
             ['key' => $key],
-            ['value' => is_scalar($value) || $value === null ? (string) $value : json_encode($value, JSON_THROW_ON_ERROR)]
+            ['value' => $value === null ? null : (is_scalar($value) ? (string) $value : json_encode($value, JSON_THROW_ON_ERROR))]
         );
     }
 

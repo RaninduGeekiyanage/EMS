@@ -338,10 +338,10 @@ final class BiometricDeviceProfileTest extends TestCase
         $previewResponse->assertOk();
         $previewResponse->assertJsonPath('success', true);
         $previewResponse->assertJsonPath('data.mapped_count', 4);
-        $previewResponse->assertJsonPath('data.sample_rows.0.parsed_datetime', '2026-08-28 07:05:00');
-        $previewResponse->assertJsonPath('data.sample_rows.0.parsed_direction', 'in');
-        $previewResponse->assertJsonPath('data.sample_rows.1.parsed_datetime', '2026-08-28 14:59:00');
-        $previewResponse->assertJsonPath('data.sample_rows.1.parsed_direction', 'out');
+        $previewResponse->assertJsonPath('data.preview_rows.0.punch_datetime', '2026-08-28 07:05:00');
+        $previewResponse->assertJsonPath('data.preview_rows.0.punch_type', 'in');
+        $previewResponse->assertJsonPath('data.preview_rows.1.punch_datetime', '2026-08-28 14:59:00');
+        $previewResponse->assertJsonPath('data.preview_rows.1.punch_type', 'out');
 
         $importResponse = $this->actingAs($this->admin)
             ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
@@ -373,5 +373,111 @@ final class BiometricDeviceProfileTest extends TestCase
             'punch_type' => 'out',
             'device_id' => 'FACTORY-TERMINAL-01',
         ]);
+    }
+
+    public function test_admin_can_access_biometric_settings_page(): void
+    {
+        $response = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->get('/settings/biometric');
+
+        $response->assertOk();
+    }
+
+    public function test_admin_can_set_custom_biometric_profile_as_tenant_default(): void
+    {
+        $profile = BiometricDeviceProfile::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Main Gate Scanner',
+            'device_brand' => 'zkteco',
+            'columns_config' => ['biometric_id_col' => 0, 'datetime_col' => 1],
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/settings/biometric/default', [
+                'adapter_type' => 'configurable',
+                'profile_id' => $profile->id,
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('success', true);
+
+        $this->tenant->refresh();
+        $this->assertSame('configurable', $this->tenant->getSetting('active_biometric_adapter'));
+        $this->assertSame($profile->id, $this->tenant->getSetting('active_biometric_profile_id'));
+
+        $profile->refresh();
+        $this->assertTrue($profile->is_default);
+    }
+
+    public function test_admin_can_set_standard_adapter_as_tenant_default(): void
+    {
+        $response = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/settings/biometric/default', [
+                'adapter_type' => 'generic_csv',
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('success', true);
+
+        $this->tenant->refresh();
+        $this->assertSame('generic_csv', $this->tenant->getSetting('active_biometric_adapter'));
+        $this->assertNull($this->tenant->getSetting('active_biometric_profile_id'));
+    }
+
+    public function test_default_biometric_profile_is_isolated_between_tenants(): void
+    {
+        $tenant2 = Tenant::create([
+            'name' => 'Second Company Ltd',
+            'slug' => 'second-company',
+            'is_active' => true,
+        ]);
+
+        $profile1 = BiometricDeviceProfile::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Company 1 Profile',
+            'device_brand' => 'zkteco',
+            'columns_config' => ['biometric_id_col' => 0, 'datetime_col' => 1],
+            'is_active' => true,
+        ]);
+
+        $profile2 = BiometricDeviceProfile::create([
+            'tenant_id' => $tenant2->id,
+            'name' => 'Company 2 Profile',
+            'device_brand' => 'hikvision',
+            'columns_config' => ['biometric_id_col' => 0, 'datetime_col' => 1],
+            'is_active' => true,
+        ]);
+
+        // Set Company 1 default
+        $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/settings/biometric/default', [
+                'adapter_type' => 'configurable',
+                'profile_id' => $profile1->id,
+            ]);
+
+        $profile1->refresh();
+        $profile2->refresh();
+
+        $this->assertTrue($profile1->is_default);
+        $this->assertFalse($profile2->is_default);
+
+        $this->assertSame('configurable', $this->tenant->getSetting('active_biometric_adapter'));
+        $this->assertNull($tenant2->getSetting('active_biometric_adapter'));
+    }
+
+    public function test_unauthorized_user_cannot_set_default_biometric_configuration(): void
+    {
+        $response = $this->actingAs($this->employeeUser)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/settings/biometric/default', [
+                'adapter_type' => 'zkteco',
+            ]);
+
+        $response->assertForbidden();
     }
 }

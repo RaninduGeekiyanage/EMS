@@ -28,6 +28,7 @@ import {
     ArrowLeft,
     Layers,
     FileText,
+    Cpu,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -124,6 +125,13 @@ export default function AuthenticatedLayout({
             ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-semibold'
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-900/80'}
     `;
+
+    const canAccessSettings = Boolean(
+        auth?.user?.is_super_admin ||
+        auth?.user?.is_company_owner ||
+        auth?.user?.roles?.includes('Company Admin') ||
+        auth?.user?.roles?.includes('HR Manager')
+    );
 
     // Determine back button visibility
     const shouldShowBack = showBackButton !== undefined
@@ -322,6 +330,21 @@ export default function AuthenticatedLayout({
                             </Link>
                         </div>
 
+                        {/* Settings */}
+                        {canAccessSettings && (
+                            <div className="space-y-1">
+                                {!collapsed && (
+                                    <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                        Settings
+                                    </p>
+                                )}
+                                <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} title="Biometric Device Configuration">
+                                    <Cpu className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Biometric Config</span>}
+                                </Link>
+                            </div>
+                        )}
+
                         {/* Super Admin Switcher Link */}
                         {auth?.user?.is_super_admin && (
                             <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 space-y-1">
@@ -495,6 +518,18 @@ export default function AuthenticatedLayout({
                                 <span>Custom HR Builder</span>
                             </Link>
                         </div>
+
+                        {canAccessSettings && (
+                            <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">
+                                    Settings
+                                </p>
+                                <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} onClick={() => setMobileOpen(false)}>
+                                    <Cpu className="w-4 h-4" />
+                                    <span>Biometric Config</span>
+                                </Link>
+                            </div>
+                        )}
 
                         {auth?.user?.is_super_admin && (
                             <div className="pt-2 border-t border-slate-200 dark:border-slate-800">

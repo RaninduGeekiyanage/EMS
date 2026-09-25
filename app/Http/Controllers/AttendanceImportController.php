@@ -50,11 +50,28 @@ final class AttendanceImportController extends Controller
         }
         $profiles = $profilesQuery->get();
 
+        $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? \App\Models\Tenant::find($tenantId) : null);
+        $activeAdapter = $tenant?->getSetting('active_biometric_adapter') ?? 'zkteco';
+        $activeProfileId = $tenant?->getSetting('active_biometric_profile_id');
+
+        if ($activeAdapter === 'configurable' && ! $activeProfileId) {
+            $activeProfileId = $profiles->firstWhere('is_default', true)?->id;
+        }
+
+        $activeProfile = $activeProfileId ? $profiles->firstWhere('id', $activeProfileId) : null;
+
+        $activeConfig = [
+            'adapter_type' => $activeAdapter,
+            'profile_id' => $activeProfileId,
+            'profile' => $activeProfile,
+        ];
+
         return Inertia::render('Attendance/Import', [
             'imports' => $imports,
             'stats' => $stats,
             'employees' => $employees,
             'profiles' => $profiles,
+            'activeConfig' => $activeConfig,
             'canManageProfiles' => auth()->user()?->can('biometric-device.manage') ?? false,
             'adapters' => [
                 [

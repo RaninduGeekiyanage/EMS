@@ -41,6 +41,7 @@ export interface BiometricDeviceProfile {
     status_code_mapping: Record<string, string> | null;
     default_device_id: string | null;
     is_active: boolean;
+    is_default?: boolean;
 }
 
 interface Props {

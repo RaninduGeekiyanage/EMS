@@ -171,7 +171,9 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/attendance/import/template/{type}', [AttendanceImportController::class, 'downloadTemplate'])->name('attendance.import.template');
         Route::post('/attendance/import/map-employee', [AttendanceImportController::class, 'mapEmployee'])->name('attendance.import.map-employee');
 
-        // Configurable Biometric Device Profiles
+        // Configurable Biometric Device Profiles & System Settings
+        Route::get('/settings/biometric', [BiometricDeviceProfileController::class, 'settingsPage'])->middleware('can:biometric-device.view')->name('settings.biometric.index');
+        Route::post('/settings/biometric/default', [BiometricDeviceProfileController::class, 'setDefault'])->middleware('can:biometric-device.manage')->name('settings.biometric.default');
         Route::get('/biometric-devices', [BiometricDeviceProfileController::class, 'index'])->name('biometric-devices.index');
         Route::post('/biometric-devices/test-parse', [BiometricDeviceProfileController::class, 'testParse'])->name('biometric-devices.test-parse');
         Route::middleware('can:biometric-device.manage')->group(function () {

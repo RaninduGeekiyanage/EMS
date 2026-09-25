@@ -44,6 +44,7 @@ final class BiometricDeviceProfile extends Model
         'status_code_mapping',
         'default_device_id',
         'is_active',
+        'is_default',
         'created_by',
     ];
 
@@ -57,6 +58,7 @@ final class BiometricDeviceProfile extends Model
         return [
             'skip_header_lines' => 'integer',
             'is_active' => 'boolean',
+            'is_default' => 'boolean',
             'columns_config' => 'array',
             'status_code_mapping' => 'array',
         ];
@@ -87,5 +89,16 @@ final class BiometricDeviceProfile extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Scope a query to only include the default profile.
+     *
+     * @param  Builder<BiometricDeviceProfile>  $query
+     * @return Builder<BiometricDeviceProfile>
+     */
+    public function scopeDefault(Builder $query): Builder
+    {
+        return $query->where('is_default', true);
     }
 }
