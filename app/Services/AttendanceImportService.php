@@ -668,6 +668,7 @@ final class AttendanceImportService
                 foreach (array_chunk(array_keys($importedStagingIds), 500) as $chunkIds) {
                     RawBiometricPunch::whereIn('id', $chunkIds)->update([
                         'status' => 'imported',
+                        'error_message' => null,
                         'imported_at' => $now,
                     ]);
                 }
@@ -764,14 +765,64 @@ final class AttendanceImportService
     }
 
     /**
-     * Map a raw biometric ID to an employee profile.
+     * Map a raw biometric ID to an employee profile and release unmapped failed punches.
      */
     public function mapBiometricIdToEmployee(string $employeeId, string $biometricId): Employee
     {
         $employee = Employee::findOrFail($employeeId);
-        $employee->update(['biometric_device_id' => trim($biometricId)]);
+        $cleanBioId = trim($biometricId);
+
+        // Count how many failed staging punches exist for this ID before saving employee
+        $failedCount = RawBiometricPunch::withoutGlobalScopes()
+            ->where('tenant_id', $employee->tenant_id)
+            ->where('raw_user_id', $cleanBioId)
+            ->where('status', 'failed')
+            ->count();
+
+        $employee->update(['biometric_device_id' => $cleanBioId]);
+
+        // In case not caught by model events, ensure they are reset
+        RawBiometricPunch::withoutGlobalScopes()
+            ->where('tenant_id', $employee->tenant_id)
+            ->where('raw_user_id', $cleanBioId)
+            ->where('status', 'failed')
+            ->update([
+                'status' => 'pending',
+                'error_message' => null,
+            ]);
+
+        $employee->punches_reset_count = $failedCount;
 
         return $employee;
+    }
+
+    /**
+     * Retry / reset failed staging punches back to pending.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return int Number of records reset to pending
+     */
+    public function retryFailedStagingPunches(array $filters = []): int
+    {
+        $query = RawBiometricPunch::query()->where('status', 'failed');
+
+        $tenantId = $filters['tenant_id'] ?? session('tenant_id') ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+        if ($tenantId !== null) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        if (! empty($filters['device_sn'])) {
+            $query->where('device_sn', (string) $filters['device_sn']);
+        }
+
+        if (! empty($filters['raw_user_id'])) {
+            $query->where('raw_user_id', (string) $filters['raw_user_id']);
+        }
+
+        return $query->update([
+            'status' => 'pending',
+            'error_message' => null,
+        ]);
     }
 
     /**
@@ -792,6 +843,7 @@ final class AttendanceImportService
 
         $totalEmployees = Employee::count();
         $pendingStagingPunches = RawBiometricPunch::pending()->count();
+        $failedStagingPunches = RawBiometricPunch::failed()->count();
 
         return [
             'total_logs' => $totalLogs,
@@ -801,6 +853,7 @@ final class AttendanceImportService
             'unmapped_employees_count' => $employeesWithoutBioId,
             'total_employees' => $totalEmployees,
             'pending_staging_punches' => $pendingStagingPunches,
+            'failed_staging_punches' => $failedStagingPunches,
         ];
     }
 

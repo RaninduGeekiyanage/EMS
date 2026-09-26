@@ -434,5 +434,92 @@ final class BiometricDatabaseStagingTest extends TestCase
         $punch1->refresh();
         $this->assertEquals($initialLogId1, $punch1->attendance_log_id);
     }
+
+    public function test_mapping_employee_resets_failed_staging_punches_to_pending(): void
+    {
+        // 1. Create a failed punch for an unmapped ID
+        $failedPunch = RawBiometricPunch::create([
+            'tenant_id' => $this->tenant->id,
+            'device_sn' => 'ZK-LOBBY-01',
+            'raw_user_id' => 'BIO-999',
+            'punch_time' => Carbon::parse('2026-09-26 08:30:00'),
+            'punch_type' => 'in',
+            'status' => 'failed',
+            'error_message' => 'Unmapped Biometric ID',
+        ]);
+
+        $this->assertEquals('failed', $failedPunch->status);
+
+        // 2. Map the biometric ID to employee2 via the API endpoint
+        $response = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/map-employee', [
+                'employee_id' => $this->employee2->id,
+                'biometric_id' => 'BIO-999',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('punches_reset', 1);
+
+        // 3. Verify the failed punch is automatically reset to pending
+        $failedPunch->refresh();
+        $this->assertEquals('pending', $failedPunch->status);
+        $this->assertNull($failedPunch->error_message);
+
+        // 4. Now commit staging - it must process and create an attendance log!
+        $commitRes = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/staging-commit', [
+                'status' => 'pending',
+            ]);
+
+        $commitRes->assertOk()->assertJson(['success' => true]);
+
+        $failedPunch->refresh();
+        $this->assertEquals('imported', $failedPunch->status);
+        $this->assertNotNull($failedPunch->attendance_log_id);
+    }
+
+    public function test_can_retry_failed_staging_punches_manually(): void
+    {
+        // Create 2 failed punches
+        $p1 = RawBiometricPunch::create([
+            'tenant_id' => $this->tenant->id,
+            'device_sn' => 'ZK-LOBBY-01',
+            'raw_user_id' => 'BIO-UNKNOWN-1',
+            'punch_time' => Carbon::parse('2026-09-26 08:30:00'),
+            'punch_type' => 'in',
+            'status' => 'failed',
+            'error_message' => 'Unmapped Biometric ID',
+        ]);
+
+        $p2 = RawBiometricPunch::create([
+            'tenant_id' => $this->tenant->id,
+            'device_sn' => 'ZK-LOBBY-01',
+            'raw_user_id' => 'BIO-UNKNOWN-2',
+            'punch_time' => Carbon::parse('2026-09-26 08:35:00'),
+            'punch_type' => 'out',
+            'status' => 'failed',
+            'error_message' => 'Unmapped Biometric ID',
+        ]);
+
+        $res = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/staging-retry', [
+                'device_sn' => 'ZK-LOBBY-01',
+            ]);
+
+        $res->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('count', 2);
+
+        $p1->refresh();
+        $p2->refresh();
+        $this->assertEquals('pending', $p1->status);
+        $this->assertEquals('pending', $p2->status);
+        $this->assertNull($p1->error_message);
+        $this->assertNull($p2->error_message);
+    }
 }
 

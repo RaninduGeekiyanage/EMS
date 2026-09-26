@@ -6,6 +6,9 @@ namespace App\Models;
 
 use App\Enums\EmploymentType;
 use App\Traits\BelongsToTenant;
+use App\Models\RawBiometricPunch;
+use App\Models\Tenant;
+use App\Scopes\TenantScope;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +19,25 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 final class Employee extends Model
 {
     use BelongsToTenant, HasFactory, HasUlids, SoftDeletes;
+
+    /**
+     * The "booted" method of the model.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (Employee $employee): void {
+            if (! empty($employee->biometric_device_id) && ($employee->wasChanged('biometric_device_id') || $employee->wasRecentlyCreated)) {
+                RawBiometricPunch::withoutGlobalScopes()
+                    ->where('tenant_id', $employee->tenant_id)
+                    ->where('raw_user_id', trim((string) $employee->biometric_device_id))
+                    ->where('status', 'failed')
+                    ->update([
+                        'status' => 'pending',
+                        'error_message' => null,
+                    ]);
+            }
+        });
+    }
 
     /**
      * The table associated with the model.

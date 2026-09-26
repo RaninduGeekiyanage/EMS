@@ -169,6 +169,7 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/attendance/import/preview', [AttendanceImportController::class, 'preview'])->name('attendance.import.preview');
         Route::post('/attendance/import/staging-preview', [AttendanceImportController::class, 'previewStaging'])->name('attendance.import.staging-preview');
         Route::post('/attendance/import/staging-commit', [AttendanceImportController::class, 'commitStaging'])->name('attendance.import.staging-commit');
+        Route::post('/attendance/import/staging-retry', [AttendanceImportController::class, 'retryFailedStaging'])->name('attendance.import.staging-retry');
         Route::post('/attendance/import', [AttendanceImportController::class, 'store'])->name('attendance.import.store');
         Route::delete('/attendance/import/{import}', [AttendanceImportController::class, 'destroy'])->name('attendance.import.destroy');
         Route::get('/attendance/import/template/{type}', [AttendanceImportController::class, 'downloadTemplate'])->name('attendance.import.template');

@@ -123,6 +123,7 @@ interface Props {
         unmapped_employees_count: number;
         total_employees: number;
         pending_staging_punches?: number;
+        failed_staging_punches?: number;
     };
     employees: EmployeeItem[];
     adapters: AdapterOption[];
@@ -171,6 +172,7 @@ export default function Import({
     const [stagingDeviceSn, setStagingDeviceSn] = useState<string>('');
     const [stagingStatus, setStagingStatus] = useState<string>('pending');
     const [isCommittingStaging, setIsCommittingStaging] = useState<boolean>(false);
+    const [isRetryingFailed, setIsRetryingFailed] = useState<boolean>(false);
     const [stagingSuccessMessage, setStagingSuccessMessage] = useState<string | null>(null);
 
     // Quick employee mapping modal
@@ -359,6 +361,48 @@ export default function Import({
         }
     };
 
+    const handleRetryFailedPunches = async () => {
+        setIsRetryingFailed(true);
+        setPreviewError(null);
+        setStagingSuccessMessage(null);
+
+        try {
+            const csrfToken = getCsrfToken();
+            const response = await fetch('/attendance/import/staging-retry', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-XSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    device_sn: stagingDeviceSn || null,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                setStagingSuccessMessage(result.message);
+                if (stagingStatus === 'failed') {
+                    setStagingStatus('pending');
+                }
+                router.reload({ only: ['stats'] });
+                // Re-run staging preview with updated status
+                setTimeout(() => {
+                    runStagingPreview();
+                }, 200);
+            } else {
+                setPreviewError(result.message || 'Failed to retry punches.');
+            }
+        } catch (err: any) {
+            setPreviewError(err.message || 'Network error while retrying failed punches.');
+        } finally {
+            setIsRetryingFailed(false);
+        }
+    };
+
     const currentActiveProfile = selectedProfileId
         ? profiles.find((p) => p.id === selectedProfileId) ?? activeConfig?.profile
         : null;
@@ -405,14 +449,14 @@ export default function Import({
             const json = await res.json();
             if (res.ok && json.success) {
                 setIsMapModalOpen(false);
+                setStagingSuccessMessage(json.message || 'Employee mapped successfully.');
                 // Re-run preview if file or staging is loaded to update the grid
                 if (selectedFile) {
                     runPreview();
                 } else if (activeTab === 'staging') {
                     runStagingPreview();
-                } else {
-                    router.reload();
                 }
+                router.reload({ only: ['stats', 'employees'] });
             } else {
                 alert(json.message || 'Failed to map employee');
             }
@@ -607,6 +651,11 @@ export default function Import({
                                 {stats.pending_staging_punches ?? 0}
                             </span>
                             <span className="text-[10px] text-slate-500">pending</span>
+                            {Boolean(stats.failed_staging_punches && stats.failed_staging_punches > 0) && (
+                                <span className="text-[10px] text-rose-400 bg-rose-500/20 border border-rose-500/30 px-1.5 py-0.5 rounded-full font-semibold ml-0.5" title="Failed staging punches awaiting mapping or retry">
+                                    {stats.failed_staging_punches} failed
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -936,6 +985,42 @@ export default function Import({
                                     )}
                                 </div>
 
+                                {Boolean(stats.failed_staging_punches && stats.failed_staging_punches > 0) && (
+                                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                        <div className="flex items-center gap-2.5">
+                                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                                            <span>
+                                                <strong>{stats.failed_staging_punches} biometric punch(es)</strong> are currently marked as failed (e.g. employee was not yet registered in the system). Once mapped, click <strong>Retry All Failed</strong> to release them back to pending.
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setStagingStatus('failed');
+                                                    setTimeout(() => runStagingPreview(), 50);
+                                                }}
+                                                className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition"
+                                            >
+                                                View Failed
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={isRetryingFailed}
+                                                onClick={handleRetryFailedPunches}
+                                                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-50 transition flex items-center gap-1.5 shadow"
+                                            >
+                                                {isRetryingFailed ? (
+                                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                    <RefreshCw className="w-3.5 h-3.5" />
+                                                )}
+                                                Retry All Failed
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                                     {/* Profile Selector */}
                                     <div>
@@ -1011,6 +1096,18 @@ export default function Import({
                                                 <option value="failed">Failed / Skipped</option>
                                             </select>
                                         </label>
+                                        {Boolean(stats.failed_staging_punches && stats.failed_staging_punches > 0) && (
+                                            <button
+                                                type="button"
+                                                disabled={isRetryingFailed}
+                                                onClick={handleRetryFailedPunches}
+                                                className="text-xs text-amber-400 hover:text-amber-300 underline font-medium flex items-center gap-1"
+                                                title="Reset failed punches to pending"
+                                            >
+                                                <RefreshCw className={`w-3 h-3 ${isRetryingFailed ? 'animate-spin' : ''}`} />
+                                                Reset {stats.failed_staging_punches} Failed
+                                            </button>
+                                        )}
                                     </div>
 
                                     <button

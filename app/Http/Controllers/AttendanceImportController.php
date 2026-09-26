@@ -289,14 +289,59 @@ final class AttendanceImportController extends Controller
             $validated['biometric_id']
         );
 
+        $punchesReset = (int) ($employee->punches_reset_count ?? 0);
+        $message = "Biometric ID '{$validated['biometric_id']}' assigned to {$employee->full_name}.";
+        if ($punchesReset > 0) {
+            $message .= " {$punchesReset} previously failed staging punch(es) were reset to pending.";
+        }
+
         if ($request->wantsJson()) {
             return response()->json([
                 'success' => true,
-                'message' => "Biometric ID '{$validated['biometric_id']}' assigned to {$employee->full_name}.",
+                'message' => $message,
                 'employee' => $employee,
+                'punches_reset' => $punchesReset,
             ]);
         }
 
-        return back()->with('success', "Biometric ID '{$validated['biometric_id']}' mapped to {$employee->full_name}.");
+        return back()->with('success', $message);
+    }
+
+    /**
+     * Reset failed staging punches back to pending for re-synchronization.
+     */
+    public function retryFailedStaging(Request $request): JsonResponse|RedirectResponse
+    {
+        $validated = $request->validate([
+            'device_sn' => ['nullable', 'string', 'max:50'],
+            'raw_user_id' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        try {
+            $count = $this->importService->retryFailedStagingPunches($validated);
+            $message = $count > 0
+                ? "Successfully reset {$count} failed biometric punch(es) to pending."
+                : "No failed biometric punches found matching the filter.";
+
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $message,
+                    'count' => $count,
+                ]);
+            }
+
+            return back()->with('success', $message);
+        } catch (\Throwable $e) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to retry punches: '.$e->getMessage(),
+                ], 422);
+            }
+
+            return back()->withErrors(['error' => 'Failed to retry punches: '.$e->getMessage()]);
+        }
     }
 }
+
