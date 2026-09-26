@@ -19,6 +19,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
+use App\Http\Controllers\RawBiometricIngestController;
 use App\Http\Controllers\RosterController;
 use App\Http\Controllers\RosterExportController;
 use App\Http\Controllers\RosterPatternController;
@@ -166,6 +167,8 @@ Route::middleware(['tenant'])->group(function (): void {
         // Biometric Attendance Ingestion & Device Profiles
         Route::get('/attendance/import', [AttendanceImportController::class, 'index'])->name('attendance.import.index');
         Route::post('/attendance/import/preview', [AttendanceImportController::class, 'preview'])->name('attendance.import.preview');
+        Route::post('/attendance/import/staging-preview', [AttendanceImportController::class, 'previewStaging'])->name('attendance.import.staging-preview');
+        Route::post('/attendance/import/staging-commit', [AttendanceImportController::class, 'commitStaging'])->name('attendance.import.staging-commit');
         Route::post('/attendance/import', [AttendanceImportController::class, 'store'])->name('attendance.import.store');
         Route::delete('/attendance/import/{import}', [AttendanceImportController::class, 'destroy'])->name('attendance.import.destroy');
         Route::get('/attendance/import/template/{type}', [AttendanceImportController::class, 'downloadTemplate'])->name('attendance.import.template');
@@ -176,11 +179,13 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/settings/biometric/default', [BiometricDeviceProfileController::class, 'setDefault'])->middleware('can:biometric-device.manage')->name('settings.biometric.default');
         Route::get('/biometric-devices', [BiometricDeviceProfileController::class, 'index'])->name('biometric-devices.index');
         Route::post('/biometric-devices/test-parse', [BiometricDeviceProfileController::class, 'testParse'])->name('biometric-devices.test-parse');
+        Route::post('/biometric-devices/test-db-query', [BiometricDeviceProfileController::class, 'testDbQuery'])->name('biometric-devices.test-db-query');
         Route::middleware('can:biometric-device.manage')->group(function () {
             Route::post('/biometric-devices', [BiometricDeviceProfileController::class, 'store'])->name('biometric-devices.store');
             Route::put('/biometric-devices/{profile}', [BiometricDeviceProfileController::class, 'update'])->name('biometric-devices.update');
             Route::delete('/biometric-devices/{profile}', [BiometricDeviceProfileController::class, 'destroy'])->name('biometric-devices.destroy');
         });
+
 
         // Attendance Daily Ledger & Overtime Engine
         Route::get('/attendance/daily', [AttendanceDailyController::class, 'index'])->name('attendance.daily.index');
@@ -224,4 +229,9 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/payroll/{payrollRun}/bank-export/banks', [BankExportController::class, 'banks'])->name('payroll.bank-export.banks');
     });
 });
+
+// Direct Hardware Biometric Ingestion API (Daemons, ADMS, IoT Webhooks)
+Route::post('/api/biometric/ingest', [RawBiometricIngestController::class, 'ingest'])->name('api.biometric.ingest');
+Route::get('/api/biometric/ping', [RawBiometricIngestController::class, 'ping'])->name('api.biometric.ping');
+
 

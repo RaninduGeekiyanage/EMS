@@ -18,6 +18,10 @@ import {
     Loader2,
     AlertCircle,
     Info,
+    Database,
+    Copy,
+    Code2,
+    Terminal,
 } from 'lucide-react';
 import BiometricProfileModal, { BiometricDeviceProfile } from '@/Components/BiometricProfileModal';
 
@@ -38,6 +42,7 @@ interface Props {
     profiles: BiometricDeviceProfile[];
     adapters: AdapterOption[];
     activeConfig: ActiveConfig;
+    pendingStagingCount?: number;
     canManage?: boolean;
 }
 
@@ -45,6 +50,7 @@ export default function Biometric({
     profiles: initialProfiles = [],
     adapters = [],
     activeConfig: initialActiveConfig,
+    pendingStagingCount = 0,
     canManage = false,
 }: Props) {
     const [profilesList, setProfilesList] = useState<BiometricDeviceProfile[]>(initialProfiles);
@@ -53,6 +59,14 @@ export default function Biometric({
     const [editingProfile, setEditingProfile] = useState<BiometricDeviceProfile | null>(null);
     const [isSettingDefault, setIsSettingDefault] = useState<string | null>(null);
     const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [docTab, setDocTab] = useState<'sql' | 'curl' | 'ping'>('sql');
+    const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+    const handleCopy = (key: string, text: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey(null), 2500);
+    };
 
     const getCsrfToken = () => {
         const meta = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
@@ -287,9 +301,15 @@ export default function Biometric({
                                 {activeCustomProfile ? (
                                     <>
                                         Hardware Profile: <strong className="text-slate-200">{activeCustomProfile.device_brand.toUpperCase()}</strong>
-                                        {activeCustomProfile.model_name ? ` (${activeCustomProfile.model_name})` : ''} • Delimiter:{' '}
-                                        <span className="font-mono text-cyan-400">{activeCustomProfile.delimiter_type}</span> • File: <span className="font-mono text-cyan-400">.{activeCustomProfile.file_extension}</span> • Mode:{' '}
-                                        <span className="text-slate-300">{activeCustomProfile.date_mode === 'separate' ? 'Split Date + Time' : 'Combined DateTime'}</span>
+                                        {activeCustomProfile.model_name ? ` (${activeCustomProfile.model_name})` : ''} • Source:{' '}
+                                        <span className="font-semibold text-cyan-400">
+                                            {activeCustomProfile.source_type === 'database_staging' ? 'Direct DB Staging' : 'File Log Export'}
+                                        </span>
+                                        {activeCustomProfile.source_type === 'database_staging' ? (
+                                            <> • Target: <span className="font-mono text-amber-400">raw_biometric_punches</span></>
+                                        ) : (
+                                            <> • Delimiter: <span className="font-mono text-cyan-400">{activeCustomProfile.delimiter_type}</span> • File: <span className="font-mono text-cyan-400">.{activeCustomProfile.file_extension}</span></>
+                                        )}
                                     </>
                                 ) : activeStandardAdapter ? (
                                     <>
@@ -310,6 +330,31 @@ export default function Biometric({
                     </div>
                 </div>
 
+                {/* Pending Staging Records Banner */}
+                {pendingStagingCount > 0 && (
+                    <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                                <Database className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <span className="font-bold text-amber-300 text-sm">
+                                    {pendingStagingCount.toLocaleString()} Unprocessed Biometric {pendingStagingCount === 1 ? 'Punch' : 'Punches'} in Staging
+                                </span>
+                                <p className="text-slate-400 text-xs mt-0.5">
+                                    Hardware or background daemons have pushed records into the staging table waiting to be synchronized into your company attendance ledger.
+                                </p>
+                            </div>
+                        </div>
+                        <Link
+                            href="/attendance/import?tab=staging"
+                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shrink-0 flex items-center gap-1.5 justify-center shadow-md shadow-amber-500/15"
+                        >
+                            Sync from Staging DB <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                    </div>
+                )}
+
                 {/* Section A: Configured Device Profiles */}
                 <div className="space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -319,7 +364,7 @@ export default function Biometric({
                                 Configured Biometric Devices
                             </h3>
                             <p className="text-xs text-slate-500 dark:text-slate-400">
-                                Custom hardware profiles tuned for specific terminal models (Hikvision, Realand, ZKTeco, custom formats).
+                                Custom hardware profiles tuned for specific terminal models (Hikvision, Realand, ZKTeco, Direct DB staging).
                             </p>
                         </div>
 
@@ -367,6 +412,7 @@ export default function Biometric({
                                 const isCurrentDefault =
                                     activeConfig.adapter_type === 'configurable' &&
                                     activeConfig.profile_id === prof.id;
+                                const isStaging = prof.source_type === 'database_staging';
 
                                 return (
                                     <div
@@ -379,9 +425,20 @@ export default function Biometric({
                                     >
                                         <div>
                                             <div className="flex items-center justify-between">
-                                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 uppercase tracking-wide">
-                                                    {prof.device_brand}
-                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 uppercase tracking-wide">
+                                                        {prof.device_brand}
+                                                    </span>
+                                                    {isStaging ? (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                                            <Database className="w-2.5 h-2.5" /> Staging DB
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
+                                                            File Log
+                                                        </span>
+                                                    )}
+                                                </div>
 
                                                 <div className="flex items-center gap-1">
                                                     {isCurrentDefault ? (
@@ -438,14 +495,29 @@ export default function Biometric({
                                             </h4>
                                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
                                                 {prof.model_name ? `${prof.model_name} • ` : ''}
-                                                {prof.delimiter_type.toUpperCase()} Delimited
+                                                {isStaging
+                                                    ? 'Direct Staging Database Table'
+                                                    : `${prof.delimiter_type.toUpperCase()} Delimited`}
                                             </p>
 
-                                            <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-cyan-600 dark:text-cyan-400">
-                                                <span>.{prof.file_extension}</span>
-                                                <span className="text-slate-500 text-[10px] font-sans">
-                                                    {prof.date_mode === 'separate' ? 'Split Date+Time' : 'Combined DateTime'}
-                                                </span>
+                                            <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-[11px] font-mono">
+                                                {isStaging ? (
+                                                    <>
+                                                        <span className="text-amber-500 dark:text-amber-400 font-mono text-[10px]">
+                                                            table: raw_biometric_punches
+                                                        </span>
+                                                        <span className="text-slate-500 text-[10px] font-sans">
+                                                            Direct Staging
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-cyan-600 dark:text-cyan-400">.{prof.file_extension}</span>
+                                                        <span className="text-slate-500 text-[10px] font-sans">
+                                                            {prof.date_mode === 'separate' ? 'Split Date+Time' : 'Combined DateTime'}
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -530,6 +602,184 @@ export default function Biometric({
                                 </div>
                             );
                         })}
+                    </div>
+                </div>
+
+                {/* Section C: Direct Ingestion & Webhook Integration Guide */}
+                <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                <Database className="w-4 h-4 text-cyan-500" />
+                                Direct Hardware & Database Ingestion Guide
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Automate biometric punch streaming directly from office LAN terminals into EMS using either database staging or REST API webhooks.
+                            </p>
+                        </div>
+
+                        {/* Guide Tabs */}
+                        <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                            <button
+                                type="button"
+                                onClick={() => setDocTab('sql')}
+                                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                                    docTab === 'sql'
+                                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-semibold'
+                                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                SQL Staging Table
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDocTab('curl')}
+                                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                                    docTab === 'curl'
+                                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-semibold'
+                                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                REST Webhook
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDocTab('ping')}
+                                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                                    docTab === 'ping'
+                                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-semibold'
+                                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                Terminal Ping
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 text-xs relative overflow-hidden">
+                        {docTab === 'sql' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-slate-400">
+                                    <div className="flex items-center gap-2">
+                                        <Code2 className="w-4 h-4 text-cyan-400" />
+                                        <span className="font-semibold text-slate-200">Local Polling Service / Direct SQL Insert</span>
+                                        <span className="text-[10px] text-slate-500 font-mono">table: raw_biometric_punches</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            handleCopy(
+                                                'sql',
+                                                `INSERT INTO raw_biometric_punches (\n    id, tenant_id, device_sn, raw_user_id, punch_time, punch_type, status, created_at, updated_at\n) VALUES (\n    CONCAT(HEX(RANDOM_BYTES(16))), -- or ULID string\n    'YOUR_TENANT_ID',\n    'ZK-LOBBY-01',\n    '10042',\n    '2026-09-26 08:30:15',\n    'in',\n    'pending',\n    NOW(),\n    NOW()\n);`
+                                            )
+                                        }
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 font-mono text-[11px]"
+                                    >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedKey === 'sql' ? 'Copied!' : 'Copy SQL'}
+                                    </button>
+                                </div>
+                                <pre className="font-mono text-cyan-300 text-[11px] overflow-x-auto p-4 rounded-xl bg-slate-900/90 border border-slate-800/80 leading-relaxed">
+{`-- Insert biometric punches directly into the staging table from your on-premise sync service:
+INSERT INTO raw_biometric_punches (
+    id, tenant_id, device_sn, raw_user_id, punch_time, punch_type, status, created_at, updated_at
+) VALUES (
+    LOWER(CONCAT(HEX(RANDOM_BYTES(16)))), -- Or generated ULID
+    'YOUR_TENANT_ID',                      -- Current tenant identifier
+    'ZK-LOBBY-01',                         -- Hardware terminal serial number
+    '10042',                               -- Biometric ID / Enroll number
+    '2026-09-26 08:30:15',                 -- YYYY-MM-DD HH:MM:SS
+    'in',                                  -- 'in', 'out', or 'auto'
+    'pending',                             -- Status: pending
+    NOW(),
+    NOW()
+);`}
+                                </pre>
+                                <p className="text-[11px] text-slate-400">
+                                    Punched records inserted with <code className="text-amber-400 font-mono">status = 'pending'</code> will be automatically staged and matched to employees during synchronization.
+                                </p>
+                            </div>
+                        )}
+
+                        {docTab === 'curl' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-slate-400">
+                                    <div className="flex items-center gap-2">
+                                        <Terminal className="w-4 h-4 text-emerald-400" />
+                                        <span className="font-semibold text-slate-200">REST API Webhook Ingestion</span>
+                                        <span className="text-[10px] text-emerald-400 font-mono">POST /api/biometric/ingest</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            handleCopy(
+                                                'curl',
+                                                `curl -X POST "${window.location.origin}/api/biometric/ingest" \\\n  -H "Content-Type: application/json" \\\n  -H "Accept: application/json" \\\n  -d '{\n    "device_sn": "ZK-LOBBY-01",\n    "punches": [\n      {\n        "raw_user_id": "10042",\n        "punch_time": "2026-09-26 08:30:15",\n        "punch_type": "in"\n      },\n      {\n        "raw_user_id": "10043",\n        "punch_time": "2026-09-26 08:31:02",\n        "punch_type": "auto"\n      }\n    ]\n  }'`
+                                            )
+                                        }
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 font-mono text-[11px]"
+                                    >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedKey === 'curl' ? 'Copied!' : 'Copy cURL'}
+                                    </button>
+                                </div>
+                                <pre className="font-mono text-emerald-300 text-[11px] overflow-x-auto p-4 rounded-xl bg-slate-900/90 border border-slate-800/80 leading-relaxed">
+{`curl -X POST "${typeof window !== 'undefined' ? window.location.origin : ''}/api/biometric/ingest" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json" \\
+  -d '{
+    "device_sn": "ZK-LOBBY-01",
+    "punches": [
+      {
+        "raw_user_id": "10042",
+        "punch_time": "2026-09-26 08:30:15",
+        "punch_type": "in"
+      },
+      {
+        "raw_user_id": "10043",
+        "punch_time": "2026-09-26 08:31:02",
+        "punch_type": "auto"
+      }
+    ]
+  }'`}
+                                </pre>
+                                <p className="text-[11px] text-slate-400">
+                                    Responds with <code className="text-emerald-400 font-mono">{`{"success": true, "inserted_count": 2}`}</code>. Duplicate timestamps for the same user and device are automatically skipped.
+                                </p>
+                            </div>
+                        )}
+
+                        {docTab === 'ping' && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-slate-400">
+                                    <div className="flex items-center gap-2">
+                                        <Cpu className="w-4 h-4 text-purple-400" />
+                                        <span className="font-semibold text-slate-200">Terminal Heartbeat Check</span>
+                                        <span className="text-[10px] text-purple-400 font-mono">GET /api/biometric/ping</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            handleCopy(
+                                                'ping',
+                                                `curl -X GET "${window.location.origin}/api/biometric/ping?device_sn=ZK-LOBBY-01" \\\n  -H "Accept: application/json"`
+                                            )
+                                        }
+                                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 font-mono text-[11px]"
+                                    >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedKey === 'ping' ? 'Copied!' : 'Copy Ping'}
+                                    </button>
+                                </div>
+                                <pre className="font-mono text-purple-300 text-[11px] overflow-x-auto p-4 rounded-xl bg-slate-900/90 border border-slate-800/80 leading-relaxed">
+{`curl -X GET "${typeof window !== 'undefined' ? window.location.origin : ''}/api/biometric/ping?device_sn=ZK-LOBBY-01" \\
+  -H "Accept: application/json"`}
+                                </pre>
+                                <p className="text-[11px] text-slate-400">
+                                    Verifies connectivity and returns server UTC timestamp and tenant matching status.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

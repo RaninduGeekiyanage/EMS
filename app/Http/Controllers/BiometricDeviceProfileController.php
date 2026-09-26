@@ -7,8 +7,10 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Biometric\StoreBiometricDeviceProfileRequest;
 use App\Http\Requests\Biometric\TestBiometricParseRequest;
 use App\Models\BiometricDeviceProfile;
+use App\Models\RawBiometricPunch;
 use App\Models\Tenant;
 use App\Services\Biometric\ConfigurableTextAdapter;
+use App\Services\Biometric\DatabaseStagingAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,7 +44,8 @@ final class BiometricDeviceProfileController extends Controller
     ];
 
     public function __construct(
-        private readonly ConfigurableTextAdapter $adapter
+        private readonly ConfigurableTextAdapter $adapter,
+        private readonly DatabaseStagingAdapter $stagingAdapter
     ) {}
 
     /**
@@ -72,13 +75,17 @@ final class BiometricDeviceProfileController extends Controller
             'profile_id' => $activeProfileId,
         ];
 
+        $pendingStagingCount = RawBiometricPunch::pending()->count();
+
         return Inertia::render('Settings/Biometric', [
             'profiles' => $profiles,
             'adapters' => self::STANDARD_ADAPTERS,
             'activeConfig' => $activeConfig,
+            'pendingStagingCount' => $pendingStagingCount,
             'canManage' => auth()->user()?->can('biometric-device.manage') ?? false,
         ]);
     }
+
 
     /**
      * Set the tenant default/active biometric configuration.
@@ -183,6 +190,7 @@ final class BiometricDeviceProfileController extends Controller
 
         $validated = $request->validated();
         $validated['tenant_id'] = $tenantId;
+        $validated['source_type'] = $validated['source_type'] ?? 'file';
         $validated['created_by'] = auth()->id();
 
         // If this is the very first profile for the tenant, make it default automatically
@@ -342,4 +350,46 @@ final class BiometricDeviceProfileController extends Controller
             }
         }
     }
+
+    /**
+     * Test query biometric punches from database staging table with column mapping before saving profile.
+     */
+    public function testDbQuery(Request $request): JsonResponse
+    {
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+
+        $config = $request->all();
+        if ($tenantId !== null) {
+            $config['tenant_id'] = $tenantId;
+        }
+
+        try {
+            $rawRecords = $this->stagingAdapter->parse('', $config);
+            $validation = $this->stagingAdapter->validate($rawRecords, $config);
+
+            $pendingQuery = RawBiometricPunch::query();
+            if ($tenantId !== null) {
+                $pendingQuery->where('tenant_id', $tenantId);
+            }
+            $totalPending = $pendingQuery->where('status', 'pending')->count();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total_pending' => $totalPending,
+                    'total_parsed' => count($rawRecords),
+                    'valid_count' => $validation['summary']['valid'],
+                    'invalid_count' => $validation['summary']['invalid'],
+                    'valid_samples' => array_slice($validation['valid_records'], 0, 10),
+                    'invalid_samples' => array_slice($validation['invalid_records'], 0, 10),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Staging DB query test failed: '.$e->getMessage(),
+            ], 422);
+        }
+    }
 }
+

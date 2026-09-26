@@ -9,7 +9,9 @@ use App\Models\AttendanceImport;
 use App\Models\AttendanceLog;
 use App\Models\BiometricDeviceProfile;
 use App\Models\Employee;
+use App\Models\RawBiometricPunch;
 use App\Services\Biometric\ConfigurableTextAdapter;
+use App\Services\Biometric\DatabaseStagingAdapter;
 use App\Services\Biometric\ExcelAdapter;
 use App\Services\Biometric\GenericCsvAdapter;
 use App\Services\Biometric\ZKTecoAdapter;
@@ -31,11 +33,23 @@ final class AttendanceImportService
      */
     public function getAdapter(string $type, array $config = []): BiometricImportAdapterInterface
     {
-        if (isset($config['profile']) || isset($config['profile_id']) || in_array(strtolower($type), ['configurable', 'profile'], true)) {
-            return new ConfigurableTextAdapter;
+        if (strtolower($type) === 'database_staging' || ($config['source_type'] ?? null) === 'database_staging') {
+            return new DatabaseStagingAdapter;
         }
 
-        if (strlen($type) === 26 && BiometricDeviceProfile::where('id', $type)->exists()) {
+        $profile = $config['profile'] ?? null;
+        if (! $profile && isset($config['profile_id'])) {
+            $profile = BiometricDeviceProfile::find($config['profile_id']);
+        }
+        if (! $profile && strlen($type) === 26) {
+            $profile = BiometricDeviceProfile::find($type);
+        }
+
+        if ($profile && $profile->source_type === 'database_staging') {
+            return new DatabaseStagingAdapter;
+        }
+
+        if ($profile || isset($config['profile']) || isset($config['profile_id']) || in_array(strtolower($type), ['configurable', 'profile'], true)) {
             return new ConfigurableTextAdapter;
         }
 
@@ -44,9 +58,11 @@ final class AttendanceImportService
             'generic_csv', 'csv' => new GenericCsvAdapter,
             'excel', 'xlsx', 'xls' => new ExcelAdapter,
             'configurable', 'profile' => new ConfigurableTextAdapter,
+            'database_staging', 'staging' => new DatabaseStagingAdapter,
             default => throw new Exception("Unsupported biometric adapter type: '{$type}'"),
         };
     }
+
 
     /**
      * Preview an uploaded attendance file without committing records to the database.
@@ -309,6 +325,283 @@ final class AttendanceImportService
     }
 
     /**
+     * Preview biometric punches from the direct database staging table without committing.
+     *
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    public function previewStaging(array $config = []): array
+    {
+        $profileId = $config['profile_id'] ?? null;
+        $profile = null;
+        if ($profileId) {
+            $profile = BiometricDeviceProfile::find($profileId);
+            if ($profile) {
+                $config['profile'] = $profile;
+                $config['date_format'] = $config['date_format'] ?? $profile->date_format;
+            }
+        }
+
+        $adapter = new DatabaseStagingAdapter;
+        $rawRecords = $adapter->parse('', $config);
+        $validation = $adapter->validate($rawRecords, $config);
+
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $employeesQuery = Employee::query()->with('department:id,name');
+        if ($tenantId !== null) {
+            $employeesQuery->where('tenant_id', $tenantId);
+        }
+        $employees = $employeesQuery->get();
+
+        $employeeByBioId = [];
+        $employeeByEmpNo = [];
+        foreach ($employees as $employee) {
+            if (! empty($employee->biometric_device_id)) {
+                $employeeByBioId[trim((string) $employee->biometric_device_id)] = $employee;
+            }
+            $employeeByEmpNo[trim((string) $employee->emp_no)] = $employee;
+        }
+
+        $mappedCount = 0;
+        $unmappedCount = 0;
+        $unmappedIds = [];
+        $previewRows = [];
+        $seenPunches = [];
+
+        foreach ($validation['valid_records'] as $record) {
+            $bioId = $record['biometric_id'];
+            $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+
+            $punchKey = ($matchedEmployee ? $matchedEmployee->id : $bioId).'_'.$record['punch_datetime'].'_'.$record['punch_type'];
+            $isDuplicateInBatch = isset($seenPunches[$punchKey]);
+            $seenPunches[$punchKey] = true;
+
+            $status = 'ready';
+            if ($isDuplicateInBatch) {
+                $status = 'duplicate';
+            } elseif ($matchedEmployee === null) {
+                $status = 'unmapped';
+                $unmappedCount++;
+                $unmappedIds[$bioId] = ($unmappedIds[$bioId] ?? 0) + 1;
+            } else {
+                $mappedCount++;
+            }
+
+            if (count($previewRows) < 100) {
+                $previewRows[] = [
+                    'line_number' => $record['line_number'],
+                    'staging_id' => $record['staging_id'] ?? null,
+                    'biometric_id' => $bioId,
+                    'matched_employee' => $matchedEmployee ? [
+                        'id' => $matchedEmployee->id,
+                        'full_name' => $matchedEmployee->full_name,
+                        'emp_no' => $matchedEmployee->emp_no,
+                        'department' => $matchedEmployee->department?->name ?? 'N/A',
+                    ] : null,
+                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_type' => $record['punch_type'],
+                    'device_id' => $record['device_id'],
+                    'status' => $status,
+                ];
+            }
+        }
+
+        $uniqueUnmappedList = [];
+        foreach ($unmappedIds as $id => $occurrences) {
+            $uniqueUnmappedList[] = [
+                'biometric_id' => (string) $id,
+                'occurrences' => $occurrences,
+            ];
+        }
+
+        return [
+            'total_rows' => $validation['summary']['total'],
+            'valid_rows' => $validation['summary']['valid'],
+            'invalid_rows' => $validation['summary']['invalid'],
+            'mapped_count' => $mappedCount,
+            'unmapped_count' => $unmappedCount,
+            'unique_unmapped' => $uniqueUnmappedList,
+            'preview_rows' => $previewRows,
+            'invalid_records' => array_slice($validation['invalid_records'], 0, 20),
+        ];
+    }
+
+    /**
+     * Commit biometric punches from the staging table to attendance_logs.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    public function commitStaging(array $config = [], ?int $userId = null): AttendanceImport
+    {
+        $profileId = $config['profile_id'] ?? null;
+        $profile = null;
+        if ($profileId) {
+            $profile = BiometricDeviceProfile::find($profileId);
+            if ($profile) {
+                $config['profile'] = $profile;
+                $config['date_format'] = $config['date_format'] ?? $profile->date_format;
+            }
+        }
+
+        $adapter = new DatabaseStagingAdapter;
+        $rawRecords = $adapter->parse('', $config);
+        $validation = $adapter->validate($rawRecords, $config);
+
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        if (! $tenantId) {
+            $firstEmployee = Employee::first();
+            $tenantId = $firstEmployee?->tenant_id;
+        }
+
+        if (! $tenantId) {
+            throw new Exception('Cannot determine tenant for attendance staging commit.');
+        }
+
+        $employees = Employee::where('tenant_id', $tenantId)
+            ->get(['id', 'tenant_id', 'emp_no', 'biometric_device_id']);
+
+        $employeeByBioId = [];
+        $employeeByEmpNo = [];
+        foreach ($employees as $employee) {
+            if (! empty($employee->biometric_device_id)) {
+                $employeeByBioId[trim((string) $employee->biometric_device_id)] = $employee;
+            }
+            $employeeByEmpNo[trim((string) $employee->emp_no)] = $employee;
+        }
+
+        return DB::transaction(function () use (
+            $tenantId,
+            $profile,
+            $userId,
+            $validation,
+            $employeeByBioId,
+            $employeeByEmpNo
+        ): AttendanceImport {
+            $batchTitle = 'Staging DB Sync: ' . ($profile ? $profile->name : 'Direct Staging') . ' (' . Carbon::now()->format('Y-m-d H:i') . ')';
+
+            $import = AttendanceImport::create([
+                'tenant_id' => $tenantId,
+                'filename' => $batchTitle,
+                'file_path' => null,
+                'adapter_type' => 'database_staging',
+                'profile_id' => $profile?->id,
+                'total_rows' => $validation['summary']['total'],
+                'processed_rows' => 0,
+                'failed_rows' => 0,
+                'status' => 'processing',
+                'imported_by' => $userId,
+                'errors' => [],
+            ]);
+
+            $punchesToInsert = [];
+            $unmappedPunches = [];
+            $importedStagingIds = [];
+            $failedStagingIds = [];
+            $insertedCount = 0;
+            $failedCount = $validation['summary']['invalid'];
+            $now = Carbon::now();
+
+            foreach ($validation['valid_records'] as $record) {
+                $bioId = $record['biometric_id'];
+                $stagingId = $record['staging_id'] ?? null;
+                $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+
+                if ($matchedEmployee === null) {
+                    $unmappedPunches[] = [
+                        'biometric_id' => $bioId,
+                        'punch_datetime' => $record['punch_datetime'],
+                        'reason' => 'Unmapped Biometric ID',
+                    ];
+                    if ($stagingId) {
+                        $failedStagingIds[] = $stagingId;
+                    }
+                    $failedCount++;
+
+                    continue;
+                }
+
+                $logId = (string) Str::ulid();
+                $punchesToInsert[] = [
+                    'id' => $logId,
+                    'tenant_id' => $tenantId,
+                    'employee_id' => $matchedEmployee->id,
+                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_type' => $record['punch_type'],
+                    'device_id' => $record['device_id'] ?? null,
+                    'raw_biometric_id' => $bioId,
+                    'import_id' => $import->id,
+                    'source' => 'staging_database',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                if ($stagingId) {
+                    $importedStagingIds[$stagingId] = $logId;
+                }
+            }
+
+            // Insert punches in chunks with duplicate protection
+            if (! empty($punchesToInsert)) {
+                foreach (array_chunk($punchesToInsert, 500) as $chunk) {
+                    $inserted = DB::table('attendance_logs')->insertOrIgnore($chunk);
+                    $insertedCount += $inserted;
+                }
+            }
+
+            // Update staging table status for imported punches
+            if (! empty($importedStagingIds)) {
+                foreach (array_chunk(array_keys($importedStagingIds), 500) as $chunkIds) {
+                    RawBiometricPunch::whereIn('id', $chunkIds)->update([
+                        'status' => 'imported',
+                        'imported_at' => $now,
+                    ]);
+                }
+                foreach ($importedStagingIds as $stgId => $lgId) {
+                    RawBiometricPunch::where('id', $stgId)->update([
+                        'attendance_log_id' => $lgId,
+                    ]);
+                }
+            }
+
+            // Update staging table status for failed / unmapped punches
+            if (! empty($failedStagingIds)) {
+                foreach (array_chunk($failedStagingIds, 500) as $chunkFailIds) {
+                    RawBiometricPunch::whereIn('id', $chunkFailIds)->update([
+                        'status' => 'failed',
+                        'error_message' => 'Unmapped Biometric ID',
+                    ]);
+                }
+            }
+
+            $errors = [];
+            if (! empty($unmappedPunches)) {
+                $errors['unmapped_punches_count'] = count($unmappedPunches);
+                $errors['unmapped_samples'] = array_slice($unmappedPunches, 0, 50);
+            }
+            if (! empty($validation['invalid_records'])) {
+                $errors['invalid_records_count'] = count($validation['invalid_records']);
+                $errors['invalid_samples'] = array_slice($validation['invalid_records'], 0, 50);
+            }
+
+            $finalStatus = 'completed';
+            if ($insertedCount === 0 && $failedCount > 0) {
+                $finalStatus = 'failed';
+            } elseif ($failedCount > 0) {
+                $finalStatus = 'partial';
+            }
+
+            $import->update([
+                'processed_rows' => $insertedCount,
+                'failed_rows' => $failedCount,
+                'status' => $finalStatus,
+                'errors' => $errors,
+            ]);
+
+            return $import;
+        });
+    }
+
+    /**
      * List past attendance imports with pagination.
      */
     public function listImports(int $perPage = 15): LengthAwarePaginator
@@ -329,6 +622,17 @@ final class AttendanceImportService
     public function deleteImport(AttendanceImport $import): bool
     {
         return DB::transaction(static function () use ($import): bool {
+            // Reset staging records if import was from staging DB
+            $logIds = AttendanceLog::where('import_id', $import->id)->pluck('id');
+            if ($logIds->isNotEmpty()) {
+                RawBiometricPunch::whereIn('attendance_log_id', $logIds)->update([
+                    'status' => 'pending',
+                    'imported_at' => null,
+                    'attendance_log_id' => null,
+                    'error_message' => null,
+                ]);
+            }
+
             // Delete associated logs
             AttendanceLog::where('import_id', $import->id)->delete();
 
@@ -369,6 +673,7 @@ final class AttendanceImportService
         })->count();
 
         $totalEmployees = Employee::count();
+        $pendingStagingPunches = RawBiometricPunch::pending()->count();
 
         return [
             'total_logs' => $totalLogs,
@@ -377,8 +682,10 @@ final class AttendanceImportService
             'last_import_status' => $lastImport?->status ?? 'none',
             'unmapped_employees_count' => $employeesWithoutBioId,
             'total_employees' => $totalEmployees,
+            'pending_staging_punches' => $pendingStagingPunches,
         ];
     }
+
 
     /**
      * Generate sample template content for download.

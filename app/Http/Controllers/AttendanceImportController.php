@@ -161,6 +161,78 @@ final class AttendanceImportController extends Controller
     }
 
     /**
+     * Preview biometric punches from the direct database staging table.
+     */
+    public function previewStaging(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'profile_id' => ['nullable', 'string', 'exists:biometric_device_profiles,id'],
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date'],
+            'device_sn' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', 'in:pending,all,failed,imported'],
+        ]);
+
+        try {
+            $preview = $this->importService->previewStaging($validated);
+
+            return response()->json([
+                'success' => true,
+                'data' => $preview,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Staging preview failed: '.$e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Commit and persist biometric punches from the staging table into attendance_logs.
+     */
+    public function commitStaging(Request $request): JsonResponse|RedirectResponse
+    {
+        $validated = $request->validate([
+            'profile_id' => ['nullable', 'string', 'exists:biometric_device_profiles,id'],
+            'start_date' => ['nullable', 'date'],
+            'end_date' => ['nullable', 'date'],
+            'device_sn' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', 'in:pending,all,failed,imported'],
+        ]);
+
+        $userId = auth()->check() ? (int) auth()->id() : null;
+
+        try {
+            $import = $this->importService->commitStaging($validated, $userId);
+
+            $message = "Staging punches synchronized successfully! Processed {$import->processed_rows} logs.";
+            if ($import->failed_rows > 0) {
+                $message .= " ({$import->failed_rows} unmapped or skipped punches).";
+            }
+
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $message,
+                    'data' => $import,
+                ]);
+            }
+
+            return back()->with('success', $message);
+        } catch (\Throwable $e) {
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Staging sync failed: '.$e->getMessage(),
+                ], 422);
+            }
+
+            return back()->withErrors(['error' => 'Staging sync failed: '.$e->getMessage()]);
+        }
+    }
+
+    /**
      * Roll back and delete an attendance import batch and its logs.
      */
     public function destroy(AttendanceImport $import): RedirectResponse

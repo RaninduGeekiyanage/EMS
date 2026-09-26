@@ -120,6 +120,7 @@ interface Props {
         last_import_status: string;
         unmapped_employees_count: number;
         total_employees: number;
+        pending_staging_punches?: number;
     };
     employees: EmployeeItem[];
     adapters: AdapterOption[];
@@ -140,6 +141,14 @@ export default function Import({
     const defaultAdapter = activeConfig?.adapter_type || (profiles.some((p) => p.is_default) ? 'configurable' : 'zkteco');
     const defaultProfileId = activeConfig?.profile_id || (profiles.find((p) => p.is_default)?.id ?? null);
 
+    const [activeTab, setActiveTab] = useState<'file' | 'staging'>(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('tab') === 'staging') return 'staging';
+        }
+        return 'file';
+    });
+
     const [selectedAdapter, setSelectedAdapter] = useState<string>(defaultAdapter);
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(defaultProfileId);
     const [showAdapterOverride, setShowAdapterOverride] = useState<boolean>(false);
@@ -149,6 +158,18 @@ export default function Import({
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewData, setPreviewData] = useState<PreviewData | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
+
+    // Direct Database Staging configuration state
+    const defaultStagingProfile =
+        profiles.find((p) => p.source_type === 'database_staging' && p.is_default) ||
+        profiles.find((p) => p.source_type === 'database_staging');
+    const [stagingProfileId, setStagingProfileId] = useState<string>(defaultStagingProfile?.id || '');
+    const [stagingStartDate, setStagingStartDate] = useState<string>('');
+    const [stagingEndDate, setStagingEndDate] = useState<string>('');
+    const [stagingDeviceSn, setStagingDeviceSn] = useState<string>('');
+    const [stagingStatus, setStagingStatus] = useState<string>('pending');
+    const [isCommittingStaging, setIsCommittingStaging] = useState<boolean>(false);
+    const [stagingSuccessMessage, setStagingSuccessMessage] = useState<string | null>(null);
 
     // Quick employee mapping modal
     const [isMapModalOpen, setIsMapModalOpen] = useState(false);
@@ -173,6 +194,7 @@ export default function Import({
         setSelectedFile(file);
         setPreviewData(null);
         setPreviewError(null);
+        setStagingSuccessMessage(null);
         uploadForm.setData('file', file);
     };
 
@@ -257,6 +279,84 @@ export default function Import({
         });
     };
 
+    const runStagingPreview = async () => {
+        setPreviewLoading(true);
+        setPreviewError(null);
+        setStagingSuccessMessage(null);
+
+        try {
+            const csrfToken = getCsrfToken();
+            const response = await fetch('/attendance/import/staging-preview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-XSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    profile_id: stagingProfileId || null,
+                    start_date: stagingStartDate || null,
+                    end_date: stagingEndDate || null,
+                    device_sn: stagingDeviceSn || null,
+                    status: stagingStatus,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                setPreviewData(result.data);
+            } else {
+                setPreviewError(result.message || 'Failed to fetch staging preview.');
+            }
+        } catch (err: any) {
+            setPreviewError(err.message || 'Network error fetching staging preview.');
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
+
+    const handleCommitStaging = async () => {
+        setIsCommittingStaging(true);
+        setPreviewError(null);
+        setStagingSuccessMessage(null);
+
+        try {
+            const csrfToken = getCsrfToken();
+            const response = await fetch('/attendance/import/staging-commit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-XSRF-TOKEN': csrfToken,
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    profile_id: stagingProfileId || null,
+                    start_date: stagingStartDate || null,
+                    end_date: stagingEndDate || null,
+                    device_sn: stagingDeviceSn || null,
+                    status: stagingStatus,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                setStagingSuccessMessage(result.message || 'Staging punches committed successfully.');
+                setPreviewData(null);
+                router.reload();
+            } else {
+                setPreviewError(result.message || 'Failed to commit staging punches.');
+            }
+        } catch (err: any) {
+            setPreviewError(err.message || 'Error committing staging punches.');
+        } finally {
+            setIsCommittingStaging(false);
+        }
+    };
+
     const currentActiveProfile = selectedProfileId
         ? profiles.find((p) => p.id === selectedProfileId) ?? activeConfig?.profile
         : null;
@@ -303,9 +403,11 @@ export default function Import({
             const json = await res.json();
             if (res.ok && json.success) {
                 setIsMapModalOpen(false);
-                // Re-run preview if file is loaded to update the grid
+                // Re-run preview if file or staging is loaded to update the grid
                 if (selectedFile) {
                     runPreview();
+                } else if (activeTab === 'staging') {
+                    runStagingPreview();
                 } else {
                     router.reload();
                 }
@@ -459,7 +561,7 @@ export default function Import({
                 </div>
 
                 {/* Metric Summary Cards - Compact Single Line */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
                     <div className="px-3.5 py-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm flex items-center justify-between gap-2 hover:border-slate-700 transition">
                         <div className="flex items-center gap-2 min-w-0">
                             <Database className="w-4 h-4 text-indigo-400 shrink-0" />
@@ -478,6 +580,31 @@ export default function Import({
                             {stats.last_import_status && stats.last_import_status !== 'none' && (
                                 <span className="text-[10px] text-slate-500">({stats.last_import_status})</span>
                             )}
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => {
+                            setActiveTab('staging');
+                            setPreviewData(null);
+                            setPreviewError(null);
+                        }}
+                        className={`px-3.5 py-2.5 rounded-xl border backdrop-blur-sm flex items-center justify-between gap-2 cursor-pointer transition ${
+                            activeTab === 'staging'
+                                ? 'bg-amber-500/10 border-amber-500/50 shadow-md shadow-amber-500/10'
+                                : 'bg-slate-900/60 border-slate-800/80 hover:border-amber-500/40'
+                        }`}
+                        title="Click to view & sync database staging punches"
+                    >
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Database className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="text-xs text-amber-300 truncate">Staging Buffer</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-sm font-bold text-amber-400">
+                                {stats.pending_staging_punches ?? 0}
+                            </span>
+                            <span className="text-[10px] text-slate-500">pending</span>
                         </div>
                     </div>
 
@@ -503,237 +630,416 @@ export default function Import({
 
                 {/* Import Workflow Container */}
                 <div className="p-4 md:p-5 rounded-2xl bg-slate-900/50 border border-slate-800/80 backdrop-blur-md shadow-2xl relative">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-                        <div>
-                            <h2 className="text-base font-bold text-white flex items-center gap-2">
-                                <UploadCloud className="w-5 h-5 text-cyan-400" />
-                                Ingest Biometric Attendance Punch Log
-                            </h2>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                Upload raw machine dumps, preview employee matching, and commit deduplicated logs into your attendance ledger.
-                            </p>
-                        </div>
-
-                        {/* Format template download shortcut & format switcher */}
-                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                            <span className="text-[11px] text-slate-400">Templates:</span>
-                            <a
-                                href="/attendance/import/template/zkteco"
-                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
-                            >
-                                <Download className="w-3 h-3 text-cyan-400" /> ZKTeco
-                            </a>
-                            <a
-                                href="/attendance/import/template/hikvision"
-                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
-                            >
-                                <Download className="w-3 h-3 text-blue-400" /> Hikvision
-                            </a>
-                            <a
-                                href="/attendance/import/template/realand"
-                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
-                            >
-                                <Download className="w-3 h-3 text-indigo-400" /> Realand
-                            </a>
-                            <a
-                                href="/attendance/import/template/csv"
-                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
-                            >
-                                <Download className="w-3 h-3 text-emerald-400" /> CSV
-                            </a>
+                    {/* Workflow Source Mode Selector Tabs */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80 mb-4">
+                        <div className="flex items-center gap-2">
                             <button
                                 type="button"
-                                onClick={() => setShowAdapterOverride(!showAdapterOverride)}
-                                className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700 ml-1"
+                                onClick={() => {
+                                    setActiveTab('file');
+                                    setPreviewData(null);
+                                    setPreviewError(null);
+                                    setStagingSuccessMessage(null);
+                                }}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                                    activeTab === 'file'
+                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                                        : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                                }`}
                             >
-                                <Cpu className="w-3 h-3 text-indigo-400" />
-                                {showAdapterOverride ? 'Hide Formats' : 'Change Format'}
+                                <UploadCloud className="w-4 h-4" />
+                                Upload Punch Log File
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveTab('staging');
+                                    setPreviewData(null);
+                                    setPreviewError(null);
+                                    setStagingSuccessMessage(null);
+                                }}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 relative ${
+                                    activeTab === 'staging'
+                                        ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
+                                        : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                                }`}
+                            >
+                                <Database className="w-4 h-4" />
+                                Sync from Staging DB
+                                {stats.pending_staging_punches !== undefined && stats.pending_staging_punches > 0 && (
+                                    <span
+                                        className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                                            activeTab === 'staging'
+                                                ? 'bg-slate-950 text-amber-400'
+                                                : 'bg-amber-500 text-slate-950'
+                                        }`}
+                                    >
+                                        {stats.pending_staging_punches}
+                                    </span>
+                                )}
                             </button>
                         </div>
+
+                        {/* Format template download shortcut & format switcher (File tab only) */}
+                        {activeTab === 'file' && (
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <span className="text-[11px] text-slate-400">Templates:</span>
+                                <a
+                                    href="/attendance/import/template/zkteco"
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                >
+                                    <Download className="w-3 h-3 text-cyan-400" /> ZKTeco
+                                </a>
+                                <a
+                                    href="/attendance/import/template/hikvision"
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                >
+                                    <Download className="w-3 h-3 text-blue-400" /> Hikvision
+                                </a>
+                                <a
+                                    href="/attendance/import/template/realand"
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                >
+                                    <Download className="w-3 h-3 text-indigo-400" /> Realand
+                                </a>
+                                <a
+                                    href="/attendance/import/template/csv"
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700/50"
+                                >
+                                    <Download className="w-3 h-3 text-emerald-400" /> CSV
+                                </a>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdapterOverride(!showAdapterOverride)}
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1 border border-slate-700 ml-1"
+                                >
+                                    <Cpu className="w-3 h-3 text-indigo-400" />
+                                    {showAdapterOverride ? 'Hide Formats' : 'Change Format'}
+                                </button>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Optional Ad-hoc Adapter Override */}
-                    {showAdapterOverride && (
-                        <div className="mt-3 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
-                            <div className="flex items-center justify-between text-xs text-slate-400">
-                                <span className="font-semibold text-slate-300">Override Ingestion Format (Ad-hoc)</span>
-                                <span>Overrides default format for this upload only</span>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                                {profiles.map((prof) => {
-                                    const isSelected = selectedProfileId === prof.id;
-                                    return (
-                                        <div
-                                            key={prof.id}
-                                            onClick={() => {
-                                                setSelectedAdapter('configurable');
-                                                setSelectedProfileId(prof.id);
-                                                setPreviewData(null);
-                                            }}
-                                            className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
-                                                isSelected
-                                                    ? 'bg-blue-950/60 border-blue-500 text-white font-semibold'
-                                                    : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
-                                            }`}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <span className="uppercase text-[10px] font-bold text-blue-400">{prof.device_brand}</span>
-                                                {isSelected && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                                            </div>
-                                            <div className="font-medium text-white truncate mt-1">{prof.name}</div>
-                                        </div>
-                                    );
-                                })}
-                                {adapters.map((adap) => {
-                                    const isSelected = selectedProfileId === null && selectedAdapter === adap.key;
-                                    return (
-                                        <div
-                                            key={adap.key}
-                                            onClick={() => {
-                                                setSelectedAdapter(adap.key);
-                                                setSelectedProfileId(null);
-                                                setPreviewData(null);
-                                            }}
-                                            className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
-                                                isSelected
-                                                    ? 'bg-indigo-950/60 border-indigo-500 text-white font-semibold'
-                                                    : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
-                                            }`}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <span className="uppercase text-[10px] font-bold text-indigo-400">{adap.badge}</span>
-                                                {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                                            </div>
-                                            <div className="font-medium text-white truncate mt-1">{adap.name}</div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                    {/* Staging Success Flash Message */}
+                    {stagingSuccessMessage && (
+                        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2 mb-4">
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            <span>{stagingSuccessMessage}</span>
                         </div>
                     )}
 
-                    {/* Upload File & Ingestion Settings */}
-                    <div className="mt-4 space-y-2.5">
-                        <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                            Upload File & Ingestion Settings
-                        </label>
+                    {/* TAB 1: FILE LOG UPLOAD WORKFLOW */}
+                    {activeTab === 'file' && (
+                        <>
+                            {/* Optional Ad-hoc Adapter Override */}
+                            {showAdapterOverride && (
+                                <div className="mb-4 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+                                    <div className="flex items-center justify-between text-xs text-slate-400">
+                                        <span className="font-semibold text-slate-300">Override Ingestion Format (Ad-hoc)</span>
+                                        <span>Overrides default format for this upload only</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                        {profiles.map((prof) => {
+                                            const isSelected = selectedProfileId === prof.id;
+                                            return (
+                                                <div
+                                                    key={prof.id}
+                                                    onClick={() => {
+                                                        setSelectedAdapter('configurable');
+                                                        setSelectedProfileId(prof.id);
+                                                        setPreviewData(null);
+                                                    }}
+                                                    className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
+                                                        isSelected
+                                                            ? 'bg-blue-950/60 border-blue-500 text-white font-semibold'
+                                                            : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="uppercase text-[10px] font-bold text-blue-400">{prof.device_brand}</span>
+                                                        {isSelected && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                                                    </div>
+                                                    <div className="font-medium text-white truncate mt-1">{prof.name}</div>
+                                                </div>
+                                            );
+                                        })}
+                                        {adapters.map((adap) => {
+                                            const isSelected = selectedProfileId === null && selectedAdapter === adap.key;
+                                            return (
+                                                <div
+                                                    key={adap.key}
+                                                    onClick={() => {
+                                                        setSelectedAdapter(adap.key);
+                                                        setSelectedProfileId(null);
+                                                        setPreviewData(null);
+                                                    }}
+                                                    className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
+                                                        isSelected
+                                                            ? 'bg-indigo-950/60 border-indigo-500 text-white font-semibold'
+                                                            : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="uppercase text-[10px] font-bold text-indigo-400">{adap.badge}</span>
+                                                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                                                    </div>
+                                                    <div className="font-medium text-white truncate mt-1">{adap.name}</div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                            {/* Drag and drop dropzone */}
-                            <div
-                                onDragOver={(e) => {
-                                    e.preventDefault();
-                                    setIsDragging(true);
-                                }}
-                                onDragLeave={() => setIsDragging(false)}
-                                onDrop={handleDrop}
-                                onClick={() => fileInputRef.current?.click()}
-                                className={`md:col-span-2 p-5 md:p-6 rounded-2xl border-2 border-dashed transition flex flex-col items-center justify-center cursor-pointer text-center relative overflow-hidden ${
-                                    isDragging
-                                        ? 'border-indigo-500 bg-indigo-500/10'
-                                        : selectedFile
-                                        ? 'border-emerald-500/60 bg-emerald-500/5'
-                                        : 'border-slate-700 hover:border-slate-600 bg-slate-950/40'
-                                }`}
-                            >
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    className="hidden"
-                                    accept=".dat,.txt,.csv,.xlsx,.xls"
-                                    onChange={(e) => {
-                                        if (e.target.files && e.target.files[0]) {
-                                            handleFileSelect(e.target.files[0]);
-                                        }
-                                    }}
-                                />
+                            {/* Upload File & Ingestion Settings */}
+                            <div className="space-y-2.5">
+                                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                                    Upload File & Ingestion Settings
+                                </label>
 
-                                {selectedFile ? (
-                                    <div className="flex flex-col items-center gap-2">
-                                        <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                                            <FileText className="w-6 h-6" />
-                                        </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                                    {/* Drag and drop dropzone */}
+                                    <div
+                                        onDragOver={(e) => {
+                                            e.preventDefault();
+                                            setIsDragging(true);
+                                        }}
+                                        onDragLeave={() => setIsDragging(false)}
+                                        onDrop={handleDrop}
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className={`md:col-span-2 p-5 md:p-6 rounded-2xl border-2 border-dashed transition flex flex-col items-center justify-center cursor-pointer text-center relative overflow-hidden ${
+                                            isDragging
+                                                ? 'border-indigo-500 bg-indigo-500/10'
+                                                : selectedFile
+                                                ? 'border-emerald-500/60 bg-emerald-500/5'
+                                                : 'border-slate-700 hover:border-slate-600 bg-slate-950/40'
+                                        }`}
+                                    >
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            className="hidden"
+                                            accept=".dat,.txt,.csv,.xlsx,.xls"
+                                            onChange={(e) => {
+                                                if (e.target.files && e.target.files[0]) {
+                                                    handleFileSelect(e.target.files[0]);
+                                                }
+                                            }}
+                                        />
+
+                                        {selectedFile ? (
+                                            <div className="flex flex-col items-center gap-2">
+                                                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                                                    <FileText className="w-6 h-6" />
+                                                </div>
+                                                <div>
+                                                    <span className="text-sm font-bold text-white">
+                                                        {selectedFile.name}
+                                                    </span>
+                                                    <span className="text-xs text-slate-400 ml-2">
+                                                        ({(selectedFile.size / 1024).toFixed(1)} KB)
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-emerald-400 font-medium">
+                                                    File ready. Click "Preview & Validate Punches" below.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center gap-2">
+                                                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 shadow-inner">
+                                                    <UploadCloud className="w-6 h-6 text-indigo-400" />
+                                                </div>
+                                                <div>
+                                                    <span className="text-sm font-semibold text-slate-200">
+                                                        Drag & drop your biometric punch file here
+                                                    </span>
+                                                    <p className="text-xs text-slate-500 mt-0.5">
+                                                        or browse files (.dat, .txt, .csv, .xlsx up to 10MB)
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Optional terminal settings */}
+                                    <div className="p-5 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-4 flex flex-col justify-between">
                                         <div>
-                                            <span className="text-sm font-bold text-white">
-                                                {selectedFile.name}
-                                            </span>
-                                            <span className="text-xs text-slate-400 ml-2">
-                                                ({(selectedFile.size / 1024).toFixed(1)} KB)
-                                            </span>
+                                            <h4 className="text-xs font-semibold text-slate-300">
+                                                Terminal / Device Details
+                                            </h4>
+                                            <p className="text-[11px] text-slate-500 mt-0.5">
+                                                Assign an optional terminal serial or branch location identifier.
+                                            </p>
+
+                                            <div className="mt-3">
+                                                <label className="text-[11px] font-medium text-slate-400">
+                                                    Device Identifier (Optional)
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={deviceIdInput}
+                                                    onChange={(e) => setDeviceIdInput(e.target.value)}
+                                                    placeholder="e.g. ZK-LOBBY-01"
+                                                    className="mt-1 w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-indigo-500 focus:outline-none text-slate-200 placeholder:text-slate-600 font-mono"
+                                                />
+                                            </div>
                                         </div>
-                                        <p className="text-xs text-emerald-400 font-medium">
-                                            File ready. Click "Preview & Validate Punches" below.
+
+                                        <button
+                                            type="button"
+                                            disabled={!selectedFile || previewLoading}
+                                            onClick={runPreview}
+                                            className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+                                        >
+                                            {previewLoading ? (
+                                                <>
+                                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                                    Analyzing Punch File...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Sparkles className="w-3.5 h-3.5" />
+                                                    Preview & Validate Punches
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
+
+                    {/* TAB 2: DIRECT DATABASE STAGING WORKFLOW */}
+                    {activeTab === 'staging' && (
+                        <div className="space-y-4">
+                            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                            <Database className="w-4 h-4 text-amber-400" />
+                                            Direct Database Staging Punch Buffer
+                                        </h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">
+                                            Synchronize records pushed into <code className="text-amber-400 font-mono">raw_biometric_punches</code> by background daemons or direct database jobs.
                                         </p>
                                     </div>
-                                ) : (
-                                    <div className="flex flex-col items-center gap-2">
-                                        <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 shadow-inner">
-                                            <UploadCloud className="w-6 h-6 text-indigo-400" />
-                                        </div>
-                                        <div>
-                                            <span className="text-sm font-semibold text-slate-200">
-                                                Drag & drop your biometric punch file here
-                                            </span>
-                                            <p className="text-xs text-slate-500 mt-0.5">
-                                                or browse files (.dat, .txt, .csv, .xlsx up to 10MB)
-                                            </p>
-                                        </div>
+
+                                    {canManageProfiles && (
+                                        <Link
+                                            href="/settings/biometric"
+                                            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1"
+                                        >
+                                            <Settings className="w-3.5 h-3.5" /> Configure Staging Mappings
+                                        </Link>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                                    {/* Profile Selector */}
+                                    <div>
+                                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                                            Biometric Profile Mapping
+                                        </label>
+                                        <select
+                                            value={stagingProfileId}
+                                            onChange={(e) => setStagingProfileId(e.target.value)}
+                                            className="w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-amber-500 focus:outline-none text-slate-200"
+                                        >
+                                            <option value="">Default Column Config</option>
+                                            {profiles.map((p) => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name} {p.source_type === 'database_staging' ? '[Staging DB]' : `(${p.device_brand})`}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
-                                )}
-                            </div>
 
-                            {/* Optional terminal settings */}
-                            <div className="p-5 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-4 flex flex-col justify-between">
-                                <div>
-                                    <h4 className="text-xs font-semibold text-slate-300">
-                                        Terminal / Device Details
-                                    </h4>
-                                    <p className="text-[11px] text-slate-500 mt-0.5">
-                                        Assign an optional terminal serial or branch location identifier.
-                                    </p>
+                                    {/* Date From */}
+                                    <div>
+                                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                                            Start Date (Optional)
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={stagingStartDate}
+                                            onChange={(e) => setStagingStartDate(e.target.value)}
+                                            className="w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-amber-500 focus:outline-none text-slate-200"
+                                        />
+                                    </div>
 
-                                    <div className="mt-3">
-                                        <label className="text-[11px] font-medium text-slate-400">
-                                            Device Identifier (Optional)
+                                    {/* Date To */}
+                                    <div>
+                                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                                            End Date (Optional)
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={stagingEndDate}
+                                            onChange={(e) => setStagingEndDate(e.target.value)}
+                                            className="w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-amber-500 focus:outline-none text-slate-200"
+                                        />
+                                    </div>
+
+                                    {/* Device SN filter */}
+                                    <div>
+                                        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                                            Terminal / Device SN
                                         </label>
                                         <input
                                             type="text"
-                                            value={deviceIdInput}
-                                            onChange={(e) => setDeviceIdInput(e.target.value)}
-                                            placeholder="e.g. ZK-LOBBY-01"
-                                            className="mt-1 w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-indigo-500 focus:outline-none text-slate-200 placeholder:text-slate-600 font-mono"
+                                            value={stagingDeviceSn}
+                                            onChange={(e) => setStagingDeviceSn(e.target.value)}
+                                            placeholder="e.g. ZK-LOBBY-01 (All)"
+                                            className="w-full text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-amber-500 focus:outline-none text-slate-200 font-mono placeholder:text-slate-600"
                                         />
                                     </div>
                                 </div>
 
-                                <button
-                                    type="button"
-                                    disabled={!selectedFile || previewLoading}
-                                    onClick={runPreview}
-                                    className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
-                                >
-                                    {previewLoading ? (
-                                        <>
-                                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                            Analyzing Punch File...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Sparkles className="w-3.5 h-3.5" />
-                                            Preview & Validate Punches
-                                        </>
-                                    )}
-                                </button>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                                    <div className="flex items-center gap-3">
+                                        <label className="text-xs text-slate-400 flex items-center gap-1.5">
+                                            <span>Buffer Status:</span>
+                                            <select
+                                                value={stagingStatus}
+                                                onChange={(e) => setStagingStatus(e.target.value)}
+                                                className="text-xs px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 focus:border-amber-500 focus:outline-none font-medium"
+                                            >
+                                                <option value="pending">Pending Only (Unsynced)</option>
+                                                <option value="all">All Records</option>
+                                                <option value="failed">Failed / Skipped</option>
+                                            </select>
+                                        </label>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        disabled={previewLoading}
+                                        onClick={runStagingPreview}
+                                        className="py-2.5 px-6 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+                                    >
+                                        {previewLoading ? (
+                                            <>
+                                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                                Loading Staging Punches...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="w-3.5 h-3.5" />
+                                                Preview Staging Punches
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                         </div>
+                    )}
 
-                        {previewError && (
-                            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
-                                <AlertTriangle className="w-4 h-4 shrink-0" />
-                                <span>{previewError}</span>
-                            </div>
-                        )}
-                    </div>
+                    {previewError && (
+                        <div className="mt-4 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>{previewError}</span>
+                        </div>
+                    )}
 
                     {/* Step 3: Live Preview & Validation Grid */}
                     {previewData && (
@@ -766,11 +1072,11 @@ export default function Import({
 
                                     <button
                                         type="button"
-                                        onClick={handleCommitImport}
-                                        disabled={uploadForm.processing}
+                                        onClick={activeTab === 'staging' ? handleCommitStaging : handleCommitImport}
+                                        disabled={activeTab === 'staging' ? isCommittingStaging : uploadForm.processing}
                                         className="py-2 px-5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
                                     >
-                                        {uploadForm.processing ? (
+                                        {(activeTab === 'staging' ? isCommittingStaging : uploadForm.processing) ? (
                                             <>
                                                 <RefreshCw className="w-4 h-4 animate-spin" />
                                                 Committing Punches...
@@ -778,7 +1084,7 @@ export default function Import({
                                         ) : (
                                             <>
                                                 <Check className="w-4 h-4" />
-                                                Commit {previewData.mapped_count} Punches
+                                                Commit {previewData.mapped_count} Punches {activeTab === 'staging' ? 'from Staging' : ''}
                                             </>
                                         )}
                                     </button>

@@ -10,6 +10,7 @@ import {
     Trash2,
     Plus,
     FileText,
+    Database,
     HelpCircle,
     Layers,
     ArrowRight,
@@ -20,6 +21,7 @@ export interface BiometricDeviceProfile {
     id: string;
     tenant_id?: string;
     name: string;
+    source_type?: 'file' | 'database_staging';
     device_brand: string;
     model_name: string | null;
     file_extension: string;
@@ -30,13 +32,16 @@ export interface BiometricDeviceProfile {
     date_format: string;
     time_format: string | null;
     columns_config: {
-        biometric_id_col: number;
+        biometric_id_col?: number | null;
         datetime_col?: number | null;
         date_col?: number | null;
         time_col?: number | null;
         am_pm_col?: number | null;
-        punch_type_col?: number | null;
+        punch_type_col?: number | string | null;
         device_id_col?: number | null;
+        raw_user_id_col?: string;
+        punch_time_col?: string;
+        device_sn_col?: string;
     };
     status_code_mapping: Record<string, string> | null;
     default_device_id: string | null;
@@ -53,11 +58,49 @@ interface Props {
 
 const PRESETS = [
     {
+        key: 'db_staging_standard',
+        label: 'Direct Database Staging Table (raw_biometric_punches)',
+        brand: 'other',
+        name: 'Database Staging Auto-Sync',
+        source_type: 'database_staging',
+        file_extension: 'none',
+        delimiter_type: 'staging_db',
+        skip_header_lines: 0,
+        date_mode: 'combined',
+        date_format: 'Y-m-d H:i:s',
+        sample: '',
+        staging_cols: {
+            raw_user_id_col: 'raw_user_id',
+            punch_time_col: 'punch_time',
+            punch_type_col: 'punch_type',
+            device_sn_col: 'device_sn',
+        },
+        columns_config: {
+            biometric_id_col: 0,
+            datetime_col: 1,
+            punch_type_col: 'punch_type',
+            device_id_col: null,
+            raw_user_id_col: 'raw_user_id',
+            punch_time_col: 'punch_time',
+            device_sn_col: 'device_sn',
+        },
+        status_code_mapping: {
+            '0': 'in',
+            '1': 'out',
+            'in': 'in',
+            'out': 'out',
+            'C/In': 'in',
+            'C/Out': 'out',
+        },
+    },
+    {
         key: 'space_ampm_txt',
         label: 'Space-Delimited 12-Hour AM/PM (C/In, C/Out)',
         brand: 'other',
         name: 'Space-Delimited AM/PM Terminal Log',
+        source_type: 'file',
         file_extension: 'txt',
+
         delimiter_type: 'space',
         skip_header_lines: 0,
         date_mode: 'separate',
@@ -186,6 +229,9 @@ export default function BiometricProfileModal({
     if (!isOpen) return null;
 
     const [name, setName] = useState(editingProfile?.name || '');
+    const [sourceType, setSourceType] = useState<'file' | 'database_staging'>(
+        editingProfile?.source_type || 'file'
+    );
     const [deviceBrand, setDeviceBrand] = useState(editingProfile?.device_brand || 'hikvision');
     const [modelName, setModelName] = useState(editingProfile?.model_name || '');
     const [fileExtension, setFileExtension] = useState(editingProfile?.file_extension || 'txt');
@@ -196,7 +242,23 @@ export default function BiometricProfileModal({
     const [dateFormat, setDateFormat] = useState(editingProfile?.date_format || 'Y-m-d H:i:s');
     const [defaultDeviceId, setDefaultDeviceId] = useState(editingProfile?.default_device_id || '');
 
-    // Column mapping indices
+    // Database staging table column names
+    const [stagingUserIdCol, setStagingUserIdCol] = useState<string>(
+        editingProfile?.columns_config?.raw_user_id_col || 'raw_user_id'
+    );
+    const [stagingPunchTimeCol, setStagingPunchTimeCol] = useState<string>(
+        editingProfile?.columns_config?.punch_time_col || 'punch_time'
+    );
+    const [stagingPunchTypeCol, setStagingPunchTypeCol] = useState<string>(
+        typeof editingProfile?.columns_config?.punch_type_col === 'string'
+            ? editingProfile.columns_config.punch_type_col
+            : 'punch_type'
+    );
+    const [stagingDeviceSnCol, setStagingDeviceSnCol] = useState<string>(
+        editingProfile?.columns_config?.device_sn_col || 'device_sn'
+    );
+
+    // Column mapping indices for file parsing
     const [bioIdCol, setBioIdCol] = useState<number>(editingProfile?.columns_config?.biometric_id_col ?? 0);
     const [datetimeCol, setDatetimeCol] = useState<number>(editingProfile?.columns_config?.datetime_col ?? 1);
     const [dateCol, setDateCol] = useState<number>(editingProfile?.columns_config?.date_col ?? 1);
@@ -253,7 +315,7 @@ export default function BiometricProfileModal({
 
     // Client-side quick tokenizer for live visual grid
     useEffect(() => {
-        if (!sampleText.trim()) {
+        if (!sampleText.trim() || sourceType === 'database_staging') {
             setTokenizedRows([]);
             setMaxTokens(0);
             return;
@@ -293,19 +355,36 @@ export default function BiometricProfileModal({
 
         setTokenizedRows(rows);
         setMaxTokens(maxCols);
-    }, [sampleText, delimiterType, customDelimiter, skipHeaderLines]);
+    }, [sampleText, delimiterType, customDelimiter, skipHeaderLines, sourceType]);
 
-    const handleApplyPreset = (preset: typeof PRESETS[0]) => {
+    const handleApplyPreset = (preset: typeof PRESETS[0] | any) => {
         setName(preset.name);
         setDeviceBrand(preset.brand);
+        if (preset.source_type) {
+            setSourceType(preset.source_type);
+        } else {
+            setSourceType('file');
+        }
+
+        if (preset.source_type === 'database_staging' && preset.staging_cols) {
+            setStagingUserIdCol(preset.staging_cols.raw_user_id_col || 'raw_user_id');
+            setStagingPunchTimeCol(preset.staging_cols.punch_time_col || 'punch_time');
+            setStagingPunchTypeCol(preset.staging_cols.punch_type_col || 'punch_type');
+            setStagingDeviceSnCol(preset.staging_cols.device_sn_col || 'device_sn');
+        }
+
         setFileExtension(preset.file_extension);
         setDelimiterType(preset.delimiter_type);
         setSkipHeaderLines(preset.skip_header_lines);
         setDateMode(preset.date_mode as any);
         setDateFormat(preset.date_format);
-        setSampleText(preset.sample);
+        if (preset.sample) {
+            setSampleText(preset.sample);
+        }
 
-        setBioIdCol(preset.columns_config.biometric_id_col);
+        if (preset.columns_config.biometric_id_col !== undefined) {
+            setBioIdCol(preset.columns_config.biometric_id_col);
+        }
         if (preset.date_mode === 'separate') {
             setDateCol(preset.columns_config.date_col ?? 1);
             setTimeCol(preset.columns_config.time_col ?? 2);
@@ -314,10 +393,10 @@ export default function BiometricProfileModal({
             setDatetimeCol(preset.columns_config.datetime_col ?? 1);
             setAmPmCol('none');
         }
-        setPunchTypeCol(preset.columns_config.punch_type_col !== null ? String(preset.columns_config.punch_type_col) : 'none');
-        setDeviceIdCol(preset.columns_config.device_id_col !== null ? String(preset.columns_config.device_id_col) : 'none');
+        setPunchTypeCol(preset.columns_config.punch_type_col !== null && preset.columns_config.punch_type_col !== undefined ? String(preset.columns_config.punch_type_col) : 'none');
+        setDeviceIdCol(preset.columns_config.device_id_col !== null && preset.columns_config.device_id_col !== undefined ? String(preset.columns_config.device_id_col) : 'none');
 
-        const mapArr = Object.entries(preset.status_code_mapping).map(([k, v]) => ({ key: k, val: v }));
+        const mapArr = Object.entries(preset.status_code_mapping).map(([k, v]) => ({ key: k, val: v as string }));
         setStatusMappings(mapArr);
         setTestResult(null);
         setTestError(null);
@@ -334,6 +413,48 @@ export default function BiometricProfileModal({
                 statusMapObj[m.key.trim()] = m.val;
             }
         });
+
+        const csrfToken = getCsrfToken();
+
+        if (sourceType === 'database_staging') {
+            const payload = {
+                source_type: 'database_staging',
+                date_format: dateFormat,
+                columns_config: {
+                    raw_user_id_col: stagingUserIdCol.trim() || 'raw_user_id',
+                    punch_time_col: stagingPunchTimeCol.trim() || 'punch_time',
+                    punch_type_col: stagingPunchTypeCol.trim() || 'punch_type',
+                    device_sn_col: stagingDeviceSnCol.trim() || 'device_sn',
+                },
+                status_code_mapping: statusMapObj,
+                default_device_id: defaultDeviceId.trim() || null,
+            };
+
+            try {
+                const res = await fetch('/biometric-devices/test-db-query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-XSRF-TOKEN': csrfToken,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    setTestResult(json.data);
+                } else {
+                    setTestError(json.message || 'Staging query test failed.');
+                }
+            } catch (e: any) {
+                setTestError(e.message || 'Network error while testing staging query.');
+            } finally {
+                setIsTesting(false);
+            }
+            return;
+        }
 
         const columnsConfig: any = {
             biometric_id_col: bioIdCol,
@@ -369,7 +490,6 @@ export default function BiometricProfileModal({
         };
 
         try {
-            const csrfToken = getCsrfToken();
             const res = await fetch('/biometric-devices/test-parse', {
                 method: 'POST',
                 headers: {
@@ -411,44 +531,56 @@ export default function BiometricProfileModal({
             }
         });
 
-        const columnsConfig: any = {
-            biometric_id_col: bioIdCol,
-        };
-
-        if (dateMode === 'separate') {
-            columnsConfig.date_col = dateCol;
-            columnsConfig.time_col = timeCol;
-            if (amPmCol !== 'none') {
-                columnsConfig.am_pm_col = parseInt(amPmCol, 10);
-            }
+        let columnsConfigPayload: any = {};
+        if (sourceType === 'database_staging') {
+            columnsConfigPayload = {
+                raw_user_id_col: stagingUserIdCol.trim() || 'raw_user_id',
+                punch_time_col: stagingPunchTimeCol.trim() || 'punch_time',
+                punch_type_col: stagingPunchTypeCol.trim() || 'punch_type',
+                device_sn_col: stagingDeviceSnCol.trim() || 'device_sn',
+            };
         } else {
-            columnsConfig.datetime_col = datetimeCol;
-        }
+            columnsConfigPayload = {
+                biometric_id_col: bioIdCol,
+            };
 
-        if (punchTypeCol !== 'none') {
-            columnsConfig.punch_type_col = parseInt(punchTypeCol, 10);
-        }
-        if (deviceIdCol !== 'none') {
-            columnsConfig.device_id_col = parseInt(deviceIdCol, 10);
+            if (dateMode === 'separate') {
+                columnsConfigPayload.date_col = dateCol;
+                columnsConfigPayload.time_col = timeCol;
+                if (amPmCol !== 'none') {
+                    columnsConfigPayload.am_pm_col = parseInt(amPmCol, 10);
+                }
+            } else {
+                columnsConfigPayload.datetime_col = datetimeCol;
+            }
+
+            if (punchTypeCol !== 'none') {
+                columnsConfigPayload.punch_type_col = parseInt(punchTypeCol, 10);
+            }
+            if (deviceIdCol !== 'none') {
+                columnsConfigPayload.device_id_col = parseInt(deviceIdCol, 10);
+            }
         }
 
         const payload = {
             name: name.trim(),
+            source_type: sourceType,
             device_brand: deviceBrand,
             model_name: modelName.trim() || null,
-            file_extension: fileExtension,
-            delimiter_type: delimiterType,
-            custom_delimiter: customDelimiter || null,
-            skip_header_lines: skipHeaderLines,
+            file_extension: sourceType === 'database_staging' ? 'none' : fileExtension,
+            delimiter_type: sourceType === 'database_staging' ? 'staging_db' : delimiterType,
+            custom_delimiter: sourceType === 'database_staging' ? null : (customDelimiter || null),
+            skip_header_lines: sourceType === 'database_staging' ? 0 : skipHeaderLines,
             date_mode: dateMode,
             date_format: dateFormat,
-            columns_config: columnsConfig,
+            columns_config: columnsConfigPayload,
             status_code_mapping: statusMapObj,
             default_device_id: defaultDeviceId.trim() || null,
             is_active: true,
         };
 
         const csrfToken = getCsrfToken();
+
         const url = editingProfile ? `/biometric-devices/${editingProfile.id}` : '/biometric-devices';
         const method = editingProfile ? 'PUT' : 'POST';
 
@@ -550,6 +682,34 @@ export default function BiometricProfileModal({
                         </div>
                     </div>
 
+                    {/* Ingestion Source Switcher */}
+                    <div className="p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => setSourceType('file')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                                sourceType === 'file'
+                                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                            }`}
+                        >
+                            <FileText className="w-4 h-4" />
+                            <span>File Log Export (.txt, .dat, .csv)</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setSourceType('database_staging')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                                sourceType === 'database_staging'
+                                    ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                            }`}
+                        >
+                            <Database className="w-4 h-4" />
+                            <span>Direct Database Staging Table (raw_biometric_punches)</span>
+                        </button>
+                    </div>
+
                     {/* Step 1: Device Brand & Name */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
                         <div>
@@ -595,321 +755,427 @@ export default function BiometricProfileModal({
                         </div>
                     </div>
 
-                    {/* Step 2: Delimiter & Raw Sample */}
-                    <div className="space-y-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <Layers className="w-3.5 h-3.5 text-blue-500" />
-                                File Delimiter & Sample Preview
-                            </label>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-slate-600 dark:text-slate-400">Skip Header Rows:</span>
-                                <input
-                                    type="number"
-                                    min={0}
-                                    max={20}
-                                    value={skipHeaderLines}
-                                    onChange={(e) => setSkipHeaderLines(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                                    className="w-16 px-2 py-1 text-xs text-center rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
-                                />
+                    {sourceType === 'database_staging' ? (
+                        /* Database Staging Field Mapping */
+                        <div className="p-4 md:p-5 rounded-2xl border border-purple-200 dark:border-purple-800/60 bg-purple-50/40 dark:bg-purple-950/20 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-semibold text-purple-800 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Database className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                                    Database Staging Table Field Mapping
+                                </h3>
+                                <span className="text-[11px] text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/50 px-2 py-0.5 rounded-full font-medium">
+                                    Table: raw_biometric_punches
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                                This profile automatically extracts pending biometric punch logs from the high-throughput <code className="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded text-purple-700 dark:text-purple-300">raw_biometric_punches</code> staging table. Hardware devices and push daemons can insert records directly or post to <code className="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded text-purple-700 dark:text-purple-300">/api/biometric/ingest</code>.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-1">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Raw User ID Field *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={stagingUserIdCol}
+                                        onChange={(e) => setStagingUserIdCol(e.target.value)}
+                                        placeholder="raw_user_id"
+                                        className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                                    />
+                                    <span className="text-[10px] text-slate-500 mt-1 block">Column or JSON key</span>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Punch Time Field *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={stagingPunchTimeCol}
+                                        onChange={(e) => setStagingPunchTimeCol(e.target.value)}
+                                        placeholder="punch_time"
+                                        className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                                    />
+                                    <span className="text-[10px] text-slate-500 mt-1 block">Column or JSON key</span>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Punch Type / Direction
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={stagingPunchTypeCol}
+                                        onChange={(e) => setStagingPunchTypeCol(e.target.value)}
+                                        placeholder="punch_type"
+                                        className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                                    />
+                                    <span className="text-[10px] text-slate-500 mt-1 block">Column or JSON key</span>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Device SN Field
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={stagingDeviceSnCol}
+                                        onChange={(e) => setStagingDeviceSnCol(e.target.value)}
+                                        placeholder="device_sn"
+                                        className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                                    />
+                                    <span className="text-[10px] text-slate-500 mt-1 block">Optional filter field</span>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2 border-t border-purple-200/60 dark:border-purple-800/40">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Timestamp Datetime Format
+                                    </label>
+                                    <select
+                                        value={dateFormat}
+                                        onChange={(e) => setDateFormat(e.target.value)}
+                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-purple-500 outline-none"
+                                    >
+                                        <option value="auto">Auto-detect timestamp format</option>
+                                        <option value="Y-m-d H:i:s">YYYY-MM-DD HH:mm:ss (Standard ISO/SQL)</option>
+                                        <option value="d/m/Y H:i:s">DD/MM/YYYY HH:mm:ss (UK/SL 24h)</option>
+                                        <option value="d/m/Y g:i A">DD/MM/YYYY hh:mm AM/PM (12h)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Default Device / Terminal Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={defaultDeviceId}
+                                        onChange={(e) => setDefaultDeviceId(e.target.value)}
+                                        placeholder="e.g. STAGING-DAEMON-01"
+                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                                    />
+                                </div>
                             </div>
                         </div>
+                    ) : (
+                        <>
+                            {/* Step 2: Delimiter & Raw Sample */}
+                            <div className="space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Layers className="w-3.5 h-3.5 text-blue-500" />
+                                        File Delimiter & Sample Preview
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-slate-600 dark:text-slate-400">Skip Header Rows:</span>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            max={20}
+                                            value={skipHeaderLines}
+                                            onChange={(e) => setSkipHeaderLines(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                                            className="w-16 px-2 py-1 text-xs text-center rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
+                                        />
+                                    </div>
+                                </div>
 
-                        {/* Delimiter Buttons */}
-                        <div className="flex flex-wrap items-center gap-2">
-                            {[
-                                { key: 'tab', label: 'Tab (\\t)' },
-                                { key: 'space', label: 'Space / Whitespace (\\s+)' },
-                                { key: 'comma', label: 'Comma (,)' },
-                                { key: 'semicolon', label: 'Semicolon (;)' },
-                                { key: 'pipe', label: 'Pipe (|)' },
-                                { key: 'custom', label: 'Custom' },
-                            ].map((d) => (
-                                <button
-                                    key={d.key}
-                                    type="button"
-                                    onClick={() => setDelimiterType(d.key)}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
-                                        delimiterType === d.key
-                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm font-semibold'
-                                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600'
-                                    }`}
-                                >
-                                    {d.label}
-                                </button>
-                            ))}
-                            {delimiterType === 'custom' && (
-                                <input
-                                    type="text"
-                                    maxLength={5}
-                                    value={customDelimiter}
-                                    onChange={(e) => setCustomDelimiter(e.target.value)}
-                                    placeholder="char"
-                                    className="w-16 px-2 py-1 text-xs text-center rounded-lg border border-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono"
-                                />
-                            )}
-                        </div>
+                                {/* Delimiter Buttons */}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {[
+                                        { key: 'tab', label: 'Tab (\\t)' },
+                                        { key: 'space', label: 'Space / Whitespace (\\s+)' },
+                                        { key: 'comma', label: 'Comma (,)' },
+                                        { key: 'semicolon', label: 'Semicolon (;)' },
+                                        { key: 'pipe', label: 'Pipe (|)' },
+                                        { key: 'custom', label: 'Custom' },
+                                    ].map((d) => (
+                                        <button
+                                            key={d.key}
+                                            type="button"
+                                            onClick={() => setDelimiterType(d.key)}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${
+                                                delimiterType === d.key
+                                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm font-semibold'
+                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-slate-600'
+                                            }`}
+                                        >
+                                            {d.label}
+                                        </button>
+                                    ))}
+                                    {delimiterType === 'custom' && (
+                                        <input
+                                            type="text"
+                                            maxLength={5}
+                                            value={customDelimiter}
+                                            onChange={(e) => setCustomDelimiter(e.target.value)}
+                                            placeholder="char"
+                                            className="w-16 px-2 py-1 text-xs text-center rounded-lg border border-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono"
+                                        />
+                                    )}
+                                </div>
 
-                        {/* Raw sample textarea */}
-                        <div>
-                            <textarea
-                                rows={3}
-                                value={sampleText}
-                                onChange={(e) => setSampleText(e.target.value)}
-                                placeholder="Paste 3 to 5 lines of raw punch log file here..."
-                                className="w-full px-3 py-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-900 text-emerald-400 dark:bg-slate-950 focus:ring-2 focus:ring-blue-500 outline-none resize-y shadow-inner"
-                            />
-                        </div>
+                                {/* Raw sample textarea */}
+                                <div>
+                                    <textarea
+                                        rows={3}
+                                        value={sampleText}
+                                        onChange={(e) => setSampleText(e.target.value)}
+                                        placeholder="Paste 3 to 5 lines of raw punch log file here..."
+                                        className="w-full px-3 py-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-900 text-emerald-400 dark:bg-slate-950 focus:ring-2 focus:ring-blue-500 outline-none resize-y shadow-inner"
+                                    />
+                                </div>
 
-                        {/* Visual Token Table */}
-                        {tokenizedRows.length > 0 && (
-                            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 max-h-48 overflow-y-auto bg-white dark:bg-slate-900">
-                                <table className="w-full text-left text-xs font-mono">
-                                    <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 sticky top-0 border-b border-slate-200 dark:border-slate-700">
-                                        <tr>
-                                            <th className="px-3 py-2 w-16 text-center text-slate-500 dark:text-slate-400">Row</th>
-                                            {Array.from({ length: maxTokens }, (_, i) => (
-                                                <th key={i} className="px-3 py-2 font-semibold">
-                                                    <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 text-[11px]">
-                                                        Col {i}
-                                                    </span>
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                                        {tokenizedRows.map((r) => (
-                                            <tr
-                                                key={r.line}
-                                                className={
-                                                    r.is_header
-                                                        ? 'bg-amber-500/10 text-amber-900 dark:text-amber-300 font-medium'
-                                                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-800 dark:text-slate-200'
-                                                }
-                                            >
-                                                <td className="px-3 py-1.5 text-center text-[11px] text-slate-400">
-                                                    {r.is_header ? (
-                                                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-sans font-semibold">
-                                                            Hdr #{r.line}
-                                                        </span>
-                                                    ) : (
-                                                        `#${r.line}`
-                                                    )}
-                                                </td>
-                                                {Array.from({ length: maxTokens }, (_, i) => (
-                                                    <td key={i} className="px-3 py-1.5 whitespace-nowrap">
-                                                        {r.tokens[i] !== undefined ? (
-                                                            <span className="font-semibold text-slate-900 dark:text-slate-100">
-                                                                {r.tokens[i]}
+                                {/* Visual Token Table */}
+                                {tokenizedRows.length > 0 && (
+                                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 max-h-48 overflow-y-auto bg-white dark:bg-slate-900">
+                                        <table className="w-full text-left text-xs font-mono">
+                                            <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 sticky top-0 border-b border-slate-200 dark:border-slate-700">
+                                                <tr>
+                                                    <th className="px-3 py-2 w-16 text-center text-slate-500 dark:text-slate-400">Row</th>
+                                                    {Array.from({ length: maxTokens }, (_, i) => (
+                                                        <th key={i} className="px-3 py-2 font-semibold">
+                                                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 text-[11px]">
+                                                                Col {i}
                                                             </span>
-                                                        ) : (
-                                                            <span className="text-slate-400 dark:text-slate-600 text-[10px]">
-                                                                -
-                                                            </span>
-                                                        )}
-                                                    </td>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                                                {tokenizedRows.map((r) => (
+                                                    <tr
+                                                        key={r.line}
+                                                        className={
+                                                            r.is_header
+                                                                ? 'bg-amber-500/10 text-amber-900 dark:text-amber-300 font-medium'
+                                                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-800 dark:text-slate-200'
+                                                        }
+                                                    >
+                                                        <td className="px-3 py-1.5 text-center text-[11px] text-slate-400">
+                                                            {r.is_header ? (
+                                                                <span className="text-[10px] text-amber-700 dark:text-amber-400 font-sans font-semibold">
+                                                                    Hdr #{r.line}
+                                                                </span>
+                                                            ) : (
+                                                                `#${r.line}`
+                                                            )}
+                                                        </td>
+                                                        {Array.from({ length: maxTokens }, (_, i) => (
+                                                            <td key={i} className="px-3 py-1.5 whitespace-nowrap">
+                                                                {r.tokens[i] !== undefined ? (
+                                                                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                                                        {r.tokens[i]}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-slate-400 dark:text-slate-600 text-[10px]">
+                                                                        -
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
                                                 ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Step 3: Column Mapping & Datetime Format */}
-                    <div className="p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                                Column Mapping & Datetime Interpretation
-                            </h3>
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Unmapped columns (e.g. Col 6, 8) are ignored automatically
-                            </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                            {/* Biometric ID */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Biometric / Employee ID *
-                                </label>
-                                <select
-                                    value={bioIdCol}
-                                    onChange={(e) => setBioIdCol(parseInt(e.target.value, 10))}
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                    {columnOptions.map((opt) => (
-                                        <option key={opt.index} value={opt.index}>
-                                            {opt.label}
-                                        </option>
-                                    ))}
-                                </select>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Date Mode */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Date & Time Layout
-                                </label>
-                                <select
-                                    value={dateMode}
-                                    onChange={(e) => setDateMode(e.target.value as any)}
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                    <option value="combined">Combined in 1 Column</option>
-                                    <option value="separate">Separate Date & Time Columns</option>
-                                </select>
-                            </div>
+                            {/* Step 3: Column Mapping & Datetime Format */}
+                            <div className="p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                                    <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                        Column Mapping & Datetime Interpretation
+                                    </h3>
+                                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        Unmapped columns (e.g. Col 6, 8) are ignored automatically
+                                    </span>
+                                </div>
 
-                            {/* Date Format */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Date Format
-                                </label>
-                                <select
-                                    value={dateFormat}
-                                    onChange={(e) => setDateFormat(e.target.value)}
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                    <option value="auto">Auto-detect (Recommended)</option>
-                                    <option value="d/m/Y g:i A">DD/MM/YYYY hh:mm AM/PM (12-Hour SL)</option>
-                                    <option value="d/m/Y H:i:s">DD/MM/YYYY HH:mm:ss (24-Hour SL/UK)</option>
-                                    <option value="Y-m-d H:i:s">YYYY-MM-DD HH:mm:ss (24-Hour)</option>
-                                    <option value="d-m-Y H:i:s">DD-MM-YYYY HH:mm:ss (24-Hour)</option>
-                                    <option value="m/d/Y H:i:s">MM/DD/YYYY HH:mm:ss (US)</option>
-                                </select>
-                            </div>
-                        </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                                    {/* Biometric ID */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Biometric / Employee ID *
+                                        </label>
+                                        <select
+                                            value={bioIdCol}
+                                            onChange={(e) => setBioIdCol(parseInt(e.target.value, 10))}
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            {columnOptions.map((opt) => (
+                                                <option key={opt.index} value={opt.index}>
+                                                    {opt.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                        {/* Date & Time Column pickers */}
-                        {dateMode === 'combined' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                        Date & Time Column *
-                                    </label>
-                                    <select
-                                        value={datetimeCol}
-                                        onChange={(e) => setDatetimeCol(parseInt(e.target.value, 10))}
-                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        {columnOptions.map((opt) => (
-                                            <option key={opt.index} value={opt.index}>
-                                                {opt.label}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    {/* Date Mode */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Date & Time Layout
+                                        </label>
+                                        <select
+                                            value={dateMode}
+                                            onChange={(e) => setDateMode(e.target.value as any)}
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            <option value="combined">Combined in 1 Column</option>
+                                            <option value="separate">Separate Date & Time Columns</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Date Format */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Date Format
+                                        </label>
+                                        <select
+                                            value={dateFormat}
+                                            onChange={(e) => setDateFormat(e.target.value)}
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            <option value="auto">Auto-detect (Recommended)</option>
+                                            <option value="d/m/Y g:i A">DD/MM/YYYY hh:mm AM/PM (12-Hour SL)</option>
+                                            <option value="d/m/Y H:i:s">DD/MM/YYYY HH:mm:ss (24-Hour SL/UK)</option>
+                                            <option value="Y-m-d H:i:s">YYYY-MM-DD HH:mm:ss (24-Hour)</option>
+                                            <option value="d-m-Y H:i:s">DD-MM-YYYY HH:mm:ss (24-Hour)</option>
+                                            <option value="m/d/Y H:i:s">MM/DD/YYYY HH:mm:ss (US)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Date & Time Column pickers */}
+                                {dateMode === 'combined' ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                                Date & Time Column *
+                                            </label>
+                                            <select
+                                                value={datetimeCol}
+                                                onChange={(e) => setDatetimeCol(parseInt(e.target.value, 10))}
+                                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                            >
+                                                {columnOptions.map((opt) => (
+                                                    <option key={opt.index} value={opt.index}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                                Date Column *
+                                            </label>
+                                            <select
+                                                value={dateCol}
+                                                onChange={(e) => setDateCol(parseInt(e.target.value, 10))}
+                                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                            >
+                                                {columnOptions.map((opt) => (
+                                                    <option key={opt.index} value={opt.index}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                                Time Column *
+                                            </label>
+                                            <select
+                                                value={timeCol}
+                                                onChange={(e) => setTimeCol(parseInt(e.target.value, 10))}
+                                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                            >
+                                                {columnOptions.map((opt) => (
+                                                    <option key={opt.index} value={opt.index}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                                AM / PM Column (Optional)
+                                            </label>
+                                            <select
+                                                value={amPmCol}
+                                                onChange={(e) => setAmPmCol(e.target.value)}
+                                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                            >
+                                                <option value="none">None / 24-Hour Time</option>
+                                                {columnOptions.map((opt) => (
+                                                    <option key={opt.index} value={String(opt.index)}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-2">
+                                    {/* Punch Direction Column */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Punch Direction / Status Col
+                                        </label>
+                                        <select
+                                            value={punchTypeCol}
+                                            onChange={(e) => setPunchTypeCol(e.target.value)}
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            <option value="none">None (Auto First-in / Last-out)</option>
+                                            {columnOptions.map((opt) => (
+                                                <option key={opt.index} value={String(opt.index)}>
+                                                    {opt.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* Device ID Column */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Device ID Column (Optional)
+                                        </label>
+                                        <select
+                                            value={deviceIdCol}
+                                            onChange={(e) => setDeviceIdCol(e.target.value)}
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            <option value="none">None</option>
+                                            {columnOptions.map((opt) => (
+                                                <option key={opt.index} value={String(opt.index)}>
+                                                    {opt.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* Default Device ID */}
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                            Default Device / Terminal Name
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={defaultDeviceId}
+                                            onChange={(e) => setDefaultDeviceId(e.target.value)}
+                                            placeholder="e.g. MAIN-GATE-01"
+                                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                                        />
+                                    </div>
                                 </div>
                             </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                        Date Column *
-                                    </label>
-                                    <select
-                                        value={dateCol}
-                                        onChange={(e) => setDateCol(parseInt(e.target.value, 10))}
-                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        {columnOptions.map((opt) => (
-                                            <option key={opt.index} value={opt.index}>
-                                                {opt.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                        Time Column *
-                                    </label>
-                                    <select
-                                        value={timeCol}
-                                        onChange={(e) => setTimeCol(parseInt(e.target.value, 10))}
-                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        {columnOptions.map((opt) => (
-                                            <option key={opt.index} value={opt.index}>
-                                                {opt.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                        AM / PM Column (Optional)
-                                    </label>
-                                    <select
-                                        value={amPmCol}
-                                        onChange={(e) => setAmPmCol(e.target.value)}
-                                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value="none">None / 24-Hour Time</option>
-                                        {columnOptions.map((opt) => (
-                                            <option key={opt.index} value={String(opt.index)}>
-                                                {opt.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-                        )}
+                        </>
+                    )}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-2">
-                            {/* Punch Direction Column */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Punch Direction / Status Col
-                                </label>
-                                <select
-                                    value={punchTypeCol}
-                                    onChange={(e) => setPunchTypeCol(e.target.value)}
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                    <option value="none">None (Auto First-in / Last-out)</option>
-                                    {columnOptions.map((opt) => (
-                                        <option key={opt.index} value={String(opt.index)}>
-                                            {opt.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Device ID Column */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Device ID Column (Optional)
-                                </label>
-                                <select
-                                    value={deviceIdCol}
-                                    onChange={(e) => setDeviceIdCol(e.target.value)}
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                                >
-                                    <option value="none">None</option>
-                                    {columnOptions.map((opt) => (
-                                        <option key={opt.index} value={String(opt.index)}>
-                                            {opt.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Default Device ID */}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Default Device / Terminal Name
-                                </label>
-                                <input
-                                    type="text"
-                                    value={defaultDeviceId}
-                                    onChange={(e) => setDefaultDeviceId(e.target.value)}
-                                    placeholder="e.g. MAIN-GATE-01"
-                                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                                />
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Step 4: Status Code Mapping */}
                     {punchTypeCol !== 'none' && (
@@ -977,12 +1243,14 @@ export default function BiometricProfileModal({
                             <div className="flex items-center justify-between text-xs font-bold text-emerald-800 dark:text-emerald-300">
                                 <span className="flex items-center gap-1.5">
                                     <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                                    Test Parse Succeeded: {testResult.valid_count} valid records parsed!
+                                    {sourceType === 'database_staging' ? 'Staging Query Succeeded' : 'Test Parse Succeeded'}: {testResult.valid_count} valid records parsed!
                                 </span>
                                 <span className="text-[11px] font-normal text-emerald-700 dark:text-emerald-400">
                                     {testResult.total_parsed} total rows evaluated
+                                    {testResult.total_pending !== undefined && ` • ${testResult.total_pending} pending in staging DB`}
                                 </span>
                             </div>
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
                                 {testResult.valid_samples.slice(0, 6).map((rec: any, idx: number) => (
                                     <div

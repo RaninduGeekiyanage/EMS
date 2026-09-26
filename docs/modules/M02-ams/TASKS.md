@@ -61,3 +61,24 @@
   - [x] Global Processing Overlays: Added blurred loading backdrop overlays across `Daily.tsx`, `Import.tsx`, `Index.tsx` (Payroll), and `Requests.tsx` (Leave)
   - [x] Test Coverage: `tests/Unit/RosterServiceTest.php`, `tests/Feature/M02/RosterManagementTest.php`, `tests/Feature/M02/AttendanceRosterIntegrationTest.php`, `tests/Feature/M02/RosterEnterpriseHardeningTest.php` (161 tests passing across app)
 
+## Phase 6: Direct Database Staging & Column Mapping for Biometric Ingestion
+- [x] Database Schema & Storage
+  - [x] Migration: `database/migrations/2026_09_26_030000_create_raw_biometric_punches_table.php` (Staging table with tenant_id, device_sn, raw_user_id, punch_time, punch_type, status, imported_at, attendance_log_id, raw_payload)
+  - [x] Migration: `database/migrations/2026_09_26_031000_add_source_type_to_biometric_device_profiles_table.php` (`source_type` enum/string: `file` vs `database_staging`)
+  - [x] Model: `app/Models/RawBiometricPunch.php` (Eloquent relationships, status scopes: pending/imported/failed, fillables)
+  - [x] Model Update: `app/Models/BiometricDeviceProfile.php` (Support `source_type`, cast `columns_config` for DB staging column mappings)
+- [x] Ingestion Adapter & Processing Engine
+  - [x] Adapter: `app/Services/Biometric/DatabaseStagingAdapter.php` (Implements `BiometricImportAdapterInterface`, maps dynamic staging table columns to normalized punch records)
+  - [x] Service Extension: `app/Services/AttendanceImportService.php` (Support staging table fetch, validation against active employees, commit to `attendance_logs`, status update in staging table)
+  - [x] Staging API / Direct Ingestion Controller: `app/Http/Controllers/RawBiometricIngestController.php` (Direct push webhook endpoint for network daemons/webhooks with tenant & duplicate guard)
+- [x] Biometric Settings & Profile UI
+  - [x] Settings Controller: `app/Http/Controllers/BiometricDeviceProfileController.php` (Add `testDbQuery` endpoint, handle `source_type` and staging column config validation)
+  - [x] Modal: `resources/js/Components/BiometricProfileModal.tsx` (Source selector toggle `File Log` vs `Database Staging`, field mapping inputs for raw user ID, punch time, punch type, device ID, test query preview table)
+  - [x] Settings Page: `resources/js/Pages/Settings/Biometric.tsx` (Display `[Staging DB]` vs `[File]` badges, default profile selection, copyable SQL snippet & webhook cURL guide)
+- [x] Attendance Ingestion Screen Integration
+  - [x] Frontend: `resources/js/Pages/Attendance/Import.tsx` (Add "Sync from Staging DB" tab alongside "Upload File", date range picker, preview table, commit action)
+  - [x] Controller: `app/Http/Controllers/AttendanceImportController.php` (Add `previewStaging` and `commitStaging` endpoints)
+- [x] Verification & Automated Tests
+  - [x] Unit & Feature Tests: `tests/Feature/M02/BiometricDatabaseStagingTest.php` (Test raw insertion, profile mapping, duplicate skipping, employee ID resolution, commit to attendance_logs, status transition, rollback)
+
+

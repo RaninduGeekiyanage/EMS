@@ -31,6 +31,7 @@ final class BiometricDeviceProfile extends Model
     protected $fillable = [
         'tenant_id',
         'name',
+        'source_type',
         'device_brand',
         'model_name',
         'file_extension',
@@ -101,4 +102,27 @@ final class BiometricDeviceProfile extends Model
     {
         return $query->where('is_default', true);
     }
+
+    /**
+     * Scope a query to file log profiles.
+     *
+     * @param  Builder<BiometricDeviceProfile>  $query
+     * @return Builder<BiometricDeviceProfile>
+     */
+    public function scopeFile(Builder $query): Builder
+    {
+        return $query->where('source_type', 'file');
+    }
+
+    /**
+     * Scope a query to direct database staging profiles.
+     *
+     * @param  Builder<BiometricDeviceProfile>  $query
+     * @return Builder<BiometricDeviceProfile>
+     */
+    public function scopeDatabaseStaging(Builder $query): Builder
+    {
+        return $query->where('source_type', 'database_staging');
+    }
 }
+
