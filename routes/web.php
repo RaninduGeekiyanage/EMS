@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
+use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\BiometricDeviceProfileController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\NewPasswordController;
@@ -187,10 +188,15 @@ Route::middleware(['tenant'])->group(function (): void {
             Route::delete('/biometric-devices/{profile}', [BiometricDeviceProfileController::class, 'destroy'])->name('biometric-devices.destroy');
         });
 
+        // Attendance Calculation Policy & Telemetry Settings
+        Route::get('/settings/attendance', [AttendanceSettingsController::class, 'index'])->middleware('can:attendance.settings.view')->name('settings.attendance.index');
+        Route::post('/settings/attendance', [AttendanceSettingsController::class, 'update'])->middleware('can:attendance.settings.manage')->name('settings.attendance.update');
+
 
         // Attendance Daily Ledger & Overtime Engine
         Route::get('/attendance/daily', [AttendanceDailyController::class, 'index'])->name('attendance.daily.index');
         Route::post('/attendance/daily/process', [AttendanceDailyController::class, 'process'])->name('attendance.daily.process');
+        Route::post('/attendance/daily/process-backlog', [AttendanceDailyController::class, 'processBacklog'])->name('attendance.daily.process-backlog');
         Route::put('/attendance/daily/{attendanceDaily}', [AttendanceDailyController::class, 'update'])->name('attendance.daily.update');
         Route::post('/attendance/rules', [AttendanceDailyController::class, 'saveRule'])->name('attendance.rules.store');
 

@@ -1,6 +1,6 @@
-﻿# M02 Permissions
+# M02 Permissions
 
 - `shift.view`, `shift.create`, `shift.update`, `shift.delete`
-- `attendance.import`, `attendance.view`, `attendance.correct`
+- `attendance.import`, `attendance.view`, `attendance.correct`, `attendance.settings.view`, `attendance.settings.manage`
 - `leave.apply`, `leave.approve`, `leave.manage-types`
 - `reports.attendance.view`

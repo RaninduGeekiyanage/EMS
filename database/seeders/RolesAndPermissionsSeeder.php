@@ -68,6 +68,8 @@ final class RolesAndPermissionsSeeder extends Seeder
         'attendance.import',
         'attendance.view',
         'attendance.correct',
+        'attendance.settings.view',
+        'attendance.settings.manage',
         'biometric-device.view',
         'biometric-device.manage',
 

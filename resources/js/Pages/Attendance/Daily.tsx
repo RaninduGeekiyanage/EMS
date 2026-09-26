@@ -30,6 +30,7 @@ import {
     Sun,
     HeartHandshake,
     Loader2,
+    Lock,
 } from 'lucide-react';
 
 interface Employee {
@@ -76,7 +77,7 @@ interface AttendanceDailyRecord {
     early_departure_minutes: number;
     ot_hours: number;
     double_ot_hours: number;
-    status: 'present' | 'absent' | 'half_day' | 'leave' | 'holiday' | 'rest_day' | 'missing_punch';
+    status: 'present' | 'absent' | 'half_day' | 'leave' | 'holiday' | 'rest_day' | 'missing_punch' | 'in_progress' | 'scheduled';
     is_manual: boolean;
     manual_reason?: string | null;
     manual_edited_by?: number | null;
@@ -129,12 +130,22 @@ interface Props {
         half_day: number;
         holiday: number;
         rest_day: number;
+        in_progress?: number;
+        scheduled?: number;
         manual_adjusted: number;
         total_worked_hours: number;
         total_regular_hours: number;
         total_ot_hours: number;
         total_double_ot_hours: number;
     };
+    unprocessedStats?: {
+        unprocessed_count: number;
+        unprocessed_dates_count: number;
+        dates: Array<{ date: string; count: number }>;
+        oldest_date?: string | null;
+        newest_date?: string | null;
+    } | null;
+    isPayrollLocked?: boolean;
     selectedDate: string;
     departments: Department[];
     shifts: Shift[];
@@ -150,6 +161,8 @@ interface Props {
 export default function Daily({
     records,
     stats,
+    unprocessedStats,
+    isPayrollLocked = false,
     selectedDate,
     departments,
     shifts,
@@ -161,6 +174,7 @@ export default function Daily({
     const [selectedDept, setSelectedDept] = useState(filters.department_id || '');
     const [selectedStatus, setSelectedStatus] = useState(filters.status || 'all');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isProcessingBacklog, setIsProcessingBacklog] = useState(false);
 
     // Modals
     const [adjustModalRecord, setAdjustModalRecord] = useState<AttendanceDailyRecord | null>(null);
@@ -236,7 +250,7 @@ export default function Daily({
         );
     };
 
-    // Trigger Attendance Calculation Engine
+    // Trigger Attendance Calculation Engine (Single Date)
     const handleRunEngine = () => {
         setIsProcessing(true);
         router.post(
@@ -245,6 +259,19 @@ export default function Daily({
             {
                 preserveScroll: true,
                 onFinish: () => setIsProcessing(false),
+            }
+        );
+    };
+
+    // Trigger Backlog Processing Engine (All Unprocessed Biometric Logs)
+    const handleProcessBacklog = () => {
+        setIsProcessingBacklog(true);
+        router.post(
+            '/attendance/daily/process-backlog',
+            {},
+            {
+                preserveScroll: true,
+                onFinish: () => setIsProcessingBacklog(false),
             }
         );
     };
@@ -328,6 +355,18 @@ export default function Daily({
                 return (
                     <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" /> Present
+                    </span>
+                );
+            case 'in_progress':
+                return (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center gap-1 animate-pulse">
+                        <Loader2 className="w-3 h-3 animate-spin text-blue-400" /> On Duty (In Progress)
+                    </span>
+                );
+            case 'scheduled':
+                return (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-500/15 text-slate-300 border border-slate-500/30 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-400" /> Scheduled
                     </span>
                 );
             case 'absent':
@@ -489,7 +528,7 @@ export default function Daily({
                                 setIsReprocessModalOpen(true);
                             }}
                             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-2 transition"
-                            title="Retroactively reprocess attendance from immutable biometric punch logs"
+                            title="Retroactively reprocess attendance from immutable biometric punch logs across date ranges"
                         >
                             <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
                             Reprocess Raw Logs
@@ -497,14 +536,79 @@ export default function Daily({
                         <button
                             type="button"
                             onClick={handleRunEngine}
-                            disabled={isProcessing}
-                            className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                            disabled={isProcessing || isPayrollLocked}
+                            className={`w-full md:w-auto px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 ${
+                                isPayrollLocked
+                                    ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
+                                    : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-indigo-500/20'
+                            }`}
+                            title={
+                                isPayrollLocked
+                                    ? 'Payroll for this month is approved/locked. Ledger cannot be altered.'
+                                    : `Calculates attendance for ${selectedDate}. Manual adjustments are strictly preserved.`
+                            }
                         >
-                            <Play className={`w-4 h-4 fill-current ${isProcessing ? 'animate-spin' : ''}`} />
-                            {isProcessing ? 'Calculating Ledger...' : 'Run Attendance Calculation'}
+                            {isPayrollLocked ? (
+                                <>
+                                    <Lock className="w-4 h-4 text-amber-400" />
+                                    Period Locked
+                                </>
+                            ) : (
+                                <>
+                                    <Play className={`w-4 h-4 fill-current ${isProcessing ? 'animate-spin' : ''}`} />
+                                    {isProcessing ? 'Calculating...' : `Calculate Daily (${selectedDate})`}
+                                </>
+                            )}
                         </button>
                     </div>
                 </div>
+
+                {/* Payroll Locked Security Alert */}
+                {isPayrollLocked && (
+                    <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3 text-xs text-amber-300">
+                        <div className="flex items-center gap-2.5">
+                            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>
+                                <strong>Payroll Period Finalized:</strong> Attendance records for this month are locked under an approved payroll run. Recalculation and modifications are locked to preserve salary compliance.
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Pending Unprocessed Biometric Punches Notification Banner */}
+                {unprocessedStats && unprocessedStats.unprocessed_count > 0 && (
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-indigo-500/15 border border-amber-500/30 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400">
+                                <Fingerprint className="w-5 h-5 animate-pulse" />
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-amber-300 flex items-center gap-2">
+                                    <span>Pending Biometric Punches Detected</span>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono">
+                                        {unprocessedStats.unprocessed_count} logs
+                                    </span>
+                                </div>
+                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                    There are {unprocessedStats.unprocessed_count} raw punches awaiting ledger calculation across {unprocessedStats.unprocessed_dates_count} historical date(s)
+                                    {unprocessedStats.oldest_date && (
+                                        <span className="text-slate-300 font-mono ml-1">({unprocessedStats.oldest_date} to {unprocessedStats.newest_date})</span>
+                                    )}.
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleProcessBacklog}
+                            disabled={isProcessingBacklog}
+                            className="w-full md:w-auto px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                        >
+                            <Zap className={`w-3.5 h-3.5 fill-current ${isProcessingBacklog ? 'animate-spin' : ''}`} />
+                            {isProcessingBacklog ? 'Processing Backlog...' : 'Process All Backlog Logs'}
+                        </button>
+                    </div>
+                )}
 
                 {/* KPI Metrics Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
@@ -522,13 +626,23 @@ export default function Daily({
                         <div className="text-[10px] text-slate-500 mt-0.5">Full day presence</div>
                     </div>
 
-                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
-                        <div className="text-[11px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1">
-                            <UserX className="w-3 h-3" /> Absent
+                    {stats.in_progress !== undefined && stats.in_progress > 0 ? (
+                        <div className="p-4 rounded-2xl bg-blue-950/40 border border-blue-800/80 animate-pulse">
+                            <div className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                                <Loader2 className="w-3 h-3 animate-spin text-blue-400" /> On Duty
+                            </div>
+                            <div className="mt-1 text-2xl font-bold text-blue-400">{stats.in_progress}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">Shift in progress</div>
                         </div>
-                        <div className="mt-1 text-2xl font-bold text-rose-400">{stats.absent}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">No punches logged</div>
-                    </div>
+                    ) : (
+                        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+                            <div className="text-[11px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1">
+                                <UserX className="w-3 h-3" /> Absent
+                            </div>
+                            <div className="mt-1 text-2xl font-bold text-rose-400">{stats.absent}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">No punches logged</div>
+                        </div>
+                    )}
 
                     <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
                         <div className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1">
@@ -607,6 +721,8 @@ export default function Daily({
                     >
                         <option value="all">All Statuses</option>
                         <option value="present">Present Only</option>
+                        <option value="in_progress">On Duty (In Progress)</option>
+                        <option value="scheduled">Scheduled (Future)</option>
                         <option value="absent">Absent Only</option>
                         <option value="late">Late Punch Only</option>
                         <option value="missing_punch">Single / Missing Punch</option>
@@ -1196,6 +1312,21 @@ export default function Daily({
                                     {viewAuditRecord.manual_reason || 'No specific notes recorded.'}
                                 </p>
                             </div>
+
+                            {viewAuditRecord.calculation_breakdown?.machine_reconciliation && (
+                                <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-800/60 text-cyan-300 space-y-1">
+                                    <div className="font-semibold flex items-center gap-1.5 text-cyan-400">
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        Biometric Punch Reconciliation
+                                    </div>
+                                    <p className="text-[11px] text-cyan-200/80">
+                                        {viewAuditRecord.calculation_breakdown.machine_reconciliation.note}
+                                    </p>
+                                    <div className="text-[10px] text-cyan-400/60 font-mono">
+                                        {viewAuditRecord.calculation_breakdown.machine_reconciliation.matched_punches_count} raw biometric punch log(s) matched and linked.
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="pt-3 border-t border-slate-800 text-right">
                             <button
@@ -1289,8 +1420,16 @@ export default function Daily({
                                 />
                                 <label htmlFor="overwrite_manual" className="cursor-pointer text-slate-300 leading-snug">
                                     <span className="font-semibold text-white block">Overwrite Manual Manager Adjustments</span>
-                                    <span className="text-[11px] text-slate-500">
-                                        If unchecked, records manually modified by managers will be safely preserved.
+                                    <span className="text-[11px] text-slate-400 block mt-1">
+                                        {reprocessForm.data.overwrite_manual ? (
+                                            <span className="text-amber-400 font-semibold block">
+                                                ⚠️ Caution: Manual adjustments, reasons, and supervisor edits in this range will be cleared and replaced with raw biometric device data.
+                                            </span>
+                                        ) : (
+                                            <span className="text-emerald-400 font-semibold block">
+                                                🛡️ Safe Mode (Active): Records adjusted manually by HR will be preserved 100%. Only unedited records and new machine punches will be calculated.
+                                            </span>
+                                        )}
                                     </span>
                                 </label>
                             </div>

@@ -9,8 +9,10 @@ use App\Models\AttendanceLog;
 use App\Models\AttendanceRule;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
+use App\Models\PayrollRun;
 use App\Models\PublicHoliday;
 use App\Models\Shift;
+use App\Models\Tenant;
 use App\Models\User;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
@@ -19,6 +21,20 @@ use Illuminate\Support\Facades\DB;
 
 final class AttendanceProcessingService
 {
+    /**
+     * Enterprise Industry-Standard Default Attendance Calculation Settings.
+     *
+     * @var array<string, mixed>
+     */
+    public const DEFAULT_SETTINGS = [
+        'intermediate_punch_mode' => 'first_last', // 'first_last' (Corporate default) or 'actual_segments' (Factory default)
+        'ignore_terminal_punch_type' => true,      // Direction-agnostic telemetry: derive IN/OUT contextually
+        'anti_passback_minutes' => 3,              // Compress rapid duplicate biometric swipes within 3 mins
+        'auto_detect_shift' => true,               // Auto-detect matching company shift if worker swaps or works unscheduled
+        'allow_early_in_as_ot' => false,           // Pre-shift arrival does not count towards OT unless authorized
+        'overtime_minimum_minutes' => 15,          // Minimum extra late minutes required to qualify for OT
+    ];
+
     public function __construct(
         private readonly ShiftService $shiftService,
         private readonly OvertimeCalculationService $overtimeService,
@@ -86,7 +102,12 @@ final class AttendanceProcessingService
             $lateCount = 0;
             $missingPunchCount = 0;
             $halfDayCount = 0;
+            $inProgressCount = 0;
+            $scheduledCount = 0;
             $savedRecords = new Collection;
+
+            // Load global tenant attendance policy & calculation settings
+            $tenantSettings = $this->getTenantAttendanceSettings($tenantId);
 
             foreach ($employees as $employee) {
                 // Check if existing record is manual override
@@ -95,13 +116,61 @@ final class AttendanceProcessingService
                     ->whereDate('attendance_date', $dateString)
                     ->first();
 
-                if ($existing && $existing->is_manual && ! $overwriteManual) {
-                    $savedRecords->push($existing);
-                    continue;
-                }
-
                 // Resolve effective shift for employee on this date
                 $shift = $this->shiftService->getEffectiveShiftForEmployee($employee, $date);
+
+                // Auto-detect shift if employee is unrostered or swapped and policy allows
+                if ($shift === null && ($tenantSettings['auto_detect_shift'] ?? true)) {
+                    $firstPunch = AttendanceLog::where('tenant_id', $tenantId)
+                        ->where('employee_id', $employee->id)
+                        ->whereDate('punch_datetime', $dateString)
+                        ->orderBy('punch_datetime')
+                        ->first();
+
+                    if ($firstPunch !== null) {
+                        $shift = $this->autoDetectShiftForPunch($tenantId, $date, Carbon::parse($firstPunch->punch_datetime));
+                    }
+                }
+
+                if ($existing && $existing->is_manual && ! $overwriteManual) {
+                    // Reconcile raw biometric punches so they don't remain dangling/unprocessed
+                    $punches = $this->getPunchesForDate($tenantId, $employee->id, $date, $shift);
+                    if ($punches->isNotEmpty()) {
+                        AttendanceLog::whereIn('id', $punches->pluck('id'))
+                            ->where('is_processed', false)
+                            ->update([
+                                'is_processed' => true,
+                                'processed_at' => Carbon::now(),
+                            ]);
+
+                        $breakdown = $existing->calculation_breakdown ?? [];
+                        $breakdown['machine_reconciliation'] = [
+                            'reconciled_at' => Carbon::now()->toIso8601String(),
+                            'matched_punches_count' => $punches->count(),
+                            'note' => 'Raw biometric punches reconciled with manual HR adjustment; manual values preserved.',
+                        ];
+                        $existing->update(['calculation_breakdown' => $breakdown]);
+                    }
+
+                    $savedRecords->push($existing);
+                    $processedCount++;
+
+                    match ($existing->status) {
+                        'present' => $presentCount++,
+                        'absent' => $absentCount++,
+                        'missing_punch' => $missingPunchCount++,
+                        'half_day' => $halfDayCount++,
+                        'in_progress' => $inProgressCount++,
+                        'scheduled' => $scheduledCount++,
+                        default => null,
+                    };
+
+                    if ($existing->late_minutes > 0) {
+                        $lateCount++;
+                    }
+
+                    continue;
+                }
 
                 // Resolve applicable management rule (shift-level or tenant default)
                 $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
@@ -116,7 +185,8 @@ final class AttendanceProcessingService
                     $shift,
                     $rule,
                     $holiday,
-                    $punches
+                    $punches,
+                    $tenantSettings
                 );
 
                 $recordData = array_merge($calculatedData, [
@@ -154,6 +224,8 @@ final class AttendanceProcessingService
                     'absent' => $absentCount++,
                     'missing_punch' => $missingPunchCount++,
                     'half_day' => $halfDayCount++,
+                    'in_progress' => $inProgressCount++,
+                    'scheduled' => $scheduledCount++,
                     default => null,
                 };
 
@@ -169,6 +241,8 @@ final class AttendanceProcessingService
                 'late' => $lateCount,
                 'missing_punch' => $missingPunchCount,
                 'half_day' => $halfDayCount,
+                'in_progress' => $inProgressCount,
+                'scheduled' => $scheduledCount,
                 'records' => $savedRecords,
             ];
         });
@@ -260,7 +334,8 @@ final class AttendanceProcessingService
         ?Shift $shift,
         AttendanceRule $rule,
         ?PublicHoliday $holiday,
-        Collection $punches
+        Collection $punches,
+        array $tenantSettings = []
     ): array {
         $isSunday = $date->isSunday();
         $isHoliday = $holiday !== null;
@@ -317,6 +392,15 @@ final class AttendanceProcessingService
             } elseif ($isSunday) {
                 $status = 'rest_day';
                 $notes = 'Rest Day (Sunday)';
+            } elseif ($date->isToday() && $shift !== null) {
+                $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
+                if (Carbon::now()->lt($shiftStart)) {
+                    $status = 'scheduled';
+                    $notes = 'Shift scheduled for today; start time is in the future.';
+                } else {
+                    $status = 'absent';
+                    $notes = 'No biometric punches recorded';
+                }
             } else {
                 $status = 'absent';
                 $notes = 'No biometric punches recorded';
@@ -340,11 +424,70 @@ final class AttendanceProcessingService
             ];
         }
 
+        // Apply anti-passback debouncing on raw punches
+        $antiPassbackMinutes = (int) ($tenantSettings['anti_passback_minutes'] ?? 3);
+        $debouncedPunches = $this->applyAntiPassbackDebounce($punches, $antiPassbackMinutes);
+
         // Pair Check-in and Check-out
-        [$checkIn, $checkOut, $isSinglePunch] = $this->pairPunches($punches, $shift, $date);
+        [$checkIn, $checkOut, $isSinglePunch] = $this->pairPunches($debouncedPunches, $shift, $date, $tenantSettings);
 
         // Case B: Incomplete Single Punch (Missing punch policy)
         if ($isSinglePunch || $checkIn === null || $checkOut === null) {
+            // Check if shift is currently on-going today (Clocked in, waiting to clock out)
+            if ($checkIn !== null && $checkOut === null && $date->isToday()) {
+                $isShiftOngoing = false;
+                if ($shift !== null) {
+                    $shiftEnd = Carbon::parse($date->toDateString().' '.$shift->end_time);
+                    if ($shift->is_night_shift) {
+                        $shiftEnd->addDay();
+                    }
+                    // Consider ongoing if current time is before shift end + 30 minutes buffer
+                    $isShiftOngoing = Carbon::now()->lt($shiftEnd->copy()->addMinutes(30));
+                } else {
+                    $isShiftOngoing = Carbon::now()->hour < 19;
+                }
+
+                if ($isShiftOngoing) {
+                    $lateMinutes = 0;
+                    if ($shift !== null) {
+                        $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
+                        $graceMinutes = $rule->grace_period_minutes ?? $shift->grace_minutes ?? 10;
+                        if ($checkIn->gt($shiftStart->copy()->addMinutes($graceMinutes))) {
+                            $lateMinutes = (int) abs($checkIn->diffInMinutes($shiftStart));
+                        }
+                    }
+
+                    $anomalies = [];
+                    if ($lateMinutes > 0) {
+                        $anomalies[] = [
+                            'type' => 'LATE_ARRIVAL',
+                            'label' => "Late Check-in ({$lateMinutes}m)",
+                            'color' => '#FBBF24',
+                            'severity' => 'medium',
+                            'minutes' => $lateMinutes,
+                        ];
+                    }
+
+                    return [
+                        'check_in' => $checkIn->toDateTimeString(),
+                        'check_out' => null,
+                        'worked_hours' => 0.00,
+                        'regular_hours' => 0.00,
+                        'late_minutes' => $lateMinutes,
+                        'early_departure_minutes' => 0,
+                        'ot_hours' => 0.00,
+                        'double_ot_hours' => 0.00,
+                        'status' => 'in_progress',
+                        'anomalies' => $anomalies,
+                        'calculation_breakdown' => [
+                            'rule' => $rule->rule_name,
+                            'punches_count' => $punches->count(),
+                            'notes' => 'Shift currently in progress. Employee has clocked in and is on duty.',
+                        ],
+                    ];
+                }
+            }
+
             $missingAnomalies = [];
             if ($checkIn === null && $checkOut !== null) {
                 $missingAnomalies[] = [
@@ -389,16 +532,61 @@ final class AttendanceProcessingService
         }
 
         // Case C: Valid Punch Pair
-        // 1. Calculate raw worked minutes
-        $rawMinutes = (int) abs($checkOut->diffInMinutes($checkIn));
+        $isActualSegments = ($tenantSettings['intermediate_punch_mode'] ?? 'first_last') === 'actual_segments';
+        $allowEarlyInAsOt = (bool) ($tenantSettings['allow_early_in_as_ot'] ?? false);
+        $segmentBreakdown = null;
 
-        // 2. Deduct break minutes if applicable
-        $breakMinutes = ($shift && $shift->break_minutes > 0 && $rawMinutes >= ($shift->break_minutes + 60))
-            ? $shift->break_minutes
-            : 0;
+        if ($isActualSegments && $debouncedPunches->count() >= 4) {
+            $sortedPunches = $debouncedPunches->sortBy('punch_datetime')->values();
+            $segmentPairs = [];
+            $breakIntervals = [];
+            $totalSegmentMinutes = 0;
+            $totalActualBreakMinutes = 0;
 
-        $netMinutes = max(0, $rawMinutes - $breakMinutes);
-        $workedHours = round($netMinutes / 60.0, 2);
+            for ($i = 0; $i < $sortedPunches->count() - 1; $i += 2) {
+                $pIn = Carbon::parse($sortedPunches[$i]->punch_datetime);
+                $pOut = Carbon::parse($sortedPunches[$i + 1]->punch_datetime);
+                $duration = max(0, (int) abs($pOut->diffInMinutes($pIn)));
+                $totalSegmentMinutes += $duration;
+                $segmentPairs[] = [
+                    'in' => $pIn->format('H:i'),
+                    'out' => $pOut->format('H:i'),
+                    'duration_hours' => round($duration / 60.0, 2),
+                ];
+
+                if ($i + 2 < $sortedPunches->count()) {
+                    $nextIn = Carbon::parse($sortedPunches[$i + 2]->punch_datetime);
+                    $breakDur = max(0, (int) abs($nextIn->diffInMinutes($pOut)));
+                    $totalActualBreakMinutes += $breakDur;
+                    $breakIntervals[] = [
+                        'out' => $pOut->format('H:i'),
+                        'in' => $nextIn->format('H:i'),
+                        'duration_minutes' => $breakDur,
+                    ];
+                }
+            }
+
+            $rawMinutes = $totalSegmentMinutes;
+            $breakMinutes = $totalActualBreakMinutes;
+            $netMinutes = max(0, $rawMinutes);
+            $workedHours = round($netMinutes / 60.0, 2);
+
+            $segmentBreakdown = [
+                'mode' => 'actual_segments',
+                'segments' => $segmentPairs,
+                'breaks' => $breakIntervals,
+                'total_break_minutes' => $totalActualBreakMinutes,
+            ];
+        } else {
+            // First-Last mode (Standard flat shift break deduction)
+            $rawMinutes = (int) abs($checkOut->diffInMinutes($checkIn));
+            $breakMinutes = ($shift && $shift->break_minutes > 0 && $rawMinutes >= ($shift->break_minutes + 60))
+                ? $shift->break_minutes
+                : 0;
+
+            $netMinutes = max(0, $rawMinutes - $breakMinutes);
+            $workedHours = round($netMinutes / 60.0, 2);
+        }
 
         // 3. Calculate late arrival minutes
         $lateMinutes = 0;
@@ -425,8 +613,17 @@ final class AttendanceProcessingService
             }
         }
 
-        // 5. Overtime Calculation via Engine
-        $otResult = $this->overtimeService->calculate($rule, $shift, $date, $workedHours, $holiday);
+        // 5. Overtime Calculation via Engine (applying pre-shift arrival OT policy)
+        $hoursForOt = $workedHours;
+        if ($shift !== null && ! $allowEarlyInAsOt) {
+            $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
+            if ($checkIn->lt($shiftStart)) {
+                $earlyMinutes = (int) abs($shiftStart->diffInMinutes($checkIn));
+                $hoursForOt = max(0.00, round(($netMinutes - $earlyMinutes) / 60.0, 2));
+            }
+        }
+
+        $otResult = $this->overtimeService->calculate($rule, $shift, $date, $hoursForOt, $holiday);
 
         // 6. Collect Structured Anomalies
         $anomalies = [];
@@ -480,6 +677,9 @@ final class AttendanceProcessingService
                 'day_type' => $otResult['day_type'],
                 'applied_rate' => $otResult['applied_rate'],
                 'punches_count' => $punches->count(),
+                'debounced_punches_count' => $debouncedPunches->count(),
+                'intermediate_punch_mode' => $tenantSettings['intermediate_punch_mode'] ?? 'first_last',
+                'segments_breakdown' => $segmentBreakdown,
                 'holiday_name' => $holiday?->name,
             ],
         ];
@@ -489,28 +689,37 @@ final class AttendanceProcessingService
      * Pair raw punches into check-in and check-out timestamps, utilizing shift sliding windows when defined.
      *
      * @param  Collection<int, AttendanceLog>  $punches
+     * @param  array<string, mixed>  $tenantSettings
      * @return array{0: ?Carbon, 1: ?Carbon, 2: bool}
      */
-    private function pairPunches(Collection $punches, ?Shift $shift = null, ?CarbonInterface $date = null): array
-    {
+    private function pairPunches(
+        Collection $punches,
+        ?Shift $shift = null,
+        ?CarbonInterface $date = null,
+        array $tenantSettings = []
+    ): array {
         if ($punches->isEmpty()) {
             return [null, null, false];
         }
 
-        // Check if explicit 'in' and 'out' types exist
-        $inPunch = $punches->firstWhere('punch_type', 'in');
-        $outPunch = $punches->reverse()->firstWhere('punch_type', 'out');
+        $ignoreTerminalPunchType = (bool) ($tenantSettings['ignore_terminal_punch_type'] ?? true);
 
-        if ($inPunch && $outPunch && $inPunch->id !== $outPunch->id) {
-            $inTime = Carbon::parse($inPunch->punch_datetime);
-            $outTime = Carbon::parse($outPunch->punch_datetime);
+        // Tier 1: Hardware-keyed punch check ONLY if ignore_terminal_punch_type is false
+        if (! $ignoreTerminalPunchType) {
+            $inPunch = $punches->firstWhere('punch_type', 'in');
+            $outPunch = $punches->reverse()->firstWhere('punch_type', 'out');
 
-            if ($outTime->gt($inTime)) {
-                return [$inTime, $outTime, false];
+            if ($inPunch && $outPunch && $inPunch->id !== $outPunch->id) {
+                $inTime = Carbon::parse($inPunch->punch_datetime);
+                $outTime = Carbon::parse($outPunch->punch_datetime);
+
+                if ($outTime->gt($inTime)) {
+                    return [$inTime, $outTime, false];
+                }
             }
         }
 
-        // Sliding 4-Window punch contract matching if shift & date provided
+        // Tier 2: Shift sliding window matching (with Elastic Out-Window)
         if ($shift !== null && $date !== null) {
             [$inStart, $inEnd] = $shift->getInWindow($date);
             [$outStart, $outEnd] = $shift->getOutWindow($date);
@@ -519,36 +728,49 @@ final class AttendanceProcessingService
             $inStartGrace = $inStart->copy()->subMinutes(5);
             $inEndGrace = $inEnd->copy()->addMinutes(5);
             $outStartGrace = $outStart->copy()->subMinutes(5);
-            $outEndGrace = $outEnd->copy()->addMinutes(5);
 
             $inCandidates = $punches->filter(function (AttendanceLog $log) use ($inStartGrace, $inEndGrace) {
                 $time = Carbon::parse($log->punch_datetime);
                 return $time->gte($inStartGrace) && $time->lte($inEndGrace);
             })->sortBy('punch_datetime');
 
-            $outCandidates = $punches->filter(function (AttendanceLog $log) use ($outStartGrace, $outEndGrace) {
+            $matchedIn = $inCandidates->first();
+
+            if ($matchedIn) {
+                $inTime = Carbon::parse($matchedIn->punch_datetime);
+
+                // Elastic Out-Window: Match any punch after In-punch that is at or past outStartGrace,
+                // or if staying late (overtime past outEndGrace), or separated by reasonable shift time
+                $outCandidates = $punches->filter(function (AttendanceLog $log) use ($inTime, $outStartGrace) {
+                    $time = Carbon::parse($log->punch_datetime);
+                    return $time->gt($inTime) && ($time->gte($outStartGrace) || $time->diffInMinutes($inTime) >= 30);
+                })->sortByDesc('punch_datetime');
+
+                $matchedOut = $outCandidates->first();
+
+                if ($matchedOut && $matchedIn->id !== $matchedOut->id) {
+                    $outTime = Carbon::parse($matchedOut->punch_datetime);
+                    if ($outTime->gt($inTime)) {
+                        return [$inTime, $outTime, false];
+                    }
+                }
+
+                // If only In-punch was found
+                return [$inTime, null, true];
+            }
+
+            // If no In candidate found in window, check if Out candidate exists
+            $outOnlyCandidates = $punches->filter(function (AttendanceLog $log) use ($outStartGrace) {
                 $time = Carbon::parse($log->punch_datetime);
-                return $time->gte($outStartGrace) && $time->lte($outEndGrace);
+                return $time->gte($outStartGrace);
             })->sortByDesc('punch_datetime');
 
-            $matchedIn = $inCandidates->first();
-            $matchedOut = $outCandidates->first();
-
-            if ($matchedIn && $matchedOut && $matchedIn->id !== $matchedOut->id) {
-                $inTime = Carbon::parse($matchedIn->punch_datetime);
-                $outTime = Carbon::parse($matchedOut->punch_datetime);
-
-                if ($outTime->gt($inTime)) {
-                    return [$inTime, $outTime, false];
-                }
-            } elseif ($matchedIn && ! $matchedOut) {
-                return [Carbon::parse($matchedIn->punch_datetime), null, true];
-            } elseif (! $matchedIn && $matchedOut) {
-                return [null, Carbon::parse($matchedOut->punch_datetime), true];
+            if ($outOnlyCandidates->isNotEmpty()) {
+                return [null, Carbon::parse($outOnlyCandidates->first()->punch_datetime), true];
             }
         }
 
-        // Fallback chronological pairing for auto or mixed types
+        // Tier 3: Chronological pairing
         $sorted = $punches->sortBy('punch_datetime')->values();
 
         if ($sorted->count() === 1) {
@@ -701,12 +923,135 @@ final class AttendanceProcessingService
             'half_day' => $records->where('status', 'half_day')->count(),
             'holiday' => $records->where('status', 'holiday')->count(),
             'rest_day' => $records->where('status', 'rest_day')->count(),
+            'in_progress' => $records->where('status', 'in_progress')->count(),
+            'scheduled' => $records->where('status', 'scheduled')->count(),
             'manual_adjusted' => $records->where('is_manual', true)->count(),
             'total_worked_hours' => round((float) $records->sum('worked_hours'), 2),
             'total_regular_hours' => round((float) $records->sum('regular_hours'), 2),
             'total_ot_hours' => round((float) $records->sum('ot_hours'), 2),
             'total_double_ot_hours' => round((float) $records->sum('double_ot_hours'), 2),
         ];
+    }
+
+    /**
+     * Get a summary of all raw biometric logs pending processing.
+     *
+     * @return array{
+     *     unprocessed_count: int,
+     *     unprocessed_dates_count: int,
+     *     dates: array<int, array{date: string, count: int}>,
+     *     oldest_date: ?string,
+     *     newest_date: ?string
+     * }
+     */
+    public function getUnprocessedSummary(?string $tenantId = null): array
+    {
+        $tenantId = $tenantId
+            ?? session('tenant_id')
+            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+
+        $query = AttendanceLog::query()->where('is_processed', false);
+
+        if ($tenantId !== null) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        $count = (clone $query)->count();
+        $dates = (clone $query)
+            ->selectRaw('DATE(punch_datetime) as punch_date, count(*) as punches_count')
+            ->groupBy('punch_date')
+            ->orderBy('punch_date')
+            ->get()
+            ->map(fn ($r) => [
+                'date' => (string) $r->punch_date,
+                'count' => (int) $r->punches_count,
+            ])
+            ->values()
+            ->toArray();
+
+        return [
+            'unprocessed_count' => $count,
+            'unprocessed_dates_count' => count($dates),
+            'dates' => $dates,
+            'oldest_date' => ! empty($dates) ? $dates[0]['date'] : null,
+            'newest_date' => ! empty($dates) ? $dates[count($dates) - 1]['date'] : null,
+        ];
+    }
+
+    /**
+     * Process all dates containing unprocessed biometric punch logs.
+     *
+     * @return array{
+     *     dates_count: int,
+     *     processed_dates: array<int, string>,
+     *     total_processed: int,
+     *     present: int,
+     *     absent: int,
+     *     late: int,
+     *     missing_punch: int
+     * }
+     */
+    public function processUnprocessedBacklog(?string $tenantId = null, bool $overwriteManual = false): array
+    {
+        $tenantId = $tenantId
+            ?? session('tenant_id')
+            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+
+        $summary = $this->getUnprocessedSummary($tenantId);
+        $dates = $summary['dates'];
+
+        $totalProcessed = 0;
+        $totalPresent = 0;
+        $totalAbsent = 0;
+        $totalLate = 0;
+        $totalMissingPunch = 0;
+        $processedDates = [];
+
+        foreach ($dates as $item) {
+            $date = Carbon::parse($item['date']);
+            $res = $this->processDate(
+                date: $date,
+                overwriteManual: $overwriteManual,
+                tenantId: $tenantId
+            );
+
+            $totalProcessed += $res['processed'];
+            $totalPresent += $res['present'];
+            $totalAbsent += $res['absent'];
+            $totalLate += $res['late'];
+            $totalMissingPunch += $res['missing_punch'];
+            $processedDates[] = $item['date'];
+        }
+
+        return [
+            'dates_count' => count($processedDates),
+            'processed_dates' => $processedDates,
+            'total_processed' => $totalProcessed,
+            'present' => $totalPresent,
+            'absent' => $totalAbsent,
+            'late' => $totalLate,
+            'missing_punch' => $totalMissingPunch,
+        ];
+    }
+
+    /**
+     * Check if a given date falls within a finalized/approved payroll cycle.
+     */
+    public function isDateInLockedPayrollPeriod(CarbonInterface $date, ?string $tenantId = null): bool
+    {
+        $tenantId = $tenantId
+            ?? session('tenant_id')
+            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+
+        if ($tenantId === null) {
+            return false;
+        }
+
+        return PayrollRun::where('tenant_id', $tenantId)
+            ->where('period_year', (int) $date->year)
+            ->where('period_month', (int) $date->month)
+            ->whereIn('status', ['approved', 'locked'])
+            ->exists();
     }
 
     /**
@@ -741,4 +1086,115 @@ final class AttendanceProcessingService
             );
         });
     }
+
+    /**
+     * Get tenant attendance calculation settings with enterprise defaults.
+     *
+     * @return array<string, mixed>
+     */
+    public function getTenantAttendanceSettings(string $tenantId): array
+    {
+        $tenant = Tenant::find($tenantId);
+        $tenantDefaultRule = AttendanceRule::where('tenant_id', $tenantId)->whereNull('shift_id')->first();
+
+        return [
+            'intermediate_punch_mode' => (string) ($tenant?->getSetting('intermediate_punch_mode', self::DEFAULT_SETTINGS['intermediate_punch_mode']) ?? self::DEFAULT_SETTINGS['intermediate_punch_mode']),
+            'ignore_terminal_punch_type' => filter_var($tenant?->getSetting('ignore_terminal_punch_type', self::DEFAULT_SETTINGS['ignore_terminal_punch_type']), FILTER_VALIDATE_BOOLEAN),
+            'anti_passback_minutes' => (int) ($tenant?->getSetting('anti_passback_minutes', self::DEFAULT_SETTINGS['anti_passback_minutes']) ?? self::DEFAULT_SETTINGS['anti_passback_minutes']),
+            'auto_detect_shift' => filter_var($tenant?->getSetting('auto_detect_shift', self::DEFAULT_SETTINGS['auto_detect_shift']), FILTER_VALIDATE_BOOLEAN),
+            'allow_early_in_as_ot' => filter_var($tenant?->getSetting('allow_early_in_as_ot', self::DEFAULT_SETTINGS['allow_early_in_as_ot']), FILTER_VALIDATE_BOOLEAN),
+            'overtime_minimum_minutes' => (int) ($tenant?->getSetting('overtime_minimum_minutes', $tenantDefaultRule?->ot_minimum_minutes ?? self::DEFAULT_SETTINGS['overtime_minimum_minutes']) ?? self::DEFAULT_SETTINGS['overtime_minimum_minutes']),
+        ];
+    }
+
+    /**
+     * Save tenant attendance calculation settings and synchronize default overtime threshold.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public function saveTenantAttendanceSettings(string $tenantId, array $settings): array
+    {
+        return DB::transaction(function () use ($tenantId, $settings): array {
+            $tenant = Tenant::findOrFail($tenantId);
+
+            foreach ($settings as $key => $value) {
+                $tenant->setSetting($key, $value);
+            }
+
+            // Sync overtime_minimum_minutes with tenant default AttendanceRule to prevent duplicate divergence
+            if (isset($settings['overtime_minimum_minutes'])) {
+                AttendanceRule::updateOrCreate(
+                    [
+                        'tenant_id' => $tenantId,
+                        'shift_id' => null,
+                    ],
+                    [
+                        'rule_name' => 'Default Company Policy',
+                        'ot_minimum_minutes' => (int) $settings['overtime_minimum_minutes'],
+                    ]
+                );
+            }
+
+            return $this->getTenantAttendanceSettings($tenantId);
+        });
+    }
+
+    /**
+     * Apply anti-passback debouncing: compress rapid duplicate swipes within X minutes into a single punch.
+     *
+     * @param  Collection<int, AttendanceLog>  $punches
+     * @return Collection<int, AttendanceLog>
+     */
+    public function applyAntiPassbackDebounce(Collection $punches, int $antiPassbackMinutes): Collection
+    {
+        if ($antiPassbackMinutes <= 0 || $punches->count() <= 1) {
+            return $punches;
+        }
+
+        $sorted = $punches->sortBy('punch_datetime')->values();
+        $debounced = new Collection;
+        $lastPunchTime = null;
+
+        foreach ($sorted as $punch) {
+            $punchTime = Carbon::parse($punch->punch_datetime);
+            if ($lastPunchTime === null) {
+                $debounced->push($punch);
+                $lastPunchTime = $punchTime;
+            } elseif (abs($punchTime->diffInMinutes($lastPunchTime)) >= $antiPassbackMinutes) {
+                $debounced->push($punch);
+                $lastPunchTime = $punchTime;
+            }
+        }
+
+        return $debounced;
+    }
+
+    /**
+     * Auto-detect the best matching active company shift based on punch arrival time.
+     */
+    public function autoDetectShiftForPunch(string $tenantId, CarbonInterface $date, CarbonInterface $punchTime): ?Shift
+    {
+        $shifts = Shift::where('tenant_id', $tenantId)->where('is_active', true)->get();
+        $bestShift = null;
+        $smallestDiff = null;
+
+        foreach ($shifts as $candidate) {
+            [$inStart, $inEnd] = $candidate->getInWindow($date);
+            $inStartGrace = $inStart->subMinutes(30);
+            $inEndGrace = $inEnd->addMinutes(30);
+
+            if ($punchTime->gte($inStartGrace) && $punchTime->lte($inEndGrace)) {
+                $shiftStart = Carbon::parse($date->toDateString().' '.$candidate->start_time);
+                $diff = abs($punchTime->diffInMinutes($shiftStart));
+                if ($smallestDiff === null || $diff < $smallestDiff) {
+                    $smallestDiff = $diff;
+                    $bestShift = $candidate;
+                }
+            }
+        }
+
+        return $bestShift;
+    }
 }
+

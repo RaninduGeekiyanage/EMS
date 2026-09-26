@@ -405,4 +405,116 @@ final class AttendanceProcessingTest extends TestCase
         $this->assertEquals(10.00, $daily->worked_hours);
         $this->assertEquals(1.00, $daily->ot_hours); // Buffered by 1 hour!
     }
+
+    public function test_reconciles_delayed_biometric_punches_without_overwriting_manual_record(): void
+    {
+        $date = Carbon::parse('2026-06-25');
+
+        // Create an existing manual record adjusted by HR
+        $daily = AttendanceDaily::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => '2026-06-25',
+            'shift_id' => $this->standardShift->id,
+            'check_in' => '2026-06-25 08:30:00',
+            'check_out' => '2026-06-25 17:30:00',
+            'worked_hours' => 8.00,
+            'regular_hours' => 8.00,
+            'status' => 'present',
+            'is_manual' => true,
+            'manual_reason' => 'Emergency HR manual adjustment due to delayed biometric sync.',
+            'manual_edited_by' => $this->manager->id,
+        ]);
+
+        // Delayed biometric punch logs arrive later
+        $logIn = AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-06-25 08:29:10',
+            'punch_type' => 'in',
+            'is_processed' => false,
+        ]);
+        $logOut = AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-06-25 17:31:40',
+            'punch_type' => 'out',
+            'is_processed' => false,
+        ]);
+
+        $service = app(AttendanceProcessingService::class);
+        $service->processDate($date, overwriteManual: false);
+
+        // Verify: The manual record kept all HR values intact
+        $daily->refresh();
+        $this->assertTrue($daily->is_manual);
+        $this->assertEquals('Emergency HR manual adjustment due to delayed biometric sync.', $daily->manual_reason);
+        $this->assertEquals(8.00, $daily->worked_hours);
+
+        // Verify: The raw punch logs were successfully reconciled and marked processed
+        $logIn->refresh();
+        $logOut->refresh();
+        $this->assertTrue($logIn->is_processed);
+        $this->assertTrue($logOut->is_processed);
+        $this->assertNotNull($daily->calculation_breakdown['machine_reconciliation'] ?? null);
+    }
+
+    public function test_can_process_unprocessed_backlog_via_endpoint(): void
+    {
+        // Create an unprocessed log on a past date
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-06-20 08:30:00',
+            'punch_type' => 'in',
+            'is_processed' => false,
+        ]);
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-06-20 17:30:00',
+            'punch_type' => 'out',
+            'is_processed' => false,
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->post('/attendance/daily/process-backlog');
+
+        $response->assertRedirect();
+        $response->assertSessionHas('success');
+
+        $daily = AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-06-20')
+            ->first();
+
+        $this->assertNotNull($daily);
+        $this->assertEquals('present', $daily->status);
+        $this->assertEquals(0, AttendanceLog::where('is_processed', false)->count());
+    }
+
+    public function test_same_day_ongoing_shift_is_marked_in_progress_not_missing_punch(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-24 11:30:00')); // Midday during standard 08:30 - 17:30 shift
+        $today = Carbon::today();
+
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-06-24 08:25:00',
+            'punch_type' => 'in',
+            'is_processed' => false,
+        ]);
+
+        $service = app(AttendanceProcessingService::class);
+        $service->processDate($today);
+
+        $daily = AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-06-24')
+            ->first();
+
+        $this->assertNotNull($daily);
+        $this->assertEquals('in_progress', $daily->status); // On duty, not missing punch!
+
+        Carbon::setTestNow(); // Reset mock
+    }
 }

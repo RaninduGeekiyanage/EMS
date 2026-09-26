@@ -78,6 +78,8 @@ final class AttendanceDailyController extends Controller
         $records = $query->orderBy('created_at', 'desc')->get();
 
         $stats = $this->processingService->getDailyLedgerStats($date);
+        $unprocessedStats = $this->processingService->getUnprocessedSummary($tenantId);
+        $isPayrollLocked = $this->processingService->isDateInLockedPayrollPeriod($date, $tenantId);
 
         $departments = Department::query()
             ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
@@ -99,6 +101,8 @@ final class AttendanceDailyController extends Controller
         return Inertia::render('Attendance/Daily', [
             'records' => $records,
             'stats' => $stats,
+            'unprocessedStats' => $unprocessedStats,
+            'isPayrollLocked' => $isPayrollLocked,
             'selectedDate' => $date->toDateString(),
             'departments' => $departments,
             'shifts' => $shifts,
@@ -146,6 +150,26 @@ final class AttendanceDailyController extends Controller
         return redirect()->back()->with(
             'success',
             "Calculated attendance for {$date->toDateString()}: {$result['processed']} processed ({$result['present']} present, {$result['absent']} absent, {$result['late']} late, {$result['missing_punch']} missing punches)."
+        );
+    }
+
+    /**
+     * Process all pending unprocessed biometric punch logs across all historical dates.
+     */
+    public function processBacklog(Request $request): RedirectResponse
+    {
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $result = $this->processingService->processUnprocessedBacklog($tenantId);
+
+        if ($result['dates_count'] === 0) {
+            return redirect()->back()->with('info', 'No unprocessed raw biometric logs found.');
+        }
+
+        $datesList = implode(', ', $result['processed_dates']);
+
+        return redirect()->back()->with(
+            'success',
+            "Processed backlog across {$result['dates_count']} dates ({$datesList}): {$result['total_processed']} records updated ({$result['present']} present, {$result['absent']} absent, {$result['late']} late, {$result['missing_punch']} single punches)."
         );
     }
 

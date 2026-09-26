@@ -29,6 +29,7 @@ import {
     Layers,
     FileText,
     Cpu,
+    SlidersHorizontal,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -40,6 +41,7 @@ interface AuthProps {
         is_super_admin: boolean;
         is_company_owner: boolean;
         roles: string[];
+        permissions?: string[];
     } | null;
     tenant: {
         id: string;
@@ -126,11 +128,19 @@ export default function AuthenticatedLayout({
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-900/80'}
     `;
 
+    const canAccessAttendanceSettings = Boolean(
+        auth?.user?.is_super_admin ||
+        auth?.user?.is_company_owner ||
+        auth?.user?.roles?.includes('Company Admin') ||
+        auth?.user?.permissions?.includes('attendance.settings.view')
+    );
+
     const canAccessSettings = Boolean(
         auth?.user?.is_super_admin ||
         auth?.user?.is_company_owner ||
         auth?.user?.roles?.includes('Company Admin') ||
-        auth?.user?.roles?.includes('HR Manager')
+        auth?.user?.roles?.includes('HR Manager') ||
+        canAccessAttendanceSettings
     );
 
     // Determine back button visibility
@@ -342,6 +352,12 @@ export default function AuthenticatedLayout({
                                     <Cpu className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Biometric Config</span>}
                                 </Link>
+                                {canAccessAttendanceSettings && (
+                                    <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} title="Attendance Policy & Engine Settings">
+                                        <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Attendance Settings</span>}
+                                    </Link>
+                                )}
                             </div>
                         )}
 
@@ -528,6 +544,12 @@ export default function AuthenticatedLayout({
                                     <Cpu className="w-4 h-4" />
                                     <span>Biometric Config</span>
                                 </Link>
+                                {canAccessAttendanceSettings && (
+                                    <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} onClick={() => setMobileOpen(false)}>
+                                        <SlidersHorizontal className="w-4 h-4" />
+                                        <span>Attendance Settings</span>
+                                    </Link>
+                                )}
                             </div>
                         )}
 
