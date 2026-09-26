@@ -206,7 +206,18 @@ final class AttendanceImportController extends Controller
         try {
             $import = $this->importService->commitStaging($validated, $userId);
 
-            $message = "Staging punches synchronized successfully! Processed {$import->processed_rows} logs.";
+            $duplicateCount = (int) ($import->errors['duplicate_skipped_count'] ?? 0);
+            if ($import->processed_rows > 0) {
+                $message = "Staging punches synchronized successfully! Ingested {$import->processed_rows} new logs.";
+                if ($duplicateCount > 0) {
+                    $message .= " ({$duplicateCount} existing logs linked).";
+                }
+            } elseif ($duplicateCount > 0) {
+                $message = "All {$duplicateCount} mapped punches already exist in attendance logs. Staging buffer updated.";
+            } else {
+                $message = "Staging synchronization completed (0 logs inserted).";
+            }
+
             if ($import->failed_rows > 0) {
                 $message .= " ({$import->failed_rows} unmapped or skipped punches).";
             }

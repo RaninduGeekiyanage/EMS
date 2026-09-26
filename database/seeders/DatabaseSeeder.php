@@ -86,5 +86,8 @@ class DatabaseSeeder extends Seeder
 
         // 5. Populate Realistic Sri Lankan AMS Shift Groups & Scenarios
         $this->call(AmsDemoSeeder::class);
+
+        // 6. Populate Realistic Biometric Staging Punches for Manual Testing
+        $this->call(RawBiometricPunchSeeder::class);
     }
 }

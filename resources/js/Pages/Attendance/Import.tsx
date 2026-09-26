@@ -57,6 +57,8 @@ interface PreviewData {
     valid_rows: number;
     invalid_rows: number;
     mapped_count: number;
+    ready_count?: number;
+    duplicate_count?: number;
     unmapped_count: number;
     unique_unmapped: { biometric_id: string; occurrences: number }[];
     preview_rows: PreviewRow[];
@@ -1060,9 +1062,23 @@ export default function Import({
                                         <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 font-mono">
                                             Total: {previewData.total_rows}
                                         </span>
-                                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">
-                                            Mapped: {previewData.mapped_count}
-                                        </span>
+                                        {previewData.ready_count !== undefined ? (
+                                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">
+                                                Ready: {previewData.ready_count}
+                                            </span>
+                                        ) : (
+                                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">
+                                                Mapped: {previewData.mapped_count}
+                                            </span>
+                                        )}
+                                        {(previewData.duplicate_count ?? 0) > 0 && (
+                                            <span
+                                                className="px-2.5 py-1 rounded-lg bg-slate-800/80 text-slate-400 font-mono border border-slate-700/60"
+                                                title="Punches that already exist in attendance logs or duplicate in this batch"
+                                            >
+                                                In Logs / Duplicate: {previewData.duplicate_count}
+                                            </span>
+                                        )}
                                         {previewData.unmapped_count > 0 && (
                                             <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-mono border border-amber-500/20">
                                                 Unmapped: {previewData.unmapped_count}
@@ -1073,7 +1089,10 @@ export default function Import({
                                     <button
                                         type="button"
                                         onClick={activeTab === 'staging' ? handleCommitStaging : handleCommitImport}
-                                        disabled={activeTab === 'staging' ? isCommittingStaging : uploadForm.processing}
+                                        disabled={
+                                            (activeTab === 'staging' ? isCommittingStaging : uploadForm.processing) ||
+                                            (previewData.ready_count === 0 && (activeTab !== 'staging' || previewData.mapped_count === 0))
+                                        }
                                         className="py-2 px-5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
                                     >
                                         {(activeTab === 'staging' ? isCommittingStaging : uploadForm.processing) ? (
@@ -1084,7 +1103,11 @@ export default function Import({
                                         ) : (
                                             <>
                                                 <Check className="w-4 h-4" />
-                                                Commit {previewData.mapped_count} Punches {activeTab === 'staging' ? 'from Staging' : ''}
+                                                {activeTab === 'staging'
+                                                    ? (previewData.ready_count !== undefined && previewData.ready_count === 0 && (previewData.duplicate_count ?? 0) > 0
+                                                        ? `Update Staging Status (${previewData.duplicate_count} in logs)`
+                                                        : `Commit ${previewData.ready_count ?? previewData.mapped_count} Punches from Staging`)
+                                                    : `Commit ${previewData.ready_count ?? previewData.mapped_count} Punches`}
                                             </>
                                         )}
                                     </button>
@@ -1188,8 +1211,11 @@ export default function Import({
                                                         </span>
                                                     )}
                                                     {row.status === 'duplicate' && (
-                                                        <span className="text-slate-400 font-medium text-[11px]">
-                                                            Duplicate
+                                                        <span
+                                                            className="text-slate-400 font-medium text-[11px] bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60"
+                                                            title="Already present in attendance logs or duplicate in batch"
+                                                        >
+                                                            In Logs / Duplicate
                                                         </span>
                                                     )}
                                                 </td>

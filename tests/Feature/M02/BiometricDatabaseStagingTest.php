@@ -364,4 +364,75 @@ final class BiometricDatabaseStagingTest extends TestCase
                 ],
             ]);
     }
+
+    public function test_staging_preview_and_commit_handle_existing_duplicates_without_error(): void
+    {
+        $punch1 = RawBiometricPunch::create([
+            'tenant_id' => $this->tenant->id,
+            'device_sn' => 'ZK-GATE',
+            'raw_user_id' => '2001',
+            'punch_time' => '2026-09-26 08:30:00',
+            'punch_type' => 'in',
+            'status' => 'pending',
+        ]);
+
+        $punch2 = RawBiometricPunch::create([
+            'tenant_id' => $this->tenant->id,
+            'device_sn' => 'ZK-GATE',
+            'raw_user_id' => '2002',
+            'punch_time' => '2026-09-26 17:30:00',
+            'punch_type' => 'out',
+            'status' => 'pending',
+        ]);
+
+        // 1. Initial commit
+        $res1 = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/staging-commit', [
+                'status' => 'pending',
+            ]);
+
+        $res1->assertOk()->assertJson(['success' => true]);
+        $this->assertEquals(2, AttendanceLog::where('tenant_id', $this->tenant->id)->count());
+
+        $punch1->refresh();
+        $initialLogId1 = $punch1->attendance_log_id;
+        $this->assertNotNull($initialLogId1);
+
+        // 2. Re-preview with status 'all'
+        $previewRes = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/staging-preview', [
+                'status' => 'all',
+            ]);
+
+        $previewRes->assertOk()
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'total_rows' => 2,
+                    'ready_count' => 0,
+                    'duplicate_count' => 2,
+                    'unmapped_count' => 0,
+                ],
+            ]);
+
+        // 3. Re-commit the exact same dataset with status 'all'
+        // This must not throw a Foreign Key constraint exception!
+        $res2 = $this->actingAs($this->admin)
+            ->withHeaders(['X-Tenant-ID' => $this->tenant->id])
+            ->postJson('/attendance/import/staging-commit', [
+                'status' => 'all',
+            ]);
+
+        $res2->assertOk()->assertJson(['success' => true]);
+
+        // Verify no duplicate logs were inserted
+        $this->assertEquals(2, AttendanceLog::where('tenant_id', $this->tenant->id)->count());
+
+        // Verify punch still references valid log ID
+        $punch1->refresh();
+        $this->assertEquals($initialLogId1, $punch1->attendance_log_id);
+    }
 }
+

@@ -105,8 +105,24 @@ final class AttendanceImportService
             $employeeByEmpNo[trim((string) $employee->emp_no)] = $employee;
         }
 
+        // Preload existing attendance logs for matched employees in this timeframe to detect duplicates
+        $matchedEmpIds = [];
+        $punchTimes = [];
+        foreach ($validation['valid_records'] as $record) {
+            $bioId = $record['biometric_id'];
+            $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+            if ($matchedEmployee !== null) {
+                $matchedEmpIds[] = $matchedEmployee->id;
+                $punchTimes[] = $record['punch_datetime'];
+            }
+        }
+
+        $existingLogsMap = $tenantId ? $this->getExistingAttendanceLogsMap($tenantId, $matchedEmpIds, $punchTimes) : [];
+
         $mappedCount = 0;
         $unmappedCount = 0;
+        $duplicateCount = 0;
+        $readyCount = 0;
         $unmappedIds = [];
         $previewRows = [];
         $seenPunches = [];
@@ -115,18 +131,24 @@ final class AttendanceImportService
             $bioId = $record['biometric_id'];
             $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
 
-            $punchKey = ($matchedEmployee ? $matchedEmployee->id : $bioId).'_'.$record['punch_datetime'].'_'.$record['punch_type'];
+            $formattedDt = Carbon::parse($record['punch_datetime'])->format('Y-m-d H:i:s');
+            $punchKey = ($matchedEmployee ? $matchedEmployee->id : $bioId).'_'.$formattedDt.'_'.$record['punch_type'];
             $isDuplicateInFile = isset($seenPunches[$punchKey]);
             $seenPunches[$punchKey] = true;
+            $isAlreadyInLogs = $matchedEmployee && isset($existingLogsMap[$punchKey]);
 
             $status = 'ready';
-            if ($isDuplicateInFile) {
-                $status = 'duplicate';
-            } elseif ($matchedEmployee === null) {
+            if ($matchedEmployee === null) {
                 $status = 'unmapped';
                 $unmappedCount++;
                 $unmappedIds[$bioId] = ($unmappedIds[$bioId] ?? 0) + 1;
+            } elseif ($isAlreadyInLogs || $isDuplicateInFile) {
+                $status = 'duplicate';
+                $duplicateCount++;
+                $mappedCount++;
             } else {
+                $status = 'ready';
+                $readyCount++;
                 $mappedCount++;
             }
 
@@ -140,7 +162,7 @@ final class AttendanceImportService
                         'emp_no' => $matchedEmployee->emp_no,
                         'department' => $matchedEmployee->department?->name ?? 'N/A',
                     ] : null,
-                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_datetime' => $formattedDt,
                     'punch_type' => $record['punch_type'],
                     'device_id' => $record['device_id'],
                     'status' => $status,
@@ -162,6 +184,8 @@ final class AttendanceImportService
             'valid_rows' => $validation['summary']['valid'],
             'invalid_rows' => $validation['summary']['invalid'],
             'mapped_count' => $mappedCount,
+            'ready_count' => $readyCount,
+            'duplicate_count' => $duplicateCount,
             'unmapped_count' => $unmappedCount,
             'unique_unmapped' => $uniqueUnmappedList,
             'preview_rows' => $previewRows,
@@ -250,9 +274,25 @@ final class AttendanceImportService
                 'errors' => [],
             ]);
 
+            // Preload existing attendance logs for matched employees in this batch
+            $matchedEmpIds = [];
+            $punchTimes = [];
+            foreach ($validation['valid_records'] as $record) {
+                $bioId = $record['biometric_id'];
+                $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+                if ($matchedEmployee !== null) {
+                    $matchedEmpIds[] = $matchedEmployee->id;
+                    $punchTimes[] = $record['punch_datetime'];
+                }
+            }
+
+            $existingLogsMap = $this->getExistingAttendanceLogsMap($tenantId, $matchedEmpIds, $punchTimes);
+
             $punchesToInsert = [];
             $unmappedPunches = [];
+            $seenInBatch = [];
             $insertedCount = 0;
+            $duplicateCount = 0;
             $failedCount = $validation['summary']['invalid'];
             $now = Carbon::now();
 
@@ -271,11 +311,21 @@ final class AttendanceImportService
                     continue;
                 }
 
+                $formattedDt = Carbon::parse($record['punch_datetime'])->format('Y-m-d H:i:s');
+                $punchKey = $matchedEmployee->id.'_'.$formattedDt.'_'.$record['punch_type'];
+
+                if (isset($existingLogsMap[$punchKey]) || isset($seenInBatch[$punchKey])) {
+                    $duplicateCount++;
+                    continue;
+                }
+
+                $seenInBatch[$punchKey] = true;
+
                 $punchesToInsert[] = [
                     'id' => (string) Str::ulid(),
                     'tenant_id' => $tenantId,
                     'employee_id' => $matchedEmployee->id,
-                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_datetime' => $formattedDt,
                     'punch_type' => $record['punch_type'],
                     'device_id' => $record['device_id'] ?? null,
                     'raw_biometric_id' => $bioId,
@@ -289,7 +339,6 @@ final class AttendanceImportService
             // Insert punches in chunks with duplicate protection
             if (! empty($punchesToInsert)) {
                 foreach (array_chunk($punchesToInsert, 500) as $chunk) {
-                    // Use insertOrIgnore to skip identical (tenant_id, employee_id, punch_datetime, punch_type) records
                     $inserted = DB::table('attendance_logs')->insertOrIgnore($chunk);
                     $insertedCount += $inserted;
                 }
@@ -305,9 +354,12 @@ final class AttendanceImportService
                 $errors['invalid_records_count'] = count($validation['invalid_records']);
                 $errors['invalid_samples'] = array_slice($validation['invalid_records'], 0, 50);
             }
+            if ($duplicateCount > 0) {
+                $errors['duplicate_skipped_count'] = $duplicateCount;
+            }
 
             $finalStatus = 'completed';
-            if ($insertedCount === 0 && $failedCount > 0) {
+            if ($insertedCount === 0 && $duplicateCount === 0 && $failedCount > 0) {
                 $finalStatus = 'failed';
             } elseif ($failedCount > 0) {
                 $finalStatus = 'partial';
@@ -362,8 +414,24 @@ final class AttendanceImportService
             $employeeByEmpNo[trim((string) $employee->emp_no)] = $employee;
         }
 
+        // Preload existing attendance logs for matched employees in this timeframe to detect duplicates
+        $matchedEmpIds = [];
+        $punchTimes = [];
+        foreach ($validation['valid_records'] as $record) {
+            $bioId = $record['biometric_id'];
+            $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+            if ($matchedEmployee !== null) {
+                $matchedEmpIds[] = $matchedEmployee->id;
+                $punchTimes[] = $record['punch_datetime'];
+            }
+        }
+
+        $existingLogsMap = $tenantId ? $this->getExistingAttendanceLogsMap($tenantId, $matchedEmpIds, $punchTimes) : [];
+
         $mappedCount = 0;
         $unmappedCount = 0;
+        $duplicateCount = 0;
+        $readyCount = 0;
         $unmappedIds = [];
         $previewRows = [];
         $seenPunches = [];
@@ -372,18 +440,24 @@ final class AttendanceImportService
             $bioId = $record['biometric_id'];
             $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
 
-            $punchKey = ($matchedEmployee ? $matchedEmployee->id : $bioId).'_'.$record['punch_datetime'].'_'.$record['punch_type'];
+            $formattedDt = Carbon::parse($record['punch_datetime'])->format('Y-m-d H:i:s');
+            $punchKey = ($matchedEmployee ? $matchedEmployee->id : $bioId).'_'.$formattedDt.'_'.$record['punch_type'];
             $isDuplicateInBatch = isset($seenPunches[$punchKey]);
             $seenPunches[$punchKey] = true;
+            $isAlreadyInLogs = $matchedEmployee && isset($existingLogsMap[$punchKey]);
 
             $status = 'ready';
-            if ($isDuplicateInBatch) {
-                $status = 'duplicate';
-            } elseif ($matchedEmployee === null) {
+            if ($matchedEmployee === null) {
                 $status = 'unmapped';
                 $unmappedCount++;
                 $unmappedIds[$bioId] = ($unmappedIds[$bioId] ?? 0) + 1;
+            } elseif ($isAlreadyInLogs || $isDuplicateInBatch) {
+                $status = 'duplicate';
+                $duplicateCount++;
+                $mappedCount++;
             } else {
+                $status = 'ready';
+                $readyCount++;
                 $mappedCount++;
             }
 
@@ -398,7 +472,7 @@ final class AttendanceImportService
                         'emp_no' => $matchedEmployee->emp_no,
                         'department' => $matchedEmployee->department?->name ?? 'N/A',
                     ] : null,
-                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_datetime' => $formattedDt,
                     'punch_type' => $record['punch_type'],
                     'device_id' => $record['device_id'],
                     'status' => $status,
@@ -419,6 +493,8 @@ final class AttendanceImportService
             'valid_rows' => $validation['summary']['valid'],
             'invalid_rows' => $validation['summary']['invalid'],
             'mapped_count' => $mappedCount,
+            'ready_count' => $readyCount,
+            'duplicate_count' => $duplicateCount,
             'unmapped_count' => $unmappedCount,
             'unique_unmapped' => $uniqueUnmappedList,
             'preview_rows' => $previewRows,
@@ -493,11 +569,27 @@ final class AttendanceImportService
                 'errors' => [],
             ]);
 
+            // Preload existing attendance logs for matched employees in this batch
+            $matchedEmpIds = [];
+            $punchTimes = [];
+            foreach ($validation['valid_records'] as $record) {
+                $bioId = $record['biometric_id'];
+                $matchedEmployee = $employeeByBioId[$bioId] ?? $employeeByEmpNo[$bioId] ?? null;
+                if ($matchedEmployee !== null) {
+                    $matchedEmpIds[] = $matchedEmployee->id;
+                    $punchTimes[] = $record['punch_datetime'];
+                }
+            }
+
+            $existingLogsMap = $this->getExistingAttendanceLogsMap($tenantId, $matchedEmpIds, $punchTimes);
+
             $punchesToInsert = [];
             $unmappedPunches = [];
             $importedStagingIds = [];
             $failedStagingIds = [];
+            $seenInBatch = [];
             $insertedCount = 0;
+            $duplicateCount = 0;
             $failedCount = $validation['summary']['invalid'];
             $now = Carbon::now();
 
@@ -520,12 +612,35 @@ final class AttendanceImportService
                     continue;
                 }
 
+                $formattedDt = Carbon::parse($record['punch_datetime'])->format('Y-m-d H:i:s');
+                $punchKey = $matchedEmployee->id.'_'.$formattedDt.'_'.$record['punch_type'];
+
+                // 1. If already exists in attendance_logs
+                if (isset($existingLogsMap[$punchKey])) {
+                    $duplicateCount++;
+                    if ($stagingId) {
+                        $importedStagingIds[$stagingId] = $existingLogsMap[$punchKey];
+                    }
+                    continue;
+                }
+
+                // 2. If duplicate within this batch
+                if (isset($seenInBatch[$punchKey])) {
+                    $duplicateCount++;
+                    if ($stagingId && isset($seenInBatch[$punchKey]['log_id'])) {
+                        $importedStagingIds[$stagingId] = $seenInBatch[$punchKey]['log_id'];
+                    }
+                    continue;
+                }
+
                 $logId = (string) Str::ulid();
+                $seenInBatch[$punchKey] = ['log_id' => $logId];
+
                 $punchesToInsert[] = [
                     'id' => $logId,
                     'tenant_id' => $tenantId,
                     'employee_id' => $matchedEmployee->id,
-                    'punch_datetime' => $record['punch_datetime'],
+                    'punch_datetime' => $formattedDt,
                     'punch_type' => $record['punch_type'],
                     'device_id' => $record['device_id'] ?? null,
                     'raw_biometric_id' => $bioId,
@@ -582,9 +697,12 @@ final class AttendanceImportService
                 $errors['invalid_records_count'] = count($validation['invalid_records']);
                 $errors['invalid_samples'] = array_slice($validation['invalid_records'], 0, 50);
             }
+            if ($duplicateCount > 0) {
+                $errors['duplicate_skipped_count'] = $duplicateCount;
+            }
 
             $finalStatus = 'completed';
-            if ($insertedCount === 0 && $failedCount > 0) {
+            if ($insertedCount === 0 && $duplicateCount === 0 && $failedCount > 0) {
                 $finalStatus = 'failed';
             } elseif ($failedCount > 0) {
                 $finalStatus = 'partial';
@@ -721,5 +839,42 @@ final class AttendanceImportService
                 'mime' => 'text/csv',
             ],
         };
+    }
+
+    /**
+     * Build an existing punches lookup map from attendance_logs for the given records.
+     *
+     * @param  string  $tenantId
+     * @param  array<int, string>  $employeeIds
+     * @param  array<int, string>  $punchDatetimes
+     * @return array<string, string> Key: "{employee_id}_{punch_datetime}_{punch_type}" => attendance_log_id
+     */
+    private function getExistingAttendanceLogsMap(string $tenantId, array $employeeIds, array $punchDatetimes): array
+    {
+        if (empty($employeeIds) || empty($punchDatetimes)) {
+            return [];
+        }
+
+        $minTime = min($punchDatetimes);
+        $maxTime = max($punchDatetimes);
+
+        $existing = DB::table('attendance_logs')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('employee_id', array_values(array_unique($employeeIds)))
+            ->whereBetween('punch_datetime', [
+                Carbon::parse($minTime)->subMinute()->toDateTimeString(),
+                Carbon::parse($maxTime)->addMinute()->toDateTimeString(),
+            ])
+            ->select(['id', 'employee_id', 'punch_datetime', 'punch_type'])
+            ->get();
+
+        $map = [];
+        foreach ($existing as $row) {
+            $dt = Carbon::parse($row->punch_datetime)->format('Y-m-d H:i:s');
+            $key = $row->employee_id.'_'.$dt.'_'.$row->punch_type;
+            $map[$key] = (string) $row->id;
+        }
+
+        return $map;
     }
 }
