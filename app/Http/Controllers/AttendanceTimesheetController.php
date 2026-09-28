@@ -80,6 +80,8 @@ final class AttendanceTimesheetController extends Controller
             ->orderBy('name')
             ->get();
 
+        $departmentId = $request->query('department_id');
+
         return Inertia::render('Attendance/Timesheet', [
             'employees' => $employees,
             'selectedEmployee' => $selectedEmployee,
@@ -89,6 +91,7 @@ final class AttendanceTimesheetController extends Controller
             'summary' => $summary,
             'departments' => $departments,
             'shifts' => $shifts,
+            'selectedDepartmentId' => $departmentId,
         ]);
     }
 

@@ -238,11 +238,69 @@ final class AttendanceDailyController extends Controller
     }
 
     /**
+     * Unified Atomic Attendance Adjustment endpoint.
+     * Can adjust an existing record by ID or resolve/create & adjust for employee_id + date.
+     */
+    public function adjust(AdjustDailyPunchRequest $request): RedirectResponse
+    {
+        $validated = $request->validated();
+        $user = $request->user();
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+
+        $record = null;
+        if (! empty($validated['attendance_daily_id'])) {
+            $record = AttendanceDaily::query()
+                ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+                ->findOrFail($validated['attendance_daily_id']);
+        } elseif (! empty($validated['employee_id']) && ! empty($validated['date'])) {
+            $date = Carbon::parse($validated['date']);
+            $record = AttendanceDaily::firstOrCreate(
+                [
+                    'tenant_id' => $tenantId,
+                    'employee_id' => $validated['employee_id'],
+                    'attendance_date' => $date->toDateString(),
+                ],
+                [
+                    'status' => 'scheduled',
+                    'worked_hours' => 0.00,
+                    'regular_hours' => 0.00,
+                    'late_minutes' => 0,
+                    'early_departure_minutes' => 0,
+                    'ot_hours' => 0.00,
+                    'double_ot_hours' => 0.00,
+                    'is_manual' => false,
+                ]
+            );
+        }
+
+        if (! $record) {
+            return redirect()->back()->with('error', 'Attendance record or employee date context not found.');
+        }
+
+        if ($this->processingService->isDateInLockedPayrollPeriod(Carbon::parse($record->attendance_date), $tenantId)) {
+            return redirect()->back()->with('error', 'Cannot adjust attendance: Payroll period for this month is approved and locked.');
+        }
+
+        $this->processingService->adjustDailyRecord(
+            $record,
+            $validated,
+            $user
+        );
+
+        return redirect()->back()->with('success', 'Attendance record manually adjusted with audit record.');
+    }
+
+    /**
      * Manually adjust an attendance daily record with mandatory audit justification.
      */
     public function update(AdjustDailyPunchRequest $request, AttendanceDaily $attendanceDaily): RedirectResponse
     {
         $user = $request->user();
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+
+        if ($this->processingService->isDateInLockedPayrollPeriod(Carbon::parse($attendanceDaily->attendance_date), $tenantId)) {
+            return redirect()->back()->with('error', 'Cannot adjust attendance: Payroll period for this month is approved and locked.');
+        }
 
         $this->processingService->adjustDailyRecord(
             $attendanceDaily,

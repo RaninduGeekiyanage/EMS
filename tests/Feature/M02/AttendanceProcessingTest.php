@@ -9,6 +9,7 @@ use App\Models\AttendanceLog;
 use App\Models\AttendanceRule;
 use App\Models\Department;
 use App\Models\Employee;
+use App\Models\PayrollRun;
 use App\Models\PublicHoliday;
 use App\Models\Shift;
 use App\Models\ShiftAssignment;
@@ -575,5 +576,108 @@ final class AttendanceProcessingTest extends TestCase
         $response->assertOk();
         $this->assertEquals('text/csv; charset=UTF-8', $response->headers->get('Content-Type'));
         $this->assertStringContainsString('attachment; filename=', (string) $response->headers->get('Content-Disposition'));
+    }
+
+    public function test_can_adjust_existing_record_via_unified_adjust_endpoint(): void
+    {
+        $daily = AttendanceDaily::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => '2026-06-15',
+            'shift_id' => $this->standardShift->id,
+            'status' => 'missing_punch',
+            'worked_hours' => 0.00,
+            'is_manual' => false,
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->post('/attendance/daily/adjust', [
+                'attendance_daily_id' => $daily->id,
+                'check_in' => '2026-06-15 08:30:00',
+                'check_out' => '2026-06-15 17:30:00',
+                'status' => 'present',
+                'manual_reason' => 'Fingerprint reader was offline; employee worked standard shift verified by manager.',
+            ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHas('success');
+
+        $daily->refresh();
+        $this->assertTrue($daily->is_manual);
+        $this->assertEquals('present', $daily->status);
+        $this->assertEquals(8.00, $daily->worked_hours);
+        $this->assertEquals($this->manager->id, $daily->manual_edited_by);
+        $this->assertStringContainsString('Fingerprint reader was offline', (string) $daily->manual_reason);
+    }
+
+    public function test_can_adjust_and_create_unrecorded_date_via_unified_adjust_endpoint(): void
+    {
+        $this->assertDatabaseMissing('attendance_daily', [
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => '2026-06-16',
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->post('/attendance/daily/adjust', [
+                'employee_id' => $this->employee->id,
+                'date' => '2026-06-16',
+                'check_in' => '2026-06-16 08:30:00',
+                'check_out' => '2026-06-16 17:30:00',
+                'status' => 'present',
+                'manual_reason' => 'Employee worked offsite client installation with paper logbook approval.',
+            ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHas('success');
+
+        $daily = AttendanceDaily::where('tenant_id', $this->tenant->id)
+            ->where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-06-16')
+            ->first();
+
+        $this->assertNotNull($daily);
+        $this->assertTrue($daily->is_manual);
+        $this->assertEquals('present', $daily->status);
+        $this->assertEquals(8.00, $daily->worked_hours);
+    }
+
+    public function test_adjust_endpoint_rejects_when_payroll_period_is_locked(): void
+    {
+        PayrollRun::create([
+            'tenant_id' => $this->tenant->id,
+            'period_year' => 2026,
+            'period_month' => 6,
+            'period_type' => 'monthly',
+            'cutoff_date' => '2026-06-30',
+            'status' => 'locked',
+            'run_by' => $this->manager->id,
+            'run_at' => Carbon::now(),
+        ]);
+
+        $daily = AttendanceDaily::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => '2026-06-18',
+            'shift_id' => $this->standardShift->id,
+            'status' => 'missing_punch',
+            'worked_hours' => 0.00,
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->post('/attendance/daily/adjust', [
+                'attendance_daily_id' => $daily->id,
+                'check_in' => '2026-06-18 08:30:00',
+                'check_out' => '2026-06-18 17:30:00',
+                'status' => 'present',
+                'manual_reason' => 'Attempting adjustment after payroll lock.',
+            ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+
+        $daily->refresh();
+        $this->assertEquals('missing_punch', $daily->status);
+        $this->assertFalse($daily->is_manual);
     }
 }

@@ -200,6 +200,7 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::post('/attendance/daily/process-date', [AttendanceDailyController::class, 'processSingleDate'])->name('attendance.daily.process-date');
         Route::post('/attendance/daily/process-backlog', [AttendanceDailyController::class, 'processBacklog'])->name('attendance.daily.process-backlog');
         Route::put('/attendance/daily/{attendanceDaily}', [AttendanceDailyController::class, 'update'])->name('attendance.daily.update');
+        Route::post('/attendance/daily/adjust', [AttendanceDailyController::class, 'adjust'])->name('attendance.daily.adjust');
         Route::post('/attendance/rules', [AttendanceDailyController::class, 'saveRule'])->name('attendance.rules.store');
 
         // Dedicated Employee Monthly Timesheet & Audit Matrix

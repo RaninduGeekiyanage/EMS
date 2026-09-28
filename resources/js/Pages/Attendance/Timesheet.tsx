@@ -33,6 +33,7 @@ interface Employee {
     id: string;
     emp_no: string;
     full_name: string;
+    department_id?: string | null;
     department?: {
         id: string;
         name: string;
@@ -96,6 +97,7 @@ interface Props {
     summary?: TimesheetSummary | null;
     departments: Array<{ id: string; name: string }>;
     shifts: Array<{ id: string; name: string; code: string; color?: string | null }>;
+    selectedDepartmentId?: string | null;
 }
 
 export default function Timesheet({
@@ -107,13 +109,19 @@ export default function Timesheet({
     summary,
     departments,
     shifts,
+    selectedDepartmentId,
 }: Props) {
-    const [employeeFilter, setEmployeeFilter] = useState('');
+    const [deptFilter, setDeptFilter] = useState(selectedDepartmentId || '');
+    const [nameSearch, setNameSearch] = useState('');
+    const [empNoSearch, setEmpNoSearch] = useState('');
     const [adjustModalDay, setAdjustModalDay] = useState<TimesheetDay | null>(null);
     const [auditModalDay, setAuditModalDay] = useState<TimesheetDay | null>(null);
 
-    // Form: Manual Adjustment
+    // Form: Manual Adjustment (Atomic single source of truth)
     const adjustForm = useForm({
+        attendance_daily_id: '',
+        employee_id: '',
+        date: '',
         check_in: '',
         check_out: '',
         status: 'present',
@@ -127,6 +135,7 @@ export default function Timesheet({
             {
                 employee_id: selectedEmployee?.id,
                 month: newMonth,
+                department_id: deptFilter || undefined,
             },
             { preserveState: true }
         );
@@ -147,21 +156,70 @@ export default function Timesheet({
             {
                 employee_id: empId,
                 month: selectedMonth,
+                department_id: deptFilter || undefined,
             },
             { preserveState: true }
         );
     };
 
-    // Filtered employees for dropdown
+    // Filtered employees shortlisted by department and name search
     const filteredEmployees = employees.filter((emp) => {
-        if (!employeeFilter) return true;
-        const q = employeeFilter.toLowerCase();
-        return (
-            emp.full_name.toLowerCase().includes(q) ||
-            emp.emp_no.toLowerCase().includes(q) ||
-            emp.department?.name?.toLowerCase().includes(q)
-        );
+        if (deptFilter && emp.department_id !== deptFilter && emp.department?.id !== deptFilter) {
+            return false;
+        }
+        if (nameSearch.trim()) {
+            const q = nameSearch.toLowerCase().trim();
+            if (!emp.full_name.toLowerCase().includes(q) && !emp.emp_no.toLowerCase().includes(q)) {
+                return false;
+            }
+        }
+        return true;
     });
+
+    // Exact Emp ID search handler
+    const handleExactEmpSearch = (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!empNoSearch.trim()) return;
+
+        const trimmed = empNoSearch.trim().toLowerCase();
+        const found = employees.find((emp) => emp.emp_no.toLowerCase() === trimmed);
+        if (found) {
+            router.get(
+                '/attendance/timesheet',
+                {
+                    employee_id: found.id,
+                    month: selectedMonth,
+                    department_id: deptFilter || undefined,
+                },
+                { preserveState: true }
+            );
+        } else {
+            alert(`No employee found with exact ID "${empNoSearch.trim()}".`);
+        }
+    };
+
+    // Department shortlist handler
+    const handleDepartmentChange = (deptId: string) => {
+        setDeptFilter(deptId);
+        const eligible = employees.filter(emp => !deptId || emp.department_id === deptId || emp.department?.id === deptId);
+        if (eligible.length > 0 && selectedEmployee && !eligible.some(e => e.id === selectedEmployee.id)) {
+            router.get(
+                '/attendance/timesheet',
+                {
+                    employee_id: eligible[0].id,
+                    month: selectedMonth,
+                    department_id: deptId || undefined,
+                },
+                { preserveState: true }
+            );
+        }
+    };
+
+    const handleResetFilters = () => {
+        setDeptFilter('');
+        setNameSearch('');
+        setEmpNoSearch('');
+    };
 
     const formatTime = (dateTimeStr?: string | null) => {
         if (!dateTimeStr) return '—';
@@ -191,10 +249,13 @@ export default function Timesheet({
         });
     };
 
-    // Open Adjust modal
+    // Open Adjust modal (Atomic consistency with Daily Ledger)
     const openAdjustModal = (day: TimesheetDay) => {
         setAdjustModalDay(day);
         adjustForm.setData({
+            attendance_daily_id: day.daily_id || '',
+            employee_id: selectedEmployee?.id || '',
+            date: day.date,
             check_in: day.check_in ? day.check_in.replace(' ', 'T').substring(0, 16) : '',
             check_out: day.check_out ? day.check_out.replace(' ', 'T').substring(0, 16) : '',
             status: (day.status === 'unprocessed' || day.status === 'missing_punch') ? 'present' : day.status,
@@ -206,31 +267,14 @@ export default function Timesheet({
         e.preventDefault();
         if (!adjustModalDay || !selectedEmployee) return;
 
-        if (adjustModalDay.daily_id) {
-            adjustForm.put(`/attendance/daily/${adjustModalDay.daily_id}`, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setAdjustModalDay(null);
-                    adjustForm.reset();
-                },
-            });
-        } else {
-            // Reprocess the day or trigger daily calculate
-            router.post(
-                '/attendance/daily/process-date',
-                {
-                    date: adjustModalDay.date,
-                },
-                {
-                    preserveScroll: true,
-                    onSuccess: () => {
-                        setAdjustModalDay(null);
-                        adjustForm.reset();
-                        router.reload();
-                    },
-                }
-            );
-        }
+        adjustForm.post('/attendance/daily/adjust', {
+            preserveScroll: true,
+            onSuccess: () => {
+                setAdjustModalDay(null);
+                adjustForm.reset();
+                router.reload();
+            },
+        });
     };
 
     const getStatusBadge = (day: TimesheetDay) => {
@@ -345,25 +389,94 @@ export default function Timesheet({
                     </div>
                 </div>
 
-                {/* Control Panel: Employee Selector & Month Navigator */}
-                <div className="px-3 py-1.5 md:py-2 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm flex flex-col md:flex-row items-center justify-between gap-2.5 shrink-0">
-                    {/* Employee Picker */}
-                    <div className="flex items-center gap-2 w-full md:w-auto flex-1 min-w-[280px] max-w-xl">
-                        <div className="relative w-full">
-                            <User className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                {/* Control Panel: Employee Shortlist Toolbar & Month Navigator */}
+                <div className="px-3 py-1.5 md:py-2 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm flex flex-col xl:flex-row items-center justify-between gap-2.5 shrink-0">
+                    {/* Left: Department Filter, Name Search, Emp ID Exact Search & Shortlisted Dropdown */}
+                    <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto flex-1">
+                        {/* Department Shortlist */}
+                        <div className="w-48 min-w-[140px]">
+                            <select
+                                value={deptFilter}
+                                onChange={(e) => handleDepartmentChange(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                                title="Shortlist employees by department"
+                            >
+                                <option value="">All Departments ({employees.length})</option>
+                                {departments.map((d) => {
+                                    const count = employees.filter((e) => e.department_id === d.id || e.department?.id === d.id).length;
+                                    return (
+                                        <option key={d.id} value={d.id}>
+                                            {d.name} ({count})
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        {/* Name Search */}
+                        <div className="relative w-40 min-w-[120px]">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input
+                                type="text"
+                                placeholder="Search name..."
+                                value={nameSearch}
+                                onChange={(e) => setNameSearch(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-7 pr-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+
+                        {/* Exact Emp ID Lookup */}
+                        <div className="flex items-center gap-1 w-36 min-w-[110px]">
+                            <input
+                                type="text"
+                                placeholder="Emp ID (Exact)..."
+                                value={empNoSearch}
+                                onChange={(e) => setEmpNoSearch(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleExactEmpSearch()}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                title="Type exact employee ID and press Enter"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => handleExactEmpSearch()}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition shrink-0"
+                                title="Search Exact Emp ID"
+                            >
+                                <Search className="w-3 h-3" />
+                            </button>
+                        </div>
+
+                        {/* Shortlisted Employee Picker */}
+                        <div className="relative flex-1 min-w-[200px] max-w-sm">
                             <select
                                 value={selectedEmployee?.id || ''}
                                 onChange={(e) => handleSelectEmployee(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-medium"
                             >
-                                <option value="">Select Employee...</option>
-                                {employees.map((emp) => (
+                                <option value="" disabled>
+                                    {filteredEmployees.length === 0
+                                        ? 'No matching employees'
+                                        : `Select Employee (${filteredEmployees.length} shortlisted)...`}
+                                </option>
+                                {filteredEmployees.map((emp) => (
                                     <option key={emp.id} value={emp.id}>
-                                        {emp.emp_no} — {emp.full_name} {emp.department ? `(${emp.department.name})` : ''}
+                                        {emp.emp_no} — {emp.full_name} ({emp.department?.name || 'No Dept'})
                                     </option>
                                 ))}
                             </select>
                         </div>
+
+                        {/* Reset Filters */}
+                        {(deptFilter || nameSearch || empNoSearch) && (
+                            <button
+                                type="button"
+                                onClick={handleResetFilters}
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs rounded-lg transition"
+                                title="Reset employee shortlist filters"
+                            >
+                                Reset
+                            </button>
+                        )}
                     </div>
 
                     {/* Month Navigator Toolbar */}
@@ -514,14 +627,14 @@ export default function Timesheet({
                         <table className="w-full text-left border-collapse text-xs">
                             <thead className="sticky top-0 z-10 bg-slate-950 border-b border-slate-800/80 shadow-sm">
                                 <tr className="text-slate-400 font-semibold tracking-wider uppercase text-[11px]">
-                                    <th className="py-2.5 px-3 text-center w-12">#</th>
-                                    <th className="py-2.5 px-3 w-32">Date</th>
+                                    <th className="py-2.5 px-3 text-center w-12 shrink-0">#</th>
+                                    <th className="py-2.5 px-3 w-44 min-w-[170px] whitespace-nowrap">Date</th>
                                     <th className="py-2.5 px-3">Duty Roster Schedule</th>
                                     <th className="py-2.5 px-3">Punch In</th>
                                     <th className="py-2.5 px-3">Punch Out</th>
-                                    <th className="py-2.5 px-3 text-center">Worked Hours</th>
-                                    <th className="py-2.5 px-3 text-center">Overtime (1.5x / 2.0x)</th>
-                                    <th className="py-2.5 px-3 text-center">Status & Flags</th>
+                                    <th className="py-2.5 px-3 text-center whitespace-nowrap">Worked Hours</th>
+                                    <th className="py-2.5 px-3 text-center whitespace-nowrap">Overtime (1.5x / 2.0x)</th>
+                                    <th className="py-2.5 px-3 text-center whitespace-nowrap">Status & Flags</th>
                                     <th className="py-2.5 px-3 text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -555,17 +668,17 @@ export default function Timesheet({
                                                 </td>
 
                                                 {/* Date & Day of Week */}
-                                                <td className="py-2 px-3">
+                                                <td className="py-2 px-3 whitespace-nowrap">
                                                     <div className="flex items-center gap-2">
                                                         <div
-                                                            className={`font-mono font-bold text-xs ${
+                                                            className={`font-mono font-bold text-xs whitespace-nowrap ${
                                                                 day.is_weekend ? 'text-indigo-400' : 'text-white'
                                                             }`}
                                                         >
                                                             {day.date}
                                                         </div>
                                                         <span
-                                                            className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                                                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${
                                                                 day.is_weekend
                                                                     ? 'bg-indigo-500/20 text-indigo-300'
                                                                     : 'bg-slate-800 text-slate-400'
@@ -734,6 +847,9 @@ export default function Timesheet({
                                             onChange={(e) => adjustForm.setData('check_in', e.target.value)}
                                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                                         />
+                                        {adjustForm.errors.check_in && (
+                                            <p className="text-[11px] text-rose-400 mt-1">{adjustForm.errors.check_in}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -745,6 +861,9 @@ export default function Timesheet({
                                             onChange={(e) => adjustForm.setData('check_out', e.target.value)}
                                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                                         />
+                                        {adjustForm.errors.check_out && (
+                                            <p className="text-[11px] text-rose-400 mt-1">{adjustForm.errors.check_out}</p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -765,6 +884,9 @@ export default function Timesheet({
                                         <option value="leave">Leave</option>
                                         <option value="missing_punch">Missing Punch</option>
                                     </select>
+                                    {adjustForm.errors.status && (
+                                        <p className="text-[11px] text-rose-400 mt-1">{adjustForm.errors.status}</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -784,6 +906,9 @@ export default function Timesheet({
                                         onChange={(e) => adjustForm.setData('manual_reason', e.target.value)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-indigo-500"
                                     />
+                                    {adjustForm.errors.manual_reason && (
+                                        <p className="text-[11px] text-rose-400 mt-1">{adjustForm.errors.manual_reason}</p>
+                                    )}
                                 </div>
 
                                 <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">

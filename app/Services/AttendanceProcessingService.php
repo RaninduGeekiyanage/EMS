@@ -830,6 +830,15 @@ final class AttendanceProcessingService
             $shift = $record->shift;
             $tenantId = $record->tenant_id;
             $date = Carbon::parse($record->attendance_date);
+
+            if (! $shift && $record->employee) {
+                $rosterEntry = $this->shiftService->getRosterEntryForEmployee($record->employee, $date);
+                $shift = $rosterEntry?->shift ?? Shift::where('tenant_id', $tenantId)->first();
+                if ($shift) {
+                    $record->shift_id = $shift->id;
+                }
+            }
+
             $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
             $holiday = $this->shiftService->isHoliday($date);
 

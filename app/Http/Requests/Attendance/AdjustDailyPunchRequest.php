@@ -19,6 +19,9 @@ final class AdjustDailyPunchRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'attendance_daily_id' => ['nullable', 'string'],
+            'employee_id' => ['nullable', 'string'],
+            'date' => ['nullable', 'date'],
             'check_in' => ['nullable', 'date'],
             'check_out' => ['nullable', 'date', 'after_or_equal:check_in'],
             'status' => ['required', 'string', 'in:present,absent,half_day,leave,holiday,rest_day,missing_punch'],
