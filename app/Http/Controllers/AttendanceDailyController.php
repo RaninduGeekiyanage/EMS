@@ -14,6 +14,7 @@ use App\Models\Shift;
 use App\Services\AttendanceProcessingService;
 use App\Services\ShiftService;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -38,6 +39,8 @@ final class AttendanceDailyController extends Controller
         $departmentId = $request->query('department_id');
         $status = $request->query('status');
         $search = $request->query('search');
+        $name = $request->query('name');
+        $empNo = $request->query('emp_no');
 
         $query = AttendanceDaily::query()
             ->with([
@@ -68,6 +71,18 @@ final class AttendanceDailyController extends Controller
             }
         }
 
+        if (! empty($name)) {
+            $query->whereHas('employee', function ($q) use ($name) {
+                $q->where('full_name', 'like', "%{$name}%");
+            });
+        }
+
+        if (! empty($empNo)) {
+            $query->whereHas('employee', function ($q) use ($empNo) {
+                $q->where('emp_no', $empNo);
+            });
+        }
+
         if (! empty($search)) {
             $query->whereHas('employee', function ($q) use ($search) {
                 $q->where('full_name', 'like', "%{$search}%")
@@ -75,7 +90,7 @@ final class AttendanceDailyController extends Controller
             });
         }
 
-        $records = $query->orderBy('created_at', 'desc')->get();
+        $records = $query->orderBy('created_at', 'desc')->paginate(30)->withQueryString();
 
         $stats = $this->processingService->getDailyLedgerStats($date);
         $unprocessedStats = $this->processingService->getUnprocessedSummary($tenantId);
@@ -112,6 +127,8 @@ final class AttendanceDailyController extends Controller
                 'department_id' => $departmentId,
                 'status' => $status,
                 'search' => $search,
+                'name' => $name,
+                'emp_no' => $empNo,
             ],
         ]);
     }
@@ -151,6 +168,53 @@ final class AttendanceDailyController extends Controller
             'success',
             "Calculated attendance for {$date->toDateString()}: {$result['processed']} processed ({$result['present']} present, {$result['absent']} absent, {$result['late']} late, {$result['missing_punch']} missing punches)."
         );
+    }
+
+    /**
+     * Process a single date as part of a safe, sequential batch loop.
+     */
+    public function processSingleDate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'department_id' => ['nullable', 'string'],
+            'overwrite_manual' => ['nullable', 'boolean'],
+        ]);
+
+        $date = Carbon::parse($validated['date']);
+        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+
+        if ($this->processingService->isDateInLockedPayrollPeriod($date, $tenantId)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Payroll for {$date->toDateString()} is finalized and locked.",
+            ], 422);
+        }
+
+        $result = $this->processingService->processDate(
+            $date,
+            null,
+            $validated['department_id'] ?? null,
+            (bool) ($validated['overwrite_manual'] ?? false)
+        );
+
+        return response()->json([
+            'success' => true,
+            'date' => $date->toDateString(),
+            'records_processed' => $result['processed'],
+            'processed' => $result['processed'],
+            'stats' => [
+                'processed' => $result['processed'],
+                'present' => $result['present'],
+                'absent' => $result['absent'],
+                'late' => $result['late'],
+                'missing_punch' => $result['missing_punch'],
+            ],
+            'present' => $result['present'],
+            'absent' => $result['absent'],
+            'late' => $result['late'],
+            'missing_punch' => $result['missing_punch'],
+        ]);
     }
 
     /**

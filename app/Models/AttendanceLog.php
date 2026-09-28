@@ -47,7 +47,7 @@ final class AttendanceLog extends Model
     protected function casts(): array
     {
         return [
-            'punch_datetime' => 'datetime',
+            'punch_datetime' => 'datetime:Y-m-d H:i:s',
             'is_processed' => 'boolean',
             'processed_at' => 'datetime',
         ];

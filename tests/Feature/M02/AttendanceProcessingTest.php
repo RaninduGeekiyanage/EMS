@@ -517,4 +517,63 @@ final class AttendanceProcessingTest extends TestCase
 
         Carbon::setTestNow(); // Reset mock
     }
+
+    public function test_can_filter_daily_by_name_and_emp_no(): void
+    {
+        $response = $this->actingAs($this->manager)
+            ->get('/attendance/daily?date=2026-06-24&emp_no=' . $this->employee->emp_no . '&name=' . urlencode($this->employee->full_name));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Attendance/Daily')
+            ->has('records.data')
+            ->where('filters.emp_no', $this->employee->emp_no)
+        );
+    }
+
+    public function test_can_process_single_date_via_json_endpoint(): void
+    {
+        $response = $this->actingAs($this->manager)
+            ->postJson('/attendance/daily/process-date', [
+                'date' => '2026-06-24',
+                'overwrite_manual' => false,
+            ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'success' => true,
+            'date' => '2026-06-24',
+        ]);
+        $response->assertJsonStructure([
+            'success',
+            'date',
+            'records_processed',
+            'stats',
+        ]);
+    }
+
+    public function test_can_view_monthly_timesheet_page(): void
+    {
+        $response = $this->actingAs($this->manager)
+            ->get('/attendance/timesheet?employee_id=' . $this->employee->id . '&month=2026-06');
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Attendance/Timesheet')
+            ->has('timesheetDays', 30) // June has 30 days
+            ->where('selectedMonth', '2026-06')
+            ->has('summary')
+            ->has('employees')
+        );
+    }
+
+    public function test_can_export_monthly_timesheet_csv(): void
+    {
+        $response = $this->actingAs($this->manager)
+            ->get('/attendance/timesheet/export?employee_id=' . $this->employee->id . '&month=2026-06');
+
+        $response->assertOk();
+        $this->assertEquals('text/csv; charset=UTF-8', $response->headers->get('Content-Type'));
+        $this->assertStringContainsString('attachment; filename=', (string) $response->headers->get('Content-Disposition'));
+    }
 }

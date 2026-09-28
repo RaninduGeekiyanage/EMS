@@ -11,6 +11,7 @@ import {
     CalendarRange,
     FileSpreadsheet,
     CalendarCheck,
+    Calendar,
     Palmtree,
     DollarSign,
     ShieldAlert,
@@ -68,6 +69,7 @@ interface LayoutProps {
     title?: string;
     backUrl?: string;
     showBackButton?: boolean;
+    fullHeight?: boolean;
     children: React.ReactNode;
 }
 
@@ -75,6 +77,7 @@ export default function AuthenticatedLayout({
     title,
     backUrl,
     showBackButton,
+    fullHeight = false,
     children,
 }: LayoutProps) {
     const { auth, flash } = usePage<PageProps>().props;
@@ -159,7 +162,7 @@ export default function AuthenticatedLayout({
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-200">
+        <div className={`min-h-screen ${fullHeight ? 'xl:h-screen xl:overflow-hidden' : ''} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-200`}>
             <Head title={title ? `${title} — EMS` : 'EMS'} />
 
             {/* Impersonation Banner for Super Admin */}
@@ -287,6 +290,10 @@ export default function AuthenticatedLayout({
                                 <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} title="Daily Attendance Ledger">
                                     <CalendarCheck className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Daily Attendance</span>}
+                                </Link>
+                                <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} title="Monthly Timesheets & Roster Reconciliation">
+                                    <Calendar className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Monthly Timesheet</span>}
                                 </Link>
                                 <Link href="/attendance/import" className={navItemClass('/attendance/import')} title="Biometric Ingestion">
                                     <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
@@ -503,6 +510,10 @@ export default function AuthenticatedLayout({
                                         <CalendarCheck className="w-4 h-4" />
                                         <span>Daily Attendance</span>
                                     </Link>
+                                    <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} onClick={() => setMobileOpen(false)}>
+                                        <Calendar className="w-4 h-4" />
+                                        <span>Monthly Timesheet</span>
+                                    </Link>
                                     <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
                                         <FileSpreadsheet className="w-4 h-4" />
                                         <span>Biometric Import</span>
@@ -575,7 +586,7 @@ export default function AuthenticatedLayout({
                 </aside>
 
                 {/* Main Content Area */}
-                <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+                <div className={`flex-1 flex flex-col min-w-0 ${fullHeight ? 'overflow-y-auto xl:overflow-hidden xl:h-full' : 'overflow-y-auto'}`}>
                     {/* Top Navigation Bar */}
                     <header className="h-16 border-b border-slate-200 dark:border-slate-800/80 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md sticky top-0 z-20 px-4 lg:px-8 flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -691,7 +702,7 @@ export default function AuthenticatedLayout({
                     </div>
 
                     {/* Main Child Content */}
-                    <main className="flex-1 px-4 lg:px-8 py-6">
+                    <main className={`flex-1 px-4 lg:px-8 ${fullHeight ? 'py-2 sm:py-3 flex flex-col min-h-0 xl:overflow-hidden' : 'py-6'}`}>
                         {children}
                     </main>
                 </div>

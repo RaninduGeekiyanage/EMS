@@ -6,6 +6,7 @@ use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
 use App\Http\Controllers\AttendanceSettingsController;
+use App\Http\Controllers\AttendanceTimesheetController;
 use App\Http\Controllers\BiometricDeviceProfileController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\NewPasswordController;
@@ -196,9 +197,14 @@ Route::middleware(['tenant'])->group(function (): void {
         // Attendance Daily Ledger & Overtime Engine
         Route::get('/attendance/daily', [AttendanceDailyController::class, 'index'])->name('attendance.daily.index');
         Route::post('/attendance/daily/process', [AttendanceDailyController::class, 'process'])->name('attendance.daily.process');
+        Route::post('/attendance/daily/process-date', [AttendanceDailyController::class, 'processSingleDate'])->name('attendance.daily.process-date');
         Route::post('/attendance/daily/process-backlog', [AttendanceDailyController::class, 'processBacklog'])->name('attendance.daily.process-backlog');
         Route::put('/attendance/daily/{attendanceDaily}', [AttendanceDailyController::class, 'update'])->name('attendance.daily.update');
         Route::post('/attendance/rules', [AttendanceDailyController::class, 'saveRule'])->name('attendance.rules.store');
+
+        // Dedicated Employee Monthly Timesheet & Audit Matrix
+        Route::get('/attendance/timesheet', [AttendanceTimesheetController::class, 'index'])->name('attendance.timesheet.index');
+        Route::get('/attendance/timesheet/export', [AttendanceTimesheetController::class, 'exportCsv'])->name('attendance.timesheet.export');
 
         // Leave Management & Statutory Entitlements
         Route::get('/leave/requests', [LeaveRequestController::class, 'index'])->name('leave.requests.index');

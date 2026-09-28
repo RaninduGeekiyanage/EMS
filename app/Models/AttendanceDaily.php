@@ -56,8 +56,8 @@ final class AttendanceDaily extends Model
     {
         return [
             'attendance_date' => 'date',
-            'check_in' => 'datetime',
-            'check_out' => 'datetime',
+            'check_in' => 'datetime:Y-m-d H:i:s',
+            'check_out' => 'datetime:Y-m-d H:i:s',
             'worked_hours' => 'float',
             'regular_hours' => 'float',
             'late_minutes' => 'integer',
