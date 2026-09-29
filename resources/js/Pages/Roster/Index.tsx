@@ -86,6 +86,9 @@ interface AvailableEmployee {
     is_available: boolean;
     is_enrolled_elsewhere?: boolean;
     is_in_current_roster?: boolean;
+    can_reassign?: boolean;
+    is_period_locked?: boolean;
+    conflicting_roster_name?: string | null;
     exclusion_reason?: string | null;
     current_roster?: {
         id: string;
@@ -385,12 +388,20 @@ export default function Index({
     };
 
     const navigateMonth = (targetYear: number, targetMonth: number) => {
+        const targetStartDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
+        const lastDay = new Date(targetYear, targetMonth, 0).getDate();
+        const targetEndDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        const spansTarget = active_roster &&
+            active_roster.start_date <= targetEndDate &&
+            active_roster.end_date >= targetStartDate;
+
         router.get(
             '/roster',
             {
                 year: targetYear,
                 month: targetMonth,
-                roster_id: active_roster?.id,
+                roster_id: spansTarget ? active_roster?.id : undefined,
             },
             { preserveState: true }
         );
@@ -457,7 +468,7 @@ export default function Index({
 
     // 2. New Roster Form (Multi-Pattern Cycle Rotation & Blank Shell)
     const newRosterForm = useForm({
-        name: `${month_name} ${year} - Operations Roster`,
+        name: `${month_name} - Operations Roster`,
         code: `RST-${year}-${String(month).padStart(2, '0')}-OPS`,
         department_id: '',
         start_date: `${year}-${String(month).padStart(2, '0')}-01`,
@@ -472,6 +483,8 @@ export default function Index({
         pattern_allocations: {} as Record<string, string[]>,
         pattern_id: patterns[0]?.id || '',
         employee_ids: [] as string[],
+        reassign_overlapping: false,
+        reassignment_reason: 'Prior Period Roster Allocation',
     });
 
     const [rosterWizardStep, setRosterWizardStep] = useState<1 | 2 | 3>(1);
@@ -512,7 +525,7 @@ export default function Index({
         setActiveWizardPatternTab(initialPatternId);
         setSelectedPatternToAdd('');
         newRosterForm.setData({
-            name: `${month_name} ${year} - Operations Roster`,
+            name: `${month_name} - Operations Roster`,
             code: `RST-${year}-${String(month).padStart(2, '0')}-OPS`,
             department_id: '',
             start_date: `${year}-${String(month).padStart(2, '0')}-01`,
@@ -524,6 +537,8 @@ export default function Index({
             pattern_allocations: initialPatternId ? { [initialPatternId]: [] } : {},
             pattern_id: initialPatternId,
             employee_ids: [],
+            reassign_overlapping: false,
+            reassignment_reason: 'Prior Period Roster Allocation',
         });
         setIsNewRosterModalOpen(true);
     };
@@ -569,8 +584,17 @@ export default function Index({
             nextAllocations[pId] = (nextAllocations[pId] || []).filter((id) => id !== empId);
         });
 
-        // If wasn't in target, add to target
+        // If wasn't in target, add to target (with conflict checks)
         if (!currentInTarget) {
+            const availInfo = available_employees.find((a) => a.id === empId);
+            if (availInfo?.is_period_locked) {
+                alert('Cannot allocate this employee because payroll has already been locked for this period.');
+                return;
+            }
+            if (availInfo && !availInfo.is_available && !newRosterForm.data.reassign_overlapping) {
+                alert('This employee is already assigned to another roster during this period. Enable "Allow Retroactive Reassignment" to transfer them.');
+                return;
+            }
             nextAllocations[targetPatternId] = [...(nextAllocations[targetPatternId] || []), empId];
         }
 
@@ -587,7 +611,12 @@ export default function Index({
                 emp.full_name.toLowerCase().includes(wizardEmpSearch.toLowerCase()) ||
                 emp.emp_no.toLowerCase().includes(wizardEmpSearch.toLowerCase());
             const matchesDept = wizardDeptFilter === 'all' || emp.department_id === wizardDeptFilter;
-            return matchesSearch && matchesDept;
+            if (!matchesSearch || !matchesDept) return false;
+
+            const availInfo = available_employees.find((a) => a.id === emp.id);
+            if (availInfo?.is_period_locked) return false;
+            if (availInfo && !availInfo.is_available && !newRosterForm.data.reassign_overlapping) return false;
+            return true;
         });
 
         const numPatterns = newRosterForm.data.selected_pattern_ids.length;
@@ -722,6 +751,8 @@ export default function Index({
         effective_to: active_roster?.end_date || `${year}-${String(month).padStart(2, '0')}-30`,
         pattern_id: '',
         notes: '',
+        reassign_overlapping: false,
+        reassignment_reason: 'Supervisor Operational Reassignment',
     });
 
     const openAddEmployeeModal = () => {
@@ -732,9 +763,11 @@ export default function Index({
             effective_to: active_roster.end_date,
             pattern_id: '',
             notes: '',
+            reassign_overlapping: false,
+            reassignment_reason: 'Supervisor Operational Reassignment',
         });
         setAddEmpSearch('');
-        setShowOnlyAvailableAddEmp(true);
+        setShowOnlyAvailableAddEmp(false);
         setIsAddEmployeeModalOpen(true);
     };
 
@@ -2234,6 +2267,40 @@ export default function Index({
                                         </div>
                                     </div>
 
+                                    {/* Retroactive Reassignment Policy */}
+                                    <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2">
+                                        <label className="flex items-center gap-2 cursor-pointer text-xs">
+                                            <input
+                                                type="checkbox"
+                                                checked={newRosterForm.data.reassign_overlapping}
+                                                onChange={(e) => newRosterForm.setData('reassign_overlapping', e.target.checked)}
+                                                className="w-4 h-4 rounded text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500"
+                                            />
+                                            <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                                                <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400" />
+                                                <span>Allow Retroactive Reassignment (Excise overlapping prior rosters)</span>
+                                            </div>
+                                        </label>
+                                        <p className="text-[11px] text-slate-400 pl-6">
+                                            When enabled, employees currently allocated to other rosters in this period will be automatically transferred to this roster. Overlapping entries in their old roster will be excised and biometric punches reprocessed. Finalized/locked payroll periods cannot be modified.
+                                        </p>
+
+                                        {newRosterForm.data.reassign_overlapping && (
+                                            <div className="pl-6 pt-1">
+                                                <label className="block text-[11px] text-slate-400 mb-1">
+                                                    Reassignment Audit Reason / Justification
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={newRosterForm.data.reassignment_reason}
+                                                    onChange={(e) => newRosterForm.setData('reassignment_reason', e.target.value)}
+                                                    placeholder="e.g., Assigned to wrong roster / Shift reallocation correction"
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:ring-1 focus:ring-amber-500"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
                                     {/* Pattern Switcher Tabs */}
                                     <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-800/80">
                                         {selectedWizardPatterns.map((pat) => {
@@ -2314,7 +2381,8 @@ export default function Index({
                                                         const matchesDept = wizardDeptFilter === 'all' || emp.department_id === wizardDeptFilter;
                                                         const availInfo = available_employees.find((a) => a.id === emp.id);
                                                         const hasExternalConflict = availInfo && !availInfo.is_available;
-                                                        return matchesSearch && matchesDept && !hasExternalConflict;
+                                                        const isEligible = !availInfo?.is_period_locked && (!hasExternalConflict || Boolean(newRosterForm.data.reassign_overlapping));
+                                                        return matchesSearch && matchesDept && isEligible;
                                                     });
                                                     const filteredIds = filtered.map((e) => e.id);
                                                     const nextAllocations = { ...newRosterForm.data.pattern_allocations };
@@ -2370,7 +2438,7 @@ export default function Index({
                                                 const availInfo = available_employees.find((a) => a.id === emp.id);
                                                 const hasExternalConflict = availInfo && !availInfo.is_available;
 
-                                                if (wizardAllocFilter === 'unallocated' && (!isUnallocated || hasExternalConflict)) {
+                                                if (wizardAllocFilter === 'unallocated' && (!isUnallocated || (hasExternalConflict && !newRosterForm.data.reassign_overlapping))) {
                                                     return false;
                                                 }
 
@@ -2388,15 +2456,19 @@ export default function Index({
 
                                                 const availInfo = available_employees.find((a) => a.id === emp.id);
                                                 const hasConflict = availInfo && !availInfo.is_available;
+                                                const isPeriodLocked = Boolean(availInfo?.is_period_locked);
+                                                const isSelectable = !isPeriodLocked && (!hasConflict || Boolean(newRosterForm.data.reassign_overlapping));
 
                                                 return (
                                                     <div
                                                         key={emp.id}
                                                         onClick={() => handleToggleEmployeeInPattern(emp.id, curPatId)}
-                                                        className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer transition ${
-                                                            isSelectedInCurrent
-                                                                ? 'bg-indigo-600/15 border border-indigo-500/30'
-                                                                : 'hover:bg-slate-900/60'
+                                                        className={`p-2.5 rounded-lg flex items-center justify-between transition ${
+                                                            !isSelectable
+                                                                ? 'opacity-60 bg-slate-950/40 cursor-not-allowed'
+                                                                : isSelectedInCurrent
+                                                                ? 'bg-indigo-600/15 border border-indigo-500/30 cursor-pointer'
+                                                                : 'hover:bg-slate-900/60 cursor-pointer'
                                                         }`}
                                                     >
                                                         <div className="flex items-center gap-2.5">
@@ -2430,17 +2502,29 @@ export default function Index({
                                                                 </span>
                                                             )}
 
-                                                            {!isSelectedInCurrent && !otherPattern && (
+                                                            {!isSelectedInCurrent && !otherPattern && !hasConflict && (
                                                                 <span className="text-[10px] text-slate-500 font-mono px-2 py-0.5">
                                                                     Available
                                                                 </span>
                                                             )}
 
-                                                            {hasConflict && (
-                                                                <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
-                                                                    {availInfo?.exclusion_reason || 'Roster Overlap'}
+                                                            {isPeriodLocked ? (
+                                                                <span className="text-[10px] text-sky-400 font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 flex items-center gap-1" title="Payroll finalized & locked">
+                                                                    <Lock className="w-3 h-3 text-sky-400" />
+                                                                    <span>Payroll Locked</span>
                                                                 </span>
-                                                            )}
+                                                            ) : hasConflict ? (
+                                                                newRosterForm.data.reassign_overlapping ? (
+                                                                    <span className="text-[10px] text-amber-300 font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 flex items-center gap-1" title="Will be reassigned from this roster to current roster">
+                                                                        <ArrowLeftRight className="w-3 h-3 text-amber-400" />
+                                                                        <span>Reassign from {availInfo?.conflicting_roster_name || 'Other Roster'}</span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20" title="Must enable reassignment toggle above to reassign">
+                                                                        {availInfo?.exclusion_reason || 'Roster Overlap'}
+                                                                    </span>
+                                                                )
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                 );
@@ -2850,17 +2934,51 @@ export default function Index({
                                 </select>
                             </div>
 
+                            {/* Reassignment / Retroactive Correction Toggle */}
+                            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2">
+                                <label className="flex items-center gap-2 cursor-pointer text-xs">
+                                    <input
+                                        type="checkbox"
+                                        checked={addEmployeeForm.data.reassign_overlapping}
+                                        onChange={(e) => addEmployeeForm.setData('reassign_overlapping', e.target.checked)}
+                                        className="w-4 h-4 rounded text-amber-500 bg-slate-900 border-slate-700 focus:ring-amber-500"
+                                    />
+                                    <span className="font-semibold text-white flex items-center gap-1.5">
+                                        <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Allow Reassignment from Other Rosters (Retroactive Correction)</span>
+                                    </span>
+                                </label>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                    Select this option if an employee was originally scheduled in the wrong roster. Conflicting allocations in other active rosters will be automatically excised and historical biometric attendance will be reprocessed.
+                                </p>
+                                {addEmployeeForm.data.reassign_overlapping && (
+                                    <div className="pt-2 border-t border-slate-800">
+                                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                            Reassignment Justification *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={addEmployeeForm.data.reassignment_reason}
+                                            onChange={(e) => addEmployeeForm.setData('reassignment_reason', e.target.value)}
+                                            placeholder="e.g. Assigned to wrong crew initially; retroactively aligning roster and punches"
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:ring-1 focus:ring-amber-500"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
                             <div>
                                 <div className="flex items-center justify-between mb-1">
                                     <label className="text-slate-400 font-medium">
-                                        Select Staff ({availableCandidatesCount} available)
+                                        Select Staff ({unallocatedCandidateEmployees.filter((e) => addEmployeeForm.data.reassign_overlapping ? (e.is_available || (e.can_reassign && !e.is_in_current_roster)) : e.is_available).length} eligible)
                                     </label>
                                     <button
                                         type="button"
                                         onClick={() => setShowOnlyAvailableAddEmp(!showOnlyAvailableAddEmp)}
                                         className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold transition"
                                     >
-                                        {showOnlyAvailableAddEmp ? 'Show All Unassigned' : 'Show Available Only'}
+                                        {showOnlyAvailableAddEmp ? 'Show All Staff' : 'Show Eligible Only'}
                                     </button>
                                 </div>
                                 <input
@@ -2873,19 +2991,24 @@ export default function Index({
                                 <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-xl p-2 bg-slate-950/60 divide-y divide-slate-800/50">
                                     {unallocatedCandidateEmployees
                                         .filter((e) => {
-                                            if (showOnlyAvailableAddEmp && !e.is_available) return false;
+                                            const isSelectable = addEmployeeForm.data.reassign_overlapping
+                                                ? (e.is_available || (e.can_reassign && !e.is_in_current_roster))
+                                                : e.is_available;
+                                            if (showOnlyAvailableAddEmp && !isSelectable) return false;
                                             if (!addEmpSearch) return true;
                                             const q = addEmpSearch.toLowerCase();
                                             return e.full_name.toLowerCase().includes(q) || e.emp_no.toLowerCase().includes(q);
                                         })
                                         .map((emp) => {
                                             const isSelected = addEmployeeForm.data.employee_ids.includes(emp.id);
-                                            const isAvailable = emp.is_available;
+                                            const isSelectable = addEmployeeForm.data.reassign_overlapping
+                                                ? (emp.is_available || (emp.can_reassign && !emp.is_in_current_roster))
+                                                : emp.is_available;
                                             return (
                                                 <label
                                                     key={emp.id}
                                                     className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg transition ${
-                                                        !isAvailable
+                                                        !isSelectable
                                                             ? 'opacity-60 bg-slate-950/40 cursor-not-allowed'
                                                             : 'hover:bg-slate-800/40 cursor-pointer'
                                                     }`}
@@ -2893,10 +3016,10 @@ export default function Index({
                                                     <div className="flex items-center gap-2.5">
                                                         <input
                                                             type="checkbox"
-                                                            disabled={!isAvailable}
+                                                            disabled={!isSelectable}
                                                             checked={isSelected}
                                                             onChange={(e) => {
-                                                                if (!isAvailable) return;
+                                                                if (!isSelectable) return;
                                                                 if (e.target.checked) {
                                                                     addEmployeeForm.setData('employee_ids', [...addEmployeeForm.data.employee_ids, emp.id]);
                                                                 } else {
@@ -2911,10 +3034,22 @@ export default function Index({
                                                         </div>
                                                     </div>
 
-                                                    {!isAvailable ? (
-                                                        <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20" title="Must be transferred to move to this roster">
-                                                            {emp.exclusion_reason || 'Roster Overlap'}
+                                                    {emp.is_period_locked ? (
+                                                        <span className="text-[10px] text-sky-400 font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 flex items-center gap-1" title="Payroll finalized & locked">
+                                                            <Lock className="w-3 h-3 text-sky-400" />
+                                                            <span>Payroll Locked</span>
                                                         </span>
+                                                    ) : !emp.is_available ? (
+                                                        addEmployeeForm.data.reassign_overlapping && emp.can_reassign ? (
+                                                            <span className="text-[10px] text-amber-300 font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 flex items-center gap-1" title="Will be reassigned from this roster to current roster">
+                                                                <ArrowLeftRight className="w-3 h-3 text-amber-400" />
+                                                                <span>Reassign from {emp.conflicting_roster_name || 'Other Roster'}</span>
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20" title="Must enable reassignment toggle above to reassign">
+                                                                {emp.exclusion_reason || 'Roster Overlap'}
+                                                            </span>
+                                                        )
                                                     ) : (
                                                         <span className="text-[10px] text-emerald-400 font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
                                                             Available
@@ -2925,14 +3060,17 @@ export default function Index({
                                         })}
 
                                     {unallocatedCandidateEmployees.filter((e) => {
-                                        if (showOnlyAvailableAddEmp && !e.is_available) return false;
+                                        const isSelectable = addEmployeeForm.data.reassign_overlapping
+                                            ? (e.is_available || (e.can_reassign && !e.is_in_current_roster))
+                                            : e.is_available;
+                                        if (showOnlyAvailableAddEmp && !isSelectable) return false;
                                         if (!addEmpSearch) return true;
                                         const q = addEmpSearch.toLowerCase();
                                         return e.full_name.toLowerCase().includes(q) || e.emp_no.toLowerCase().includes(q);
                                     }).length === 0 && (
                                         <div className="py-6 text-center text-slate-400 text-xs">
                                             {showOnlyAvailableAddEmp
-                                                ? 'No available unallocated staff found for this period.'
+                                                ? 'No eligible unallocated staff found for this period.'
                                                 : 'No unassigned staff found matching your query.'}
                                         </div>
                                     )}

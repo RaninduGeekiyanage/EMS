@@ -31,6 +31,7 @@ import {
     FileText,
     Cpu,
     SlidersHorizontal,
+    Fingerprint,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -295,6 +296,10 @@ export default function AuthenticatedLayout({
                                     <Calendar className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Monthly Timesheet</span>}
                                 </Link>
+                                <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} title="Biometric Raw Punch Logs & Engine Audit">
+                                    <Fingerprint className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Attendance Logs</span>}
+                                </Link>
                                 <Link href="/attendance/import" className={navItemClass('/attendance/import')} title="Biometric Ingestion">
                                     <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Biometric Import</span>}
@@ -513,6 +518,10 @@ export default function AuthenticatedLayout({
                                     <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} onClick={() => setMobileOpen(false)}>
                                         <Calendar className="w-4 h-4" />
                                         <span>Monthly Timesheet</span>
+                                    </Link>
+                                    <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} onClick={() => setMobileOpen(false)}>
+                                        <Fingerprint className="w-4 h-4" />
+                                        <span>Attendance Logs</span>
                                     </Link>
                                     <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
                                         <FileSpreadsheet className="w-4 h-4" />

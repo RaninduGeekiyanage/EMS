@@ -61,6 +61,8 @@ final class RosterController extends Controller
             'pattern_allocations.*.pattern_id' => ['required_with:pattern_allocations', 'string', 'exists:roster_patterns,id'],
             'pattern_allocations.*.employee_ids' => ['required_with:pattern_allocations', 'array'],
             'pattern_allocations.*.employee_ids.*' => ['string', 'exists:employees,id'],
+            'reassign_overlapping' => ['nullable', 'boolean'],
+            'reassignment_reason' => ['nullable', 'string', 'max:255'],
         ]);
 
         try {
@@ -274,7 +276,9 @@ final class RosterController extends Controller
                 $validated['effective_from'],
                 $validated['effective_to'],
                 $validated['pattern_id'] ?? null,
-                $validated['notes'] ?? null
+                $validated['notes'] ?? null,
+                (bool) ($validated['reassign_overlapping'] ?? false),
+                $validated['reassignment_reason'] ?? null
             );
 
             return redirect()->back()->with('success', "{$count} employee(s) successfully allocated to roster '{$roster->name}'.");

@@ -49,6 +49,9 @@ final class Shift extends Model
         'early_in_as_att_in',
         'ot_start_time',
         'working_minutes',
+        'punch_mode',
+        'break_deduction_type',
+        'min_work_hours_for_break',
         'color',
         'description',
         'is_active',
@@ -73,6 +76,7 @@ final class Shift extends Model
             'early_in_as_ot' => 'boolean',
             'early_in_as_att_in' => 'boolean',
             'working_minutes' => 'integer',
+            'min_work_hours_for_break' => 'integer',
             'is_active' => 'boolean',
         ];
     }

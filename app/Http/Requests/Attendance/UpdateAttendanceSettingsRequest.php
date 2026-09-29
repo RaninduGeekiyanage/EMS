@@ -29,7 +29,6 @@ final class UpdateAttendanceSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'intermediate_punch_mode' => ['required', 'string', 'in:first_last,actual_segments'],
             'ignore_terminal_punch_type' => ['required', 'boolean'],
             'anti_passback_minutes' => ['required', 'integer', 'min:0', 'max:60'],
             'auto_detect_shift' => ['required', 'boolean'],

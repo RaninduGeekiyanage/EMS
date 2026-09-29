@@ -28,6 +28,7 @@ import {
     CalendarRange,
     Check,
     Info,
+    Layers,
 } from 'lucide-react';
 
 interface Shift {
@@ -52,6 +53,9 @@ interface Shift {
     early_in_as_att_in?: boolean;
     ot_start_time?: string | null;
     working_minutes?: number | null;
+    punch_mode?: 'first_last' | 'actual_segments';
+    break_deduction_type?: 'auto_deduct' | 'actual_punches' | 'no_deduction';
+    min_work_hours_for_break?: number;
     color: string | null;
     description: string | null;
     is_active: boolean;
@@ -163,6 +167,9 @@ export default function Index({ shifts, employees, stats }: Props) {
         early_in_as_att_in: true,
         ot_start_time: '',
         working_minutes: 0,
+        punch_mode: 'first_last' as 'first_last' | 'actual_segments',
+        break_deduction_type: 'auto_deduct' as 'auto_deduct' | 'actual_punches' | 'no_deduction',
+        min_work_hours_for_break: 300,
         color: '#3B82F6',
         description: '',
         is_active: true,
@@ -199,6 +206,9 @@ export default function Index({ shifts, employees, stats }: Props) {
             early_in_as_att_in: true,
             ot_start_time: '',
             working_minutes: 0,
+            punch_mode: 'first_last',
+            break_deduction_type: 'auto_deduct',
+            min_work_hours_for_break: 300,
             color: '#3B82F6',
             description: '',
             is_active: true,
@@ -230,6 +240,9 @@ export default function Index({ shifts, employees, stats }: Props) {
             early_in_as_att_in: shift.early_in_as_att_in !== undefined ? Boolean(shift.early_in_as_att_in) : true,
             ot_start_time: shift.ot_start_time ? shift.ot_start_time.substring(0, 5) : '',
             working_minutes: shift.working_minutes ?? 0,
+            punch_mode: shift.punch_mode ?? 'first_last',
+            break_deduction_type: shift.break_deduction_type ?? 'auto_deduct',
+            min_work_hours_for_break: shift.min_work_hours_for_break ?? 300,
             color: shift.color || '#3B82F6',
             description: shift.description || '',
             is_active: Boolean(shift.is_active),
@@ -774,12 +787,20 @@ export default function Index({ shifts, employees, stats }: Props) {
                                                         <div className="flex items-center gap-2">
                                                             <span className="inline-flex items-center gap-1 text-[11px] text-slate-300">
                                                                 <Coffee className="w-3 h-3 text-amber-400" />
-                                                                {shift.break_minutes}m break
+                                                                {shift.break_deduction_type === 'no_deduction' ? (
+                                                                    <span className="text-emerald-400 font-medium">Paid (0m)</span>
+                                                                ) : shift.break_deduction_type === 'actual_punches' ? (
+                                                                    <span className="text-purple-400 font-medium">Actual Swipes</span>
+                                                                ) : (
+                                                                    <span>{shift.break_minutes}m auto</span>
+                                                                )}
                                                             </span>
                                                         </div>
                                                         <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-                                                            <ShieldAlert className="w-3 h-3 text-emerald-400" />
-                                                            Grace: {shift.grace_minutes}m
+                                                            <Layers className="w-3 h-3 text-indigo-400" />
+                                                            <span>{shift.punch_mode === 'actual_segments' ? 'Segments' : 'First/Last'}</span>
+                                                            <span className="text-slate-600">•</span>
+                                                            <span>Grace: {shift.grace_minutes}m</span>
                                                         </div>
                                                     </td>
 
@@ -1497,6 +1518,90 @@ export default function Index({ shifts, employees, stats }: Props) {
                                                 </p>
                                             </div>
                                         </label>
+                                    </div>
+
+                                    {/* Punch Mode & Break Policy Configuration */}
+                                    <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-4">
+                                        <div className="flex items-center gap-2">
+                                            <Layers className="w-4 h-4 text-indigo-400" />
+                                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                                                Biometric Calculation Mode & Break Policy
+                                            </h4>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            {/* Punch Mode */}
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Punch Pairing Mode
+                                                </label>
+                                                <select
+                                                    value={shiftForm.data.punch_mode}
+                                                    onChange={(e) => shiftForm.setData('punch_mode', e.target.value as 'first_last' | 'actual_segments')}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                                >
+                                                    <option value="first_last">First-In / Last-Out (Corporate Default)</option>
+                                                    <option value="actual_segments">Actual Punch Segments (Factory / Multi-Session)</option>
+                                                </select>
+                                                <span className="text-[10px] text-slate-500 mt-1 block">
+                                                    {shiftForm.data.punch_mode === 'first_last'
+                                                        ? 'Earliest swipe is In, latest is Out. Intermediate door/coffee swipes are ignored.'
+                                                        : 'Consecutive swipes paired into work sessions (In1->Out1, In2->Out2).'}
+                                                </span>
+                                            </div>
+
+                                            {/* Break Deduction Type */}
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                    Break Deduction Policy
+                                                </label>
+                                                <select
+                                                    value={shiftForm.data.break_deduction_type}
+                                                    onChange={(e) => shiftForm.setData('break_deduction_type', e.target.value as 'auto_deduct' | 'actual_punches' | 'no_deduction')}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                                >
+                                                    <option value="auto_deduct">Auto-Deduct Scheduled Meal Break</option>
+                                                    <option value="actual_punches">Deduct Actual Swiped Break Duration</option>
+                                                    <option value="no_deduction">Paid Break / Zero Deduction</option>
+                                                </select>
+                                                <span className="text-[10px] text-slate-500 mt-1 block">
+                                                    {shiftForm.data.break_deduction_type === 'auto_deduct'
+                                                        ? `Deducts ${shiftForm.data.break_minutes}m automatically when qualifying hours are worked.`
+                                                        : shiftForm.data.break_deduction_type === 'actual_punches'
+                                                        ? 'Calculates exact time clocked out between sessions or lunch punches.'
+                                                        : '100% paid time. No break time is subtracted from worked hours.'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Qualifying Work Hours for Auto-Deduct */}
+                                        {shiftForm.data.break_deduction_type === 'auto_deduct' && (
+                                            <div className="pt-2 border-t border-slate-800/60">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                                    <div>
+                                                        <label className="block text-xs font-semibold text-slate-300">
+                                                            Min Work Time to Deduct Break (Minutes)
+                                                        </label>
+                                                        <span className="text-[10px] text-slate-500">
+                                                            Employees working less than this (e.g. half-day or early leave) won't have meal break deducted.
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="number"
+                                                            value={shiftForm.data.min_work_hours_for_break}
+                                                            onChange={(e) => shiftForm.setData('min_work_hours_for_break', parseInt(e.target.value) || 0)}
+                                                            min="0"
+                                                            max="720"
+                                                            className="w-24 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono text-right focus:outline-none focus:border-indigo-500"
+                                                        />
+                                                        <span className="text-xs text-slate-400 font-mono">
+                                                            ({Math.round((shiftForm.data.min_work_hours_for_break / 60) * 10) / 10}h)
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}

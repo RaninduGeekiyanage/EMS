@@ -27,7 +27,6 @@ final class AttendanceProcessingService
      * @var array<string, mixed>
      */
     public const DEFAULT_SETTINGS = [
-        'intermediate_punch_mode' => 'first_last', // 'first_last' (Corporate default) or 'actual_segments' (Factory default)
         'ignore_terminal_punch_type' => true,      // Direction-agnostic telemetry: derive IN/OUT contextually
         'anti_passback_minutes' => 3,              // Compress rapid duplicate biometric swipes within 3 mins
         'auto_detect_shift' => true,               // Auto-detect matching company shift if worker swaps or works unscheduled
@@ -532,7 +531,11 @@ final class AttendanceProcessingService
         }
 
         // Case C: Valid Punch Pair
-        $isActualSegments = ($tenantSettings['intermediate_punch_mode'] ?? 'first_last') === 'actual_segments';
+        $punchMode = $shift?->punch_mode ?? 'first_last';
+        $breakDeductionType = $shift?->break_deduction_type ?? 'auto_deduct';
+        $scheduledBreakMinutes = (int) ($shift?->break_minutes ?? 0);
+        $minBreakQualifyingMinutes = (int) ($shift?->min_work_hours_for_break ?? 300);
+        $isActualSegments = ($punchMode === 'actual_segments');
         $allowEarlyInAsOt = (bool) ($tenantSettings['allow_early_in_as_ot'] ?? false);
         $segmentBreakdown = null;
 
@@ -566,23 +569,54 @@ final class AttendanceProcessingService
                 }
             }
 
-            $rawMinutes = $totalSegmentMinutes;
-            $breakMinutes = $totalActualBreakMinutes;
-            $netMinutes = max(0, $rawMinutes);
+            $rawMinutes = $totalSegmentMinutes + $totalActualBreakMinutes;
+
+            $breakMinutes = match ($breakDeductionType) {
+                'no_deduction' => 0,
+                'auto_deduct' => ($rawMinutes >= $minBreakQualifyingMinutes ? $scheduledBreakMinutes : 0),
+                'actual_punches' => $totalActualBreakMinutes,
+                default => $totalActualBreakMinutes,
+            };
+
+            $netMinutes = max(0, $rawMinutes - $breakMinutes);
             $workedHours = round($netMinutes / 60.0, 2);
 
             $segmentBreakdown = [
                 'mode' => 'actual_segments',
+                'break_deduction_type' => $breakDeductionType,
                 'segments' => $segmentPairs,
                 'breaks' => $breakIntervals,
-                'total_break_minutes' => $totalActualBreakMinutes,
+                'total_break_minutes' => $breakMinutes,
             ];
         } else {
-            // First-Last mode (Standard flat shift break deduction)
+            // First-Last mode (Standard shift break deduction policy)
             $rawMinutes = (int) abs($checkOut->diffInMinutes($checkIn));
-            $breakMinutes = ($shift && $shift->break_minutes > 0 && $rawMinutes >= ($shift->break_minutes + 60))
-                ? $shift->break_minutes
-                : 0;
+
+            $breakMinutes = 0;
+            if ($breakDeductionType === 'no_deduction') {
+                $breakMinutes = 0;
+            } elseif ($breakDeductionType === 'actual_punches') {
+                // If intermediate punches exist, calculate actual duration between intermediate out & in
+                if ($debouncedPunches->count() >= 4) {
+                    $sorted = $debouncedPunches->sortBy('punch_datetime')->values();
+                    $actualBreak = 0;
+                    for ($i = 1; $i < $sorted->count() - 1; $i += 2) {
+                        $pOut = Carbon::parse($sorted[$i]->punch_datetime);
+                        $pIn = Carbon::parse($sorted[$i + 1]->punch_datetime);
+                        if ($pIn->gt($pOut)) {
+                            $actualBreak += (int) abs($pIn->diffInMinutes($pOut));
+                        }
+                    }
+                    $breakMinutes = $actualBreak;
+                } else {
+                    $breakMinutes = 0;
+                }
+            } else {
+                // 'auto_deduct': deduct scheduled break if employee worked at least min_work_hours_for_break
+                if ($scheduledBreakMinutes > 0 && $rawMinutes >= $minBreakQualifyingMinutes) {
+                    $breakMinutes = $scheduledBreakMinutes;
+                }
+            }
 
             $netMinutes = max(0, $rawMinutes - $breakMinutes);
             $workedHours = round($netMinutes / 60.0, 2);
@@ -678,7 +712,9 @@ final class AttendanceProcessingService
                 'applied_rate' => $otResult['applied_rate'],
                 'punches_count' => $punches->count(),
                 'debounced_punches_count' => $debouncedPunches->count(),
-                'intermediate_punch_mode' => $tenantSettings['intermediate_punch_mode'] ?? 'first_last',
+                'punch_mode' => $punchMode,
+                'break_deduction_type' => $breakDeductionType,
+                'intermediate_punch_mode' => $punchMode,
                 'segments_breakdown' => $segmentBreakdown,
                 'holiday_name' => $holiday?->name,
             ],
@@ -743,7 +779,7 @@ final class AttendanceProcessingService
                 // or if staying late (overtime past outEndGrace), or separated by reasonable shift time
                 $outCandidates = $punches->filter(function (AttendanceLog $log) use ($inTime, $outStartGrace) {
                     $time = Carbon::parse($log->punch_datetime);
-                    return $time->gt($inTime) && ($time->gte($outStartGrace) || $time->diffInMinutes($inTime) >= 30);
+                    return $time->gt($inTime) && ($time->gte($outStartGrace) || abs($time->diffInMinutes($inTime)) >= 30);
                 })->sortByDesc('punch_datetime');
 
                 $matchedOut = $outCandidates->first();
@@ -851,9 +887,13 @@ final class AttendanceProcessingService
 
             if ($checkIn && $checkOut && $checkOut->gt($checkIn)) {
                 $rawMinutes = (int) abs($checkOut->diffInMinutes($checkIn));
-                $breakMinutes = ($shift && $shift->break_minutes > 0 && $rawMinutes >= ($shift->break_minutes + 60))
-                    ? $shift->break_minutes
-                    : 0;
+                $breakMinutes = 0;
+                $breakDeductionType = $shift?->break_deduction_type ?? 'auto_deduct';
+                $minQualifying = (int) ($shift?->min_work_hours_for_break ?? 300);
+
+                if ($breakDeductionType === 'auto_deduct' && $shift && $shift->break_minutes > 0 && $rawMinutes >= $minQualifying) {
+                    $breakMinutes = $shift->break_minutes;
+                }
 
                 $netMinutes = max(0, $rawMinutes - $breakMinutes);
                 $workedHours = round($netMinutes / 60.0, 2);
@@ -1107,7 +1147,6 @@ final class AttendanceProcessingService
         $tenantDefaultRule = AttendanceRule::where('tenant_id', $tenantId)->whereNull('shift_id')->first();
 
         return [
-            'intermediate_punch_mode' => (string) ($tenant?->getSetting('intermediate_punch_mode', self::DEFAULT_SETTINGS['intermediate_punch_mode']) ?? self::DEFAULT_SETTINGS['intermediate_punch_mode']),
             'ignore_terminal_punch_type' => filter_var($tenant?->getSetting('ignore_terminal_punch_type', self::DEFAULT_SETTINGS['ignore_terminal_punch_type']), FILTER_VALIDATE_BOOLEAN),
             'anti_passback_minutes' => (int) ($tenant?->getSetting('anti_passback_minutes', self::DEFAULT_SETTINGS['anti_passback_minutes']) ?? self::DEFAULT_SETTINGS['anti_passback_minutes']),
             'auto_detect_shift' => filter_var($tenant?->getSetting('auto_detect_shift', self::DEFAULT_SETTINGS['auto_detect_shift']), FILTER_VALIDATE_BOOLEAN),

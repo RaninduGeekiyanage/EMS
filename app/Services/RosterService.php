@@ -14,6 +14,7 @@ use App\Models\RosterEmployeeAllocation;
 use App\Models\RosterEntry;
 use App\Models\RosterPattern;
 use App\Models\Shift;
+use App\Services\AttendanceProcessingService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Carbon\CarbonPeriod;
@@ -27,6 +28,7 @@ final class RosterService
 {
     public function __construct(
         private readonly ShiftService $shiftService,
+        private readonly AttendanceProcessingService $attendanceProcessingService,
     ) {}
 
     /**
@@ -41,10 +43,13 @@ final class RosterService
         $daysInMonth = $startDate->daysInMonth;
 
         // Check if this month is finalized & locked by M03 Payroll
-        $isPayrollLocked = PayrollRun::where('period_year', $year)
+        $payrollQuery = PayrollRun::where('period_year', $year)
             ->where('period_month', $month)
-            ->where('status', 'locked')
-            ->exists();
+            ->where('status', 'locked');
+        if (app()->bound('current_tenant_id') && app('current_tenant_id')) {
+            $payrollQuery->where('tenant_id', app('current_tenant_id'));
+        }
+        $isPayrollLocked = $payrollQuery->exists();
 
         // 0. Query all active (non-archived) Rosters for the switcher
         $allRosters = Roster::query()
@@ -286,7 +291,10 @@ final class RosterService
                             $end->addDay();
                         }
                         $diffMinutes = $start->diffInMinutes($end);
-                        $netHours = max(0, ($diffMinutes - ($entry->shift->break_minutes ?? 0)) / 60);
+                        $deductBreak = ($entry->shift?->break_deduction_type ?? 'auto_deduct') === 'no_deduction'
+                            ? 0
+                            : ($entry->shift?->break_minutes ?? 0);
+                        $netHours = max(0, ($diffMinutes - $deductBreak) / 60);
                         $totalHours += $netHours;
 
                         // Roster-specific calculations & daily coverage summary (only if in this active roster)
@@ -434,7 +442,7 @@ final class RosterService
         $shifts = Shift::query()
             ->where('is_active', true)
             ->orderBy('name')
-            ->get(['id', 'name', 'code', 'color', 'start_time', 'end_time', 'is_night_shift', 'break_minutes']);
+            ->get(['id', 'name', 'code', 'color', 'start_time', 'end_time', 'is_night_shift', 'break_minutes', 'punch_mode', 'break_deduction_type']);
 
         $patterns = RosterPattern::query()
             ->active()
@@ -463,7 +471,7 @@ final class RosterService
         return [
             'year' => $year,
             'month' => $month,
-            'month_name' => $startDate->format('F Y'),
+            'month_name' => $startDate->format('F'),
             'days' => $days,
             'matrix' => $matrix,
             'shifts' => $shifts,
@@ -904,7 +912,7 @@ final class RosterService
     ): RosterEntry {
         $this->ensureNotLocked($date);
 
-        return DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason, $rosterId, $overriddenById): RosterEntry {
+        $savedEntry = DB::transaction(function () use ($employeeId, $date, $shiftId, $scheduleType, $notes, $status, $overrideReason, $rosterId, $overriddenById): RosterEntry {
             $entry = RosterEntry::where('employee_id', $employeeId)
                 ->whereDate('roster_date', $date)
                 ->first();
@@ -947,6 +955,20 @@ final class RosterService
                 'created_by' => $effectiveOverriddenBy,
             ]))->load(['shift:id,name,code,color,start_time,end_time,is_night_shift', 'originalShift:id,name,code,color', 'overriddenBy:id,name']);
         });
+
+        // Trigger automatic attendance reprocessing for this employee on this date
+        try {
+            $this->attendanceProcessingService->processDate(
+                Carbon::parse($date),
+                $employeeId,
+                null,
+                true
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $savedEntry;
     }
 
     /**
@@ -1168,20 +1190,34 @@ final class RosterService
         }
         $allAllocatedEmpIds = array_values(array_unique(array_filter($allAllocatedEmpIds)));
 
+        $reassignOverlapping = (bool) ($data['reassign_overlapping'] ?? false);
+        $reassignmentReason = $data['reassignment_reason'] ?? null;
+
         if (! empty($allAllocatedEmpIds)) {
-            $this->validateNoRosterOverlap($allAllocatedEmpIds, $startDate->toDateString(), $endDate->toDateString());
+            if ($reassignOverlapping) {
+                $this->reassignOverlappingAllocations(
+                    $allAllocatedEmpIds,
+                    $startDate->toDateString(),
+                    $endDate->toDateString(),
+                    null,
+                    $reassignmentReason
+                );
+            } else {
+                $this->validateNoRosterOverlap($allAllocatedEmpIds, $startDate->toDateString(), $endDate->toDateString());
+            }
         }
 
         $code = ! empty($data['code'])
             ? strtoupper(trim($data['code']))
             : 'RST-' . $startDate->format('Y-m') . '-' . strtoupper(Str::random(4));
 
-        return DB::transaction(function () use ($data, $startDate, $endDate, $code, $patternAllocations): Roster {
+        $roster = DB::transaction(function () use ($data, $startDate, $endDate, $code, $patternAllocations): Roster {
             $tenantId = session('tenant_id')
                 ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null)
                 ?? Auth::user()?->tenant_id;
 
             $roster = Roster::create([
+                'tenant_id' => $tenantId,
                 'name' => trim($data['name']),
                 'code' => $code,
                 'department_id' => ! empty($data['department_id']) && $data['department_id'] !== 'all' ? $data['department_id'] : null,
@@ -1265,6 +1301,25 @@ final class RosterService
 
             return $roster;
         });
+
+        // Trigger automatic attendance reprocessing for reassigned staff on affected dates
+        if ($reassignOverlapping && ! empty($allAllocatedEmpIds)) {
+            try {
+                foreach ($allAllocatedEmpIds as $empId) {
+                    $this->attendanceProcessingService->reprocessDateRange(
+                        $startDate,
+                        $endDate,
+                        $empId,
+                        null,
+                        false
+                    );
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $roster;
     }
 
     /**
@@ -1510,6 +1565,110 @@ final class RosterService
     }
 
     /**
+     * Resolve and trim overlapping allocations and entries for employees being reassigned to a target roster.
+     * Prevents double-booking by cleanly excising the date range from conflicting active rosters.
+     *
+     * @param  array<int, string>  $employeeIds
+     */
+    public function reassignOverlappingAllocations(
+        array $employeeIds,
+        string $startDate,
+        string $endDate,
+        ?string $targetRosterId = null,
+        ?string $reason = null
+    ): void {
+        if (empty($employeeIds)) {
+            return;
+        }
+
+        $start = Carbon::parse($startDate)->startOfDay();
+        $end = Carbon::parse($endDate)->endOfDay();
+        $startStr = $start->toDateString();
+        $endStr = $end->toDateString();
+
+        $this->ensureNotLockedInRange($start, $end);
+
+        $tenantId = session('tenant_id')
+            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null)
+            ?? Auth::user()?->tenant_id;
+
+        DB::transaction(function () use ($employeeIds, $start, $end, $startStr, $endStr, $targetRosterId, $reason, $tenantId): void {
+            // 1. Delete conflicting RosterEntry records in any other active rosters
+            $entryQuery = RosterEntry::query()
+                ->whereIn('employee_id', $employeeIds)
+                ->whereBetween('roster_date', [$startStr, $endStr])
+                ->whereHas('roster', function ($q) use ($targetRosterId) {
+                    $q->where('status', '!=', 'archived');
+                    if ($targetRosterId) {
+                        $q->where('id', '!=', $targetRosterId);
+                    }
+                });
+
+            $entryQuery->delete();
+
+            // 2. Query all conflicting allocations in other active rosters
+            $allocQuery = RosterEmployeeAllocation::query()
+                ->whereIn('employee_id', $employeeIds)
+                ->where('effective_from', '<=', $endStr)
+                ->where('effective_to', '>=', $startStr)
+                ->whereHas('roster', function ($q) use ($targetRosterId) {
+                    $q->where('status', '!=', 'archived');
+                    if ($targetRosterId) {
+                        $q->where('id', '!=', $targetRosterId);
+                    }
+                });
+
+            $allocations = $allocQuery->get();
+
+            foreach ($allocations as $alloc) {
+                $allocStart = Carbon::parse($alloc->effective_from)->startOfDay();
+                $allocEnd = Carbon::parse($alloc->effective_to)->endOfDay();
+
+                $coversStart = $start->lte($allocStart);
+                $coversEnd = $end->gte($allocEnd);
+
+                if ($coversStart && $coversEnd) {
+                    // Case 1: Reassignment window completely covers this allocation
+                    $alloc->delete();
+                } elseif ($coversStart && ! $coversEnd) {
+                    // Case 2: Overlaps beginning of allocation -> trim start forward
+                    $alloc->update([
+                        'effective_from' => $end->copy()->addDay()->toDateString(),
+                        'notes' => trim(($alloc->notes ?? '') . " | Reassigned from {$startStr} to {$endStr}: " . ($reason ?? 'Prior period correction')),
+                    ]);
+                } elseif (! $coversStart && $coversEnd) {
+                    // Case 3: Overlaps end of allocation -> trim end backward
+                    $alloc->update([
+                        'effective_to' => $start->copy()->subDay()->toDateString(),
+                        'notes' => trim(($alloc->notes ?? '') . " | Reassigned from {$startStr} to {$endStr}: " . ($reason ?? 'Prior period correction')),
+                    ]);
+                } else {
+                    // Case 4: Reassignment window is in the middle of this allocation -> split into two
+                    $originalEndStr = $allocEnd->toDateString();
+
+                    // Shorten first piece to end before $start
+                    $alloc->update([
+                        'effective_to' => $start->copy()->subDay()->toDateString(),
+                        'notes' => trim(($alloc->notes ?? '') . " | Split reassignment up to {$startStr}"),
+                    ]);
+
+                    // Create second piece starting after $end
+                    RosterEmployeeAllocation::create([
+                        'tenant_id' => $alloc->tenant_id ?? $tenantId,
+                        'roster_id' => $alloc->roster_id,
+                        'roster_pattern_id' => $alloc->roster_pattern_id,
+                        'employee_id' => $alloc->employee_id,
+                        'effective_from' => $end->copy()->addDay()->toDateString(),
+                        'effective_to' => $originalEndStr,
+                        'notes' => trim(($alloc->notes ?? '') . " | Split post-reassignment from {$endStr}"),
+                        'created_by' => Auth::id() ?? $alloc->created_by,
+                    ]);
+                }
+            }
+        });
+    }
+
+    /**
      * Query available active employees for enrollment with strict Roster Exclusivity filtering.
      *
      * @return Collection<int, array<string, mixed>>
@@ -1522,6 +1681,15 @@ final class RosterService
     ): \Illuminate\Support\Collection {
         $start = Carbon::parse($startDate)->toDateString();
         $end = Carbon::parse($endDate)->toDateString();
+
+        $startDateCarbon = Carbon::parse($startDate)->startOfDay();
+        $endDateCarbon = Carbon::parse($endDate)->endOfDay();
+        $isPeriodLocked = false;
+        try {
+            $this->ensureNotLockedInRange($startDateCarbon, $endDateCarbon);
+        } catch (\Throwable) {
+            $isPeriodLocked = true;
+        }
 
         // 1. Find all active entries in overlapping active rosters (excluding current roster)
         $activeEntries = RosterEntry::query()
@@ -1582,7 +1750,7 @@ final class RosterService
 
         $allEmployees = $query->get();
 
-        return $allEmployees->map(function ($emp) use ($activeEntries, $activeAllocs, $currentRosterMembers) {
+        return $allEmployees->map(function ($emp) use ($activeEntries, $activeAllocs, $currentRosterMembers, $isPeriodLocked) {
             $entries = $activeEntries->get($emp->id);
             $allocs = $activeAllocs->get($emp->id);
             $firstRoster = $entries?->first()?->roster ?? $allocs?->first()?->roster;
@@ -1601,6 +1769,9 @@ final class RosterService
                 'is_available' => ! $isEnrolledElsewhere && ! $isInCurrentRoster,
                 'is_enrolled_elsewhere' => $isEnrolledElsewhere,
                 'is_in_current_roster' => $isInCurrentRoster,
+                'can_reassign' => $isEnrolledElsewhere && ! $isPeriodLocked && ! $isInCurrentRoster,
+                'is_period_locked' => $isPeriodLocked,
+                'conflicting_roster_name' => $firstRoster?->name,
                 'exclusion_reason' => $isInCurrentRoster
                     ? 'Already assigned to this roster'
                     : ($isEnrolledElsewhere ? "Assigned to {$firstRoster->name}" : null),
@@ -1741,25 +1912,35 @@ final class RosterService
         string $effectiveFrom,
         string $effectiveTo,
         ?string $patternId = null,
-        ?string $notes = null
+        ?string $notes = null,
+        bool $reassignOverlapping = false,
+        ?string $reassignmentReason = null
     ): int {
         $roster = Roster::findOrFail($rosterId);
+        $startDate = Carbon::parse($effectiveFrom)->startOfDay();
+        $endDate = Carbon::parse($effectiveTo)->endOfDay();
+        $this->ensureNotLockedInRange($startDate, $endDate);
+
         $empIds = (array) $employeeIds;
 
         if (empty($empIds)) {
             return 0;
         }
 
-        // Validate that no employee is double-booked into another active roster during overlapping dates
-        $this->validateNoRosterOverlap($empIds, $effectiveFrom, $effectiveTo, $roster->id);
+        if ($reassignOverlapping) {
+            $this->reassignOverlappingAllocations($empIds, $effectiveFrom, $effectiveTo, $roster->id, $reassignmentReason);
+        } else {
+            // Validate that no employee is double-booked into another active roster during overlapping dates
+            $this->validateNoRosterOverlap($empIds, $effectiveFrom, $effectiveTo, $roster->id);
+        }
 
         $userId = Auth::id();
         $tenantId = session('tenant_id')
             ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null)
             ?? Auth::user()?->tenant_id;
 
-        return DB::transaction(function () use ($roster, $empIds, $effectiveFrom, $effectiveTo, $patternId, $notes, $userId, $tenantId): int {
-            $createdCount = 0;
+        $createdCount = DB::transaction(function () use ($roster, $empIds, $effectiveFrom, $effectiveTo, $patternId, $notes, $userId, $tenantId): int {
+            $count = 0;
 
             foreach ($empIds as $empId) {
                 // Remove overlapping allocation for this employee in this roster if any exists
@@ -1780,7 +1961,7 @@ final class RosterService
                     'created_by' => $userId,
                 ]);
 
-                $createdCount++;
+                $count++;
             }
 
             // If patternId is supplied, auto-generate shift entries for allocated range
@@ -1794,8 +1975,27 @@ final class RosterService
                 ]);
             }
 
-            return $createdCount;
+            return $count;
         });
+
+        // Trigger automatic attendance reprocessing for reassigned staff on affected dates
+        if ($reassignOverlapping) {
+            try {
+                foreach ($empIds as $empId) {
+                    $this->attendanceProcessingService->reprocessDateRange(
+                        $startDate,
+                        $endDate,
+                        $empId,
+                        null,
+                        false
+                    );
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $createdCount;
     }
 
     /**
@@ -1856,11 +2056,18 @@ final class RosterService
         string $targetRosterId,
         string $employeeId,
         string $transferDate,
-        ?string $patternId = null
+        ?string $patternId = null,
+        ?string $effectiveTo = null,
+        ?string $notes = null
     ): bool {
-        return DB::transaction(function () use ($sourceRosterId, $targetRosterId, $employeeId, $transferDate, $patternId): bool {
-            $targetRoster = Roster::findOrFail($targetRosterId);
+        $targetRoster = Roster::findOrFail($targetRosterId);
+        $startDate = Carbon::parse($transferDate)->startOfDay();
+        $targetEnd = $effectiveTo ?? ($targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date);
+        $endDate = Carbon::parse($targetEnd)->endOfDay();
 
+        $this->ensureNotLockedInRange($startDate, $endDate);
+
+        return DB::transaction(function () use ($sourceRosterId, $targetRosterId, $employeeId, $transferDate, $patternId, $targetRoster, $targetEnd, $startDate, $endDate, $notes): bool {
             if ($sourceRosterId === $targetRosterId) {
                 // Same Roster Shift Pattern Switch: Update allocation's pattern_id and regenerate shifts
                 $alloc = RosterEmployeeAllocation::where('roster_id', $targetRosterId)
@@ -1876,25 +2083,38 @@ final class RosterService
                         'pattern_id' => $patternId,
                         'employee_ids' => [$employeeId],
                         'start_date' => $transferDate,
-                        'end_date' => $targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date,
+                        'end_date' => $targetEnd,
                         'conflict_mode' => 'overwrite',
                     ]);
                 }
-                return true;
+            } else {
+                // 1. Deallocate from source roster from transferDate onwards
+                $this->deallocateEmployee($sourceRosterId, $employeeId, $transferDate);
+
+                // 2. Allocate to target roster with reassign_overlapping enabled
+                $this->allocateEmployee(
+                    $targetRoster->id,
+                    [$employeeId],
+                    $transferDate,
+                    $targetEnd,
+                    $patternId,
+                    $notes ?? 'Transferred from previous roster',
+                    true,
+                    $notes ?? 'Roster Transfer'
+                );
             }
 
-            // 1. Deallocate from source roster from transferDate onwards
-            $this->deallocateEmployee($sourceRosterId, $employeeId, $transferDate);
-
-            // 2. Allocate to target roster from transferDate to targetRoster end_date
-            $targetEnd = $targetRoster->end_date instanceof CarbonInterface ? $targetRoster->end_date->toDateString() : (string) $targetRoster->end_date;
-            $this->allocateEmployee(
-                $targetRoster->id,
-                [$employeeId],
-                $transferDate,
-                $targetEnd,
-                $patternId
-            );
+            try {
+                $this->attendanceProcessingService->reprocessDateRange(
+                    $startDate,
+                    $endDate,
+                    $employeeId,
+                    null,
+                    false
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
 
             return true;
         });
@@ -1907,10 +2127,15 @@ final class RosterService
     {
         $carbonDate = $date instanceof CarbonInterface ? $date : Carbon::parse($date);
 
-        return PayrollRun::where('period_year', $carbonDate->year)
+        $query = PayrollRun::where('period_year', $carbonDate->year)
             ->where('period_month', $carbonDate->month)
-            ->where('status', 'locked')
-            ->exists();
+            ->where('status', 'locked');
+
+        if (app()->bound('current_tenant_id') && app('current_tenant_id')) {
+            $query->where('tenant_id', app('current_tenant_id'));
+        }
+
+        return $query->exists();
     }
 
     /**

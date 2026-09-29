@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 
 interface AttendanceSettingsData {
-    intermediate_punch_mode: 'first_last' | 'actual_segments';
     ignore_terminal_punch_type: boolean;
     anti_passback_minutes: number;
     auto_detect_shift: boolean;
@@ -41,7 +40,6 @@ export default function AttendanceSettings({
     const [savedSuccess, setSavedSuccess] = useState(false);
 
     const form = useForm<AttendanceSettingsData>({
-        intermediate_punch_mode: initialSettings.intermediate_punch_mode ?? 'first_last',
         ignore_terminal_punch_type: initialSettings.ignore_terminal_punch_type ?? true,
         anti_passback_minutes: initialSettings.anti_passback_minutes ?? 3,
         auto_detect_shift: initialSettings.auto_detect_shift ?? true,
@@ -64,7 +62,6 @@ export default function AttendanceSettings({
 
     const handleResetDefaults = () => {
         form.setData({
-            intermediate_punch_mode: 'first_last',
             ignore_terminal_punch_type: true,
             anti_passback_minutes: 3,
             auto_detect_shift: true,
@@ -151,97 +148,31 @@ export default function AttendanceSettings({
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-8">
-                    {/* Setting 1: Intermediate Punch Pairing Mode */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-6">
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                                        Intermediate Punch & Break Deductions
-                                    </h2>
-                                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                                        Core Pairing Policy
-                                    </span>
-                                </div>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                    Determines how multiple punches occurring between the earliest check-in and final check-out are paired and treated for work hour calculations.
-                                </p>
+                    {/* Shift-Level Policy Information Banner */}
+                    <div className="bg-gradient-to-r from-indigo-900/20 via-purple-900/10 to-transparent border border-indigo-500/20 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                                <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                    <Layers className="w-4 h-4" />
+                                </span>
+                                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                                    Shift-Level Punch Modes & Break Policies
+                                </h2>
+                                <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    Shift Defined
+                                </span>
                             </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                                Punch Pairing Modes (First-In/Last-Out vs Actual Punch Segments) and Break Policies (Auto-Deduct Lunch, Actual Biometric Swipes, or Paid Breaks) are configured individually per Shift to support mixed corporate, factory, and security operations.
+                            </p>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Option 1: First / Last */}
-                            <label
-                                className={`relative flex flex-col p-5 rounded-xl border cursor-pointer transition ${
-                                    form.data.intermediate_punch_mode === 'first_last'
-                                        ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/30 ring-1 ring-indigo-600'
-                                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-800/20'
-                                }`}
-                            >
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="radio"
-                                            name="intermediate_punch_mode"
-                                            value="first_last"
-                                            checked={form.data.intermediate_punch_mode === 'first_last'}
-                                            onChange={() => form.setData('intermediate_punch_mode', 'first_last')}
-                                            disabled={!canManage}
-                                            className="text-indigo-600 focus:ring-indigo-500 dark:bg-slate-900 border-slate-300 dark:border-slate-700"
-                                        />
-                                        <span className="font-semibold text-sm text-slate-900 dark:text-white">
-                                            First-In / Last-Out Mode
-                                        </span>
-                                    </div>
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-semibold border border-emerald-300 dark:border-emerald-800">
-                                        Corporate Standard (Default)
-                                    </span>
-                                </div>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-                                    The earliest swipe is Check-In; the latest swipe is Check-Out. Standard scheduled shift breaks (e.g. 60-minute lunch) are deducted automatically. Intermediate swipes for coffee or short door openings are ignored.
-                                </p>
-                                <div className="mt-auto pt-3 border-t border-slate-200/80 dark:border-slate-700/60 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                                    <span>Punches: [08:00, 12:05, 12:55, 17:00] &rarr; Check-in: 08:00, Check-out: 17:00 (Break: -60m)</span>
-                                </div>
-                            </label>
-
-                            {/* Option 2: Actual Segments */}
-                            <label
-                                className={`relative flex flex-col p-5 rounded-xl border cursor-pointer transition ${
-                                    form.data.intermediate_punch_mode === 'actual_segments'
-                                        ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/30 ring-1 ring-indigo-600'
-                                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-800/20'
-                                }`}
-                            >
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="radio"
-                                            name="intermediate_punch_mode"
-                                            value="actual_segments"
-                                            checked={form.data.intermediate_punch_mode === 'actual_segments'}
-                                            onChange={() => form.setData('intermediate_punch_mode', 'actual_segments')}
-                                            disabled={!canManage}
-                                            className="text-indigo-600 focus:ring-indigo-500 dark:bg-slate-900 border-slate-300 dark:border-slate-700"
-                                        />
-                                        <span className="font-semibold text-sm text-slate-900 dark:text-white">
-                                            Actual Punch Segments Mode
-                                        </span>
-                                    </div>
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400 font-semibold border border-purple-300 dark:border-purple-800">
-                                        Factory / Production
-                                    </span>
-                                </div>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-                                    Sequential punches are paired into work sessions (In1 &rarr; Out1, In2 &rarr; Out2). Actual elapsed intervals between sessions are deducted as unpaid breaks. Ideal for plants with strict gate-pass or clock-out lunch policies.
-                                </p>
-                                <div className="mt-auto pt-3 border-t border-slate-200/80 dark:border-slate-700/60 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                    <Layers className="w-3.5 h-3.5 text-purple-500" />
-                                    <span>Punches: [08:00, 12:00, 12:45, 17:00] &rarr; Seg 1: 4h, Seg 2: 4h15m (Actual Break: 45m)</span>
-                                </div>
-                            </label>
-                        </div>
+                        <Link
+                            href="/shifts"
+                            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition whitespace-nowrap"
+                        >
+                            Configure Shifts
+                            <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
                     </div>
 
                     {/* Setting 2 & 3: Telemetry Direction & Anti-Passback */}

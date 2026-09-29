@@ -25,6 +25,8 @@ final class StoreRosterAllocationRequest extends FormRequest
             'effective_to' => ['required', 'date', 'after_or_equal:effective_from'],
             'pattern_id' => ['nullable', 'string', 'exists:roster_patterns,id'],
             'notes' => ['nullable', 'string', 'max:255'],
+            'reassign_overlapping' => ['nullable', 'boolean'],
+            'reassignment_reason' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

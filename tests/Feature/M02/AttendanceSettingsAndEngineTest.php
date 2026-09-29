@@ -120,7 +120,6 @@ final class AttendanceSettingsAndEngineTest extends TestCase
         $response->assertInertia(fn ($page) => $page
             ->component('Settings/Attendance')
             ->has('settings')
-            ->where('settings.intermediate_punch_mode', 'first_last')
             ->where('settings.ignore_terminal_punch_type', true)
             ->where('settings.anti_passback_minutes', 3)
             ->where('canManage', true)
@@ -136,7 +135,6 @@ final class AttendanceSettingsAndEngineTest extends TestCase
         $response->assertForbidden();
 
         $updateResponse = $this->actingAs($this->standardStaff)->post('/settings/attendance', [
-            'intermediate_punch_mode' => 'actual_segments',
             'ignore_terminal_punch_type' => false,
             'anti_passback_minutes' => 5,
             'auto_detect_shift' => true,
@@ -149,7 +147,6 @@ final class AttendanceSettingsAndEngineTest extends TestCase
     public function test_can_update_attendance_settings_and_sync_overtime_minimum_minutes(): void
     {
         $payload = [
-            'intermediate_punch_mode' => 'actual_segments',
             'ignore_terminal_punch_type' => true,
             'anti_passback_minutes' => 5,
             'auto_detect_shift' => true,
@@ -163,7 +160,6 @@ final class AttendanceSettingsAndEngineTest extends TestCase
 
         // Verify stored in tenant_settings
         $settings = $this->service->getTenantAttendanceSettings($this->tenant->id);
-        $this->assertSame('actual_segments', $settings['intermediate_punch_mode']);
         $this->assertTrue($settings['ignore_terminal_punch_type']);
         $this->assertSame(5, $settings['anti_passback_minutes']);
         $this->assertTrue($settings['auto_detect_shift']);
@@ -310,9 +306,12 @@ final class AttendanceSettingsAndEngineTest extends TestCase
 
     public function test_actual_segments_mode_pairs_intermediate_punches_and_deducts_exact_break(): void
     {
-        // Configure tenant for actual_segments mode
+        // Configure shift for actual_segments mode & actual_punches break deduction
+        $this->shift->update([
+            'punch_mode' => 'actual_segments',
+            'break_deduction_type' => 'actual_punches',
+        ]);
         $this->service->saveTenantAttendanceSettings($this->tenant->id, [
-            'intermediate_punch_mode' => 'actual_segments',
             'anti_passback_minutes' => 1,
         ]);
 

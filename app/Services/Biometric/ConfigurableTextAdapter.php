@@ -292,6 +292,9 @@ final class ConfigurableTextAdapter implements BiometricImportAdapterInterface
             try {
                 $carbon = Carbon::createFromFormat($dateFormat, $trimmed);
                 if ($carbon !== false) {
+                    if ($carbon->year < 100) {
+                        $carbon->addYears(2000);
+                    }
                     return $carbon->format('Y-m-d H:i:s');
                 }
             } catch (\Throwable) {
@@ -335,6 +338,9 @@ final class ConfigurableTextAdapter implements BiometricImportAdapterInterface
             try {
                 $carbon = Carbon::createFromFormat($format, $trimmed);
                 if ($carbon !== false) {
+                    if ($carbon->year < 100) {
+                        $carbon->addYears(2000);
+                    }
                     return $carbon->format('Y-m-d H:i:s');
                 }
             } catch (\Throwable) {
@@ -345,6 +351,9 @@ final class ConfigurableTextAdapter implements BiometricImportAdapterInterface
         // 3. Fallback to generic Carbon parse
         try {
             $carbon = Carbon::parse($trimmed);
+            if ($carbon->year < 100) {
+                $carbon->addYears(2000);
+            }
 
             return $carbon->format('Y-m-d H:i:s');
         } catch (\Throwable) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
+use App\Http\Controllers\AttendanceLogController;
 use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\AttendanceTimesheetController;
 use App\Http\Controllers\BiometricDeviceProfileController;
@@ -206,6 +207,11 @@ Route::middleware(['tenant'])->group(function (): void {
         // Dedicated Employee Monthly Timesheet & Audit Matrix
         Route::get('/attendance/timesheet', [AttendanceTimesheetController::class, 'index'])->name('attendance.timesheet.index');
         Route::get('/attendance/timesheet/export', [AttendanceTimesheetController::class, 'exportCsv'])->name('attendance.timesheet.export');
+
+        // Biometric Raw Logs & Engine Audit Ledger
+        Route::get('/attendance/logs', [AttendanceLogController::class, 'index'])->name('attendance.logs.index');
+        Route::get('/attendance/logs/export/excel', [AttendanceLogController::class, 'exportExcel'])->name('attendance.logs.export.excel');
+        Route::get('/attendance/logs/export/pdf', [AttendanceLogController::class, 'exportPdf'])->name('attendance.logs.export.pdf');
 
         // Leave Management & Statutory Entitlements
         Route::get('/leave/requests', [LeaveRequestController::class, 'index'])->name('leave.requests.index');
