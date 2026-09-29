@@ -1302,8 +1302,8 @@ final class RosterService
             return $roster;
         });
 
-        // Trigger automatic attendance reprocessing for reassigned staff on affected dates
-        if ($reassignOverlapping && ! empty($allAllocatedEmpIds)) {
+        // Trigger automatic attendance reprocessing for allocated staff on affected dates
+        if (! empty($allAllocatedEmpIds)) {
             try {
                 foreach ($allAllocatedEmpIds as $empId) {
                     $this->attendanceProcessingService->reprocessDateRange(
@@ -1423,6 +1423,31 @@ final class RosterService
                 'updated_at' => now(),
             ]);
         });
+
+        // Trigger automatic attendance reprocessing for all employees across the roster date range
+        try {
+            $empIds = RosterEntry::where('roster_id', $roster->id)
+                ->pluck('employee_id')
+                ->unique()
+                ->filter()
+                ->values()
+                ->all();
+
+            $startDate = Carbon::parse($roster->start_date);
+            $endDate = Carbon::parse($roster->end_date);
+
+            foreach ($empIds as $empId) {
+                $this->attendanceProcessingService->reprocessDateRange(
+                    $startDate,
+                    $endDate,
+                    $empId,
+                    null,
+                    false
+                );
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /**
@@ -1978,8 +2003,8 @@ final class RosterService
             return $count;
         });
 
-        // Trigger automatic attendance reprocessing for reassigned staff on affected dates
-        if ($reassignOverlapping) {
+        // Trigger automatic attendance reprocessing for allocated staff on affected dates
+        if (! empty($empIds)) {
             try {
                 foreach ($empIds as $empId) {
                     $this->attendanceProcessingService->reprocessDateRange(

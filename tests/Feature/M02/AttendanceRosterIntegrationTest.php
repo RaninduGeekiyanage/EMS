@@ -25,6 +25,7 @@ final class AttendanceRosterIntegrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->seed(\Database\Seeders\RolesAndPermissionsSeeder::class);
 
         $this->tenant = Tenant::create([
             'name' => 'Lanka Tea Processors',
@@ -110,5 +111,86 @@ final class AttendanceRosterIntegrationTest extends TestCase
         $record = $result['records']->first();
         $this->assertNotNull($record);
         $this->assertEquals('absent', $record->status);
+    }
+
+    public function test_timesheet_accurately_reconciles_rostered_rest_day_and_avoids_unassigned_or_standard_shift(): void
+    {
+        $user = \App\Models\User::factory()->create(['tenant_id' => $this->tenant->id]);
+        $user->givePermissionTo('attendance.view');
+
+        // Tuesday 2026-05-12 is scheduled Rest Day
+        $tuesday = Carbon::parse('2026-05-12');
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'roster_date' => $tuesday->toDateString(),
+            'schedule_type' => 'rest_day',
+            'shift_id' => null,
+            'status' => 'published',
+        ]);
+
+        $response = $this->actingAs($user)
+            ->get(route('attendance.timesheet.index', [
+                'employee_id' => $this->employee->id,
+                'month' => '2026-05',
+            ]));
+
+        $response->assertOk();
+        $days = $response->viewData('page')['props']['timesheetDays'];
+        $tuesdayDay = collect($days)->firstWhere('date', '2026-05-12');
+
+        $this->assertNotNull($tuesdayDay);
+        $this->assertTrue($tuesdayDay['is_roster_off']);
+        $this->assertFalse($tuesdayDay['is_scheduled_work']);
+        $this->assertEquals('Rest Day (Off)', $tuesdayDay['roster_label']);
+        $this->assertNull($tuesdayDay['shift']);
+        $this->assertEquals('rest_day', $tuesdayDay['status']);
+    }
+
+    public function test_publishing_roster_retroactively_reprocesses_stale_attendance_records(): void
+    {
+        $tuesday = Carbon::parse('2026-05-12');
+
+        // Initially processed as absent before roster existed
+        \App\Models\AttendanceDaily::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => $tuesday->toDateString(),
+            'shift_id' => null,
+            'status' => 'absent',
+            'worked_hours' => 0.00,
+        ]);
+
+        // Create and publish a roster covering this date
+        $roster = \App\Models\Roster::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'May Operations Roster',
+            'code' => 'MAY-OPS',
+            'start_date' => '2026-05-01',
+            'end_date' => '2026-05-31',
+            'status' => 'draft',
+        ]);
+
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'roster_id' => $roster->id,
+            'employee_id' => $this->employee->id,
+            'roster_date' => $tuesday->toDateString(),
+            'schedule_type' => 'rest_day',
+            'shift_id' => null,
+            'status' => 'draft',
+        ]);
+
+        // Publish the roster via RosterService
+        $rosterService = app(\App\Services\RosterService::class);
+        $rosterService->publishNamedRoster($roster, true);
+
+        // Daily attendance record should now be updated to rest_day
+        $daily = \App\Models\AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', $tuesday->toDateString())
+            ->first();
+
+        $this->assertNotNull($daily);
+        $this->assertEquals('rest_day', $daily->status);
     }
 }

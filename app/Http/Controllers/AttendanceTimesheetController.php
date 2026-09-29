@@ -258,11 +258,19 @@ final class AttendanceTimesheetController extends Controller
                 return $current->between(Carbon::parse($l->start_date), Carbon::parse($l->end_date));
             });
 
-            // Determine Roster info
-            $rosterShift = $roster?->shift ?? $daily?->shift;
-            $isRosterOff = ($roster && $roster->schedule_type === 'off') || (! $roster && $current->isSunday());
-            $rosterLabel = $isRosterOff ? 'Rest Day (Off)' : ($rosterShift ? $rosterShift->name : 'Standard Shift');
-            $shiftTimes = $rosterShift ? substr($rosterShift->start_time, 0, 5) . ' - ' . substr($rosterShift->end_time, 0, 5) : null;
+            // Determine Roster & Schedule info via unified ShiftService schedule resolver
+            $schedule = $this->shiftService->resolveDailySchedule(
+                $employee,
+                $current,
+                $roster,
+                $activeLeave,
+                $holiday
+            );
+
+            $rosterShift = $schedule['shift'] ?? $daily?->shift;
+            $isRosterOff = $schedule['is_off'];
+            $rosterLabel = $schedule['label'];
+            $shiftTimes = $schedule['shift_times'] ?? ($rosterShift ? substr($rosterShift->start_time, 0, 5) . ' - ' . substr($rosterShift->end_time, 0, 5) : null);
 
             // Attendance details
             $status = 'scheduled';
@@ -281,6 +289,18 @@ final class AttendanceTimesheetController extends Controller
             if ($daily) {
                 $dailyId = $daily->id;
                 $status = $daily->status;
+
+                // Reconcile non-manual unpunched absent records if duty roster or holiday designates this as rest day, holiday or leave
+                if (! $daily->is_manual && empty($daily->check_in) && empty($daily->check_out) && $status === 'absent') {
+                    if ($activeLeave) {
+                        $status = $activeLeave->is_half_day ? 'half_day' : 'leave';
+                    } elseif ($holiday) {
+                        $status = 'holiday';
+                    } elseif ($isRosterOff) {
+                        $status = 'rest_day';
+                    }
+                }
+
                 $workedHours = (float) $daily->worked_hours;
                 $lateMinutes = (int) $daily->late_minutes;
                 $earlyMinutes = (int) $daily->early_departure_minutes;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Models\PublicHoliday;
 use App\Models\RosterEntry;
 use App\Models\Shift;
@@ -296,30 +297,102 @@ final class ShiftService
     }
 
     /**
-     * Find effective shift for an employee on a given date.
-     * Prioritizes scheduled RosterEntry (if exists) before falling back to permanent ShiftAssignment.
+     * Unified resolution of an employee's scheduled status on a specific date.
+     * Single source of truth across Roster, Daily Attendance, Timesheet, and Shift Swaps.
+     *
+     * @param  Employee  $employee
+     * @param  CarbonInterface  $date
+     * @param  RosterEntry|null  $preloadedRoster
+     * @param  LeaveRequest|null  $preloadedLeave
+     * @param  PublicHoliday|null  $preloadedHoliday
+     * @return array{
+     *     schedule_type: string,
+     *     is_off: bool,
+     *     label: string,
+     *     shift: ?Shift,
+     *     shift_times: ?string,
+     *     roster_entry: ?RosterEntry,
+     *     leave: ?LeaveRequest,
+     *     holiday: ?PublicHoliday,
+     *     source: string
+     * }
      */
-    public function getEffectiveShiftForEmployee(Employee $employee, CarbonInterface $date): ?Shift
-    {
+    public function resolveDailySchedule(
+        Employee $employee,
+        CarbonInterface $date,
+        ?RosterEntry $preloadedRoster = null,
+        ?LeaveRequest $preloadedLeave = null,
+        ?PublicHoliday $preloadedHoliday = null
+    ): array {
         $dateString = $date->toDateString();
 
-        // 1. Check for specific roster entry on this date
-        $rosterEntry = RosterEntry::where('employee_id', $employee->id)
+        // 1. Check for approved leave
+        $leave = $preloadedLeave ?? LeaveRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $dateString)
+            ->whereDate('end_date', '>=', $dateString)
+            ->with('leaveType:id,name,code')
+            ->first();
+
+        if ($leave !== null) {
+            $leaveName = $leave->leaveType?->name ?? 'Approved Leave';
+
+            return [
+                'schedule_type' => 'leave',
+                'is_off' => ! $leave->is_half_day,
+                'label' => $leave->is_half_day ? "Half-Day Leave ({$leaveName})" : "Leave: {$leaveName}",
+                'shift' => null,
+                'shift_times' => null,
+                'roster_entry' => null,
+                'leave' => $leave,
+                'holiday' => null,
+                'source' => 'leave',
+            ];
+        }
+
+        // 2. Check for public/company holiday
+        $holiday = $preloadedHoliday ?? $this->isHoliday($date);
+
+        // 3. Check for specific roster entry on this date
+        $rosterEntry = $preloadedRoster ?? RosterEntry::where('employee_id', $employee->id)
             ->whereDate('roster_date', $dateString)
             ->with('shift')
             ->first();
 
         if ($rosterEntry !== null) {
             if ($rosterEntry->schedule_type === 'rest_day' || $rosterEntry->schedule_type === 'off') {
-                return null;
+                return [
+                    'schedule_type' => 'rest_day',
+                    'is_off' => true,
+                    'label' => 'Rest Day (Off)',
+                    'shift' => null,
+                    'shift_times' => null,
+                    'roster_entry' => $rosterEntry,
+                    'leave' => null,
+                    'holiday' => $holiday,
+                    'source' => 'roster',
+                ];
             }
 
             if ($rosterEntry->shift !== null) {
-                return $rosterEntry->shift;
+                $start = substr($rosterEntry->shift->start_time, 0, 5);
+                $end = substr($rosterEntry->shift->end_time, 0, 5);
+
+                return [
+                    'schedule_type' => 'shift',
+                    'is_off' => false,
+                    'label' => $rosterEntry->shift->name,
+                    'shift' => $rosterEntry->shift,
+                    'shift_times' => "{$start} - {$end}",
+                    'roster_entry' => $rosterEntry,
+                    'leave' => null,
+                    'holiday' => $holiday,
+                    'source' => 'roster',
+                ];
             }
         }
 
-        // 2. Fallback to permanent baseline ShiftAssignment
+        // 4. Contractual baseline ShiftAssignment fallback
         $assignment = ShiftAssignment::where('employee_id', $employee->id)
             ->where('effective_from', '<=', $dateString)
             ->where(static function ($q) use ($dateString) {
@@ -327,9 +400,77 @@ final class ShiftService
                     ->orWhere('effective_to', '>=', $dateString);
             })
             ->latest('effective_from')
+            ->with('shift')
             ->first();
 
-        return $assignment?->shift;
+        if ($assignment?->shift !== null) {
+            $start = substr($assignment->shift->start_time, 0, 5);
+            $end = substr($assignment->shift->end_time, 0, 5);
+
+            return [
+                'schedule_type' => 'shift',
+                'is_off' => false,
+                'label' => $assignment->shift->name,
+                'shift' => $assignment->shift,
+                'shift_times' => "{$start} - {$end}",
+                'roster_entry' => null,
+                'leave' => null,
+                'holiday' => $holiday,
+                'source' => 'assignment',
+            ];
+        }
+
+        // 5. Public Holiday (when no roster or assignment is scheduled)
+        if ($holiday !== null) {
+            return [
+                'schedule_type' => 'holiday',
+                'is_off' => true,
+                'label' => "Holiday: {$holiday->name}",
+                'shift' => null,
+                'shift_times' => null,
+                'roster_entry' => null,
+                'leave' => null,
+                'holiday' => $holiday,
+                'source' => 'holiday',
+            ];
+        }
+
+        // 6. Sunday Default (unassigned)
+        if ($date->isSunday()) {
+            return [
+                'schedule_type' => 'rest_day',
+                'is_off' => true,
+                'label' => 'Rest Day (Sunday)',
+                'shift' => null,
+                'shift_times' => null,
+                'roster_entry' => null,
+                'leave' => null,
+                'holiday' => null,
+                'source' => 'sunday_default',
+            ];
+        }
+
+        // 7. Unassigned
+        return [
+            'schedule_type' => 'unassigned',
+            'is_off' => false,
+            'label' => 'Unassigned Shift',
+            'shift' => null,
+            'shift_times' => null,
+            'roster_entry' => null,
+            'leave' => null,
+            'holiday' => null,
+            'source' => 'none',
+        ];
+    }
+
+    /**
+     * Find effective shift for an employee on a given date.
+     * Prioritizes scheduled RosterEntry (if exists) before falling back to permanent ShiftAssignment.
+     */
+    public function getEffectiveShiftForEmployee(Employee $employee, CarbonInterface $date): ?Shift
+    {
+        return $this->resolveDailySchedule($employee, $date)['shift'];
     }
 
     /**

@@ -375,11 +375,12 @@ final class ShiftSwapService
 
         $shiftModel = null;
         if ($entry !== null) {
-            $scheduleType = $entry->schedule_type;
+            $scheduleType = ($entry->schedule_type === 'off') ? 'rest_day' : $entry->schedule_type;
             $shiftModel = $entry->shift;
         } else {
-            $shiftModel = $this->shiftService->getEffectiveShiftForEmployee($emp, $date);
-            $scheduleType = $shiftModel !== null ? 'shift' : 'rest_day';
+            $unified = $this->shiftService->resolveDailySchedule($emp, $date, null, $leave);
+            $shiftModel = $unified['shift'];
+            $scheduleType = $unified['schedule_type'] === 'unassigned' ? 'rest_day' : $unified['schedule_type'];
         }
 
         return [

@@ -1102,8 +1102,23 @@ export default function Daily({
                                                             {rec.shift.start_time.substring(0, 5)} - {rec.shift.end_time.substring(0, 5)}
                                                         </span>
                                                     </div>
+                                                ) : rec.status === 'rest_day' ? (
+                                                    <span className="text-indigo-400 font-semibold text-xs flex items-center gap-1.5">
+                                                        <Sun className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                                        Rest Day (OFF)
+                                                    </span>
+                                                ) : rec.status === 'holiday' ? (
+                                                    <span className="text-purple-400 font-semibold text-xs flex items-center gap-1.5">
+                                                        <Moon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                                                        Public Holiday
+                                                    </span>
+                                                ) : rec.status === 'leave' ? (
+                                                    <span className="text-amber-400 font-semibold text-xs flex items-center gap-1.5">
+                                                        <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                                        Approved Leave
+                                                    </span>
                                                 ) : (
-                                                    <span className="text-slate-500 italic text-[11px]">Unassigned</span>
+                                                    <span className="text-slate-500 italic text-[11px]">Unassigned Shift</span>
                                                 )}
                                             </td>
 

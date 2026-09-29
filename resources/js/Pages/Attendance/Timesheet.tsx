@@ -696,6 +696,11 @@ export default function Timesheet({
                                                             <Moon className="w-3.5 h-3.5 text-purple-400" />
                                                             {day.holiday.name} ({day.holiday.type.toUpperCase()})
                                                         </span>
+                                                    ) : day.leave ? (
+                                                        <span className="text-amber-400 font-semibold text-xs flex items-center gap-1.5">
+                                                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                                            {day.leave.type}
+                                                        </span>
                                                     ) : day.is_roster_off ? (
                                                         <span className="text-indigo-400 font-semibold text-xs flex items-center gap-1.5">
                                                             <Sun className="w-3.5 h-3.5 text-indigo-400" />
