@@ -427,8 +427,8 @@ final class ShiftSwapService
             }
             $currStart = Carbon::parse("{$date->toDateString()} {$newShift->start_time}");
             $gapMinutes = $prevEnd->diffInMinutes($currStart, false);
-            if ($gapMinutes >= 0 && $gapMinutes < 660) {
-                $restHours = round($gapMinutes / 60, 1);
+            if ($gapMinutes < 660) {
+                $restHours = max(0.0, round($gapMinutes / 60, 1));
 
                 return "Turnaround rest interval for {$employee->full_name} between {$prevDate->format('M d')} and {$date->format('M d')} is {$restHours}h (< 11.0h statutory minimum).";
             }
@@ -444,8 +444,8 @@ final class ShiftSwapService
             }
             $nextStart = Carbon::parse("{$nextDate->toDateString()} {$nextSched['shift_model']->start_time}");
             $gapMinutes = $currEnd->diffInMinutes($nextStart, false);
-            if ($gapMinutes >= 0 && $gapMinutes < 660) {
-                $restHours = round($gapMinutes / 60, 1);
+            if ($gapMinutes < 660) {
+                $restHours = max(0.0, round($gapMinutes / 60, 1));
 
                 return "Turnaround rest interval for {$employee->full_name} between {$date->format('M d')} and {$nextDate->format('M d')} is {$restHours}h (< 11.0h statutory minimum).";
             }

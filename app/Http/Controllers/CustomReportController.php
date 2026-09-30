@@ -22,7 +22,7 @@ final class CustomReportController extends Controller
      */
     public function index(Request $request): Response
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $defaultColumns = ['emp_no', 'full_name', 'department', 'designation', 'employment_category', 'payment_mode', 'basic_salary'];
         $selectedColumns = $request->query('columns')
@@ -57,7 +57,7 @@ final class CustomReportController extends Controller
      */
     public function exportCsv(Request $request): SymfonyResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $columns = (array) $request->input('columns', ['emp_no', 'full_name', 'department', 'designation']);
         $filters = (array) $request->input('filters', []);
@@ -70,7 +70,7 @@ final class CustomReportController extends Controller
      */
     public function exportPdf(Request $request): SymfonyResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $columns = (array) $request->input('columns', ['emp_no', 'full_name', 'department', 'designation']);
         $filters = (array) $request->input('filters', []);

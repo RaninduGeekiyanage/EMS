@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('public_holidays', function (Blueprint $table): void {
+            if (! Schema::hasColumn('public_holidays', 'custom_ot_rate')) {
+                $table->decimal('custom_ot_rate', 4, 2)->nullable()->after('type');
+            }
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('public_holidays', function (Blueprint $table): void {
+            if (Schema::hasColumn('public_holidays', 'custom_ot_rate')) {
+                $table->dropColumn('custom_ot_rate');
+            }
+        });
+    }
+};

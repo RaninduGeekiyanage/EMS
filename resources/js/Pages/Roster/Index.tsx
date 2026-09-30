@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Head, useForm, router, Link } from '@inertiajs/react';
+import { Head, useForm, router, Link, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
     Calendar as CalendarIcon,
@@ -251,6 +251,7 @@ export default function Index({
     is_payroll_locked = false,
     summary,
 }: Props) {
+    const { flash } = usePage<{ flash?: { success?: string; error?: string } }>().props;
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'department' | 'flat'>('department');
     const [deptFilter, setDeptFilter] = useState<string>(selected_department || 'all');
@@ -601,23 +602,56 @@ export default function Index({
         newRosterForm.setData('pattern_allocations', nextAllocations);
     };
 
+    // Check if any allocated staff currently has conflicts and reassignment is not enabled
+    const hasConflictStaffWithoutReassign = useMemo(() => {
+        if (newRosterForm.data.reassign_overlapping) return false;
+        const allAllocatedIds = Object.values(newRosterForm.data.pattern_allocations || {}).flat();
+        return allAllocatedIds.some((id) => {
+            const avail = available_employees.find((a) => a.id === id);
+            return avail && !avail.is_available && !avail.is_period_locked;
+        });
+    }, [newRosterForm.data.reassign_overlapping, newRosterForm.data.pattern_allocations, available_employees]);
+
     const handleAutoDistributeEvenly = () => {
         if (newRosterForm.data.selected_pattern_ids.length === 0) return;
 
-        // Get matching available employees based on current filter & search
-        const eligibleEmps = employeePool.filter((emp) => {
+        const candidateEmps = employeePool.filter((emp) => {
             const matchesSearch =
                 !wizardEmpSearch ||
                 emp.full_name.toLowerCase().includes(wizardEmpSearch.toLowerCase()) ||
                 emp.emp_no.toLowerCase().includes(wizardEmpSearch.toLowerCase());
             const matchesDept = wizardDeptFilter === 'all' || emp.department_id === wizardDeptFilter;
-            if (!matchesSearch || !matchesDept) return false;
+            return matchesSearch && matchesDept;
+        });
 
+        let allowReassign = newRosterForm.data.reassign_overlapping;
+        const conflictingCandidates = candidateEmps.filter((emp) => {
+            const availInfo = available_employees.find((a) => a.id === emp.id);
+            return availInfo && !availInfo.is_available && !availInfo.is_period_locked;
+        });
+
+        if (!allowReassign && conflictingCandidates.length > 0) {
+            const confirmed = window.confirm(
+                `${conflictingCandidates.length} staff member(s) are already allocated to another active roster.\n\nWould you like to enable 'Allow Retroactive Reassignment' to automatically distribute them across these crews?`
+            );
+            if (confirmed) {
+                allowReassign = true;
+                newRosterForm.setData('reassign_overlapping', true);
+            }
+        }
+
+        // Get matching available employees based on current filter & search
+        const eligibleEmps = candidateEmps.filter((emp) => {
             const availInfo = available_employees.find((a) => a.id === emp.id);
             if (availInfo?.is_period_locked) return false;
-            if (availInfo && !availInfo.is_available && !newRosterForm.data.reassign_overlapping) return false;
+            if (availInfo && !availInfo.is_available && !allowReassign) return false;
             return true;
         });
+
+        if (eligibleEmps.length === 0) {
+            alert('No eligible personnel found matching the active search/department filters.');
+            return;
+        }
 
         const numPatterns = newRosterForm.data.selected_pattern_ids.length;
         const newAllocations: Record<string, string[]> = {};
@@ -630,7 +664,11 @@ export default function Index({
             newAllocations[targetPatId].push(emp.id);
         });
 
-        newRosterForm.setData('pattern_allocations', newAllocations);
+        newRosterForm.setData({
+            ...newRosterForm.data,
+            reassign_overlapping: allowReassign,
+            pattern_allocations: newAllocations,
+        });
     };
 
     const handleNewRosterSubmit = (e: React.FormEvent) => {
@@ -658,8 +696,26 @@ export default function Index({
 
         const allAllocatedIds = allocationsPayload.flatMap((a) => a.employee_ids);
 
+        // Check for conflicting staff without reassign_overlapping enabled
+        const conflictingIds = allAllocatedIds.filter((id) => {
+            const avail = available_employees.find((a) => a.id === id);
+            return avail && !avail.is_available && !avail.is_period_locked;
+        });
+
+        let allowReassign = newRosterForm.data.reassign_overlapping;
+        if (!allowReassign && conflictingIds.length > 0) {
+            const confirmed = window.confirm(
+                `Warning: ${conflictingIds.length} allocated staff member(s) are currently scheduled in another active roster.\n\nDo you want to enable 'Allow Retroactive Reassignment' to reassign them to this new roster?`
+            );
+            if (!confirmed) {
+                return;
+            }
+            allowReassign = true;
+        }
+
         newRosterForm.transform((data) => ({
             ...data,
+            reassign_overlapping: allowReassign,
             pattern_allocations: allocationsPayload,
             pattern_id: allocationsPayload[0]?.pattern_id || data.selected_pattern_ids[0] || null,
             employee_ids: allAllocatedIds,
@@ -1097,6 +1153,24 @@ export default function Index({
             `}</style>
 
             <div className="max-w-[1780px] mx-auto space-y-4 pb-12">
+                {/* Global Notification Alerts */}
+                {flash?.success && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-4 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                            <span className="text-sm font-semibold">{flash.success}</span>
+                        </div>
+                    </div>
+                )}
+                {flash?.error && (
+                    <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 p-4 rounded-2xl flex items-center justify-between shadow-lg animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                            <span className="text-sm font-semibold">{flash.error}</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* 1. Header & Roster Switcher Bar */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1817,6 +1891,19 @@ export default function Index({
 
                         {/* Form Body - Scrollable content */}
                         <form onSubmit={handleNewRosterSubmit} className="space-y-4 overflow-y-auto flex-1 pr-1 text-xs">
+                            {/* Modal Error Banner */}
+                            {(flash?.error || Object.keys(newRosterForm.errors).length > 0) && (
+                                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5 animate-in fade-in">
+                                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                                    <div className="space-y-1">
+                                        {flash?.error && <div className="font-semibold">{flash.error}</div>}
+                                        {Object.entries(newRosterForm.errors).map(([key, msg]) => (
+                                            <div key={key} className="text-rose-400 font-mono">• {msg}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* STAGE 1: Roster Identity & Horizon */}
                             {rosterWizardStep === 1 && (
                                 <div className="space-y-4">
@@ -2530,6 +2617,19 @@ export default function Index({
                                                 );
                                             })}
                                     </div>
+
+                                    {/* Overlap conflict warning alert */}
+                                    {hasConflictStaffWithoutReassign && (
+                                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5 animate-in fade-in">
+                                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                            <div className="space-y-1">
+                                                <span className="font-bold">Overlapping Staff Assignment Detected:</span>
+                                                <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                                                    One or more allocated staff members are already scheduled in another active roster. Check <strong>"Allow Retroactive Reassignment"</strong> above to reassign them, or assign different personnel.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Navigation & Submit footer */}
                                     <div className="pt-3 flex items-center justify-between border-t border-slate-800">

@@ -61,7 +61,7 @@ final class AttendanceProcessingService
     ): array {
         $tenantId = $tenantId
             ?? session('tenant_id')
-            ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+            ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         if ($tenantId === null) {
             throw new \RuntimeException('Tenant context could not be resolved for attendance processing.');
@@ -120,11 +120,8 @@ final class AttendanceProcessingService
 
                 // Auto-detect shift if employee is unrostered or swapped and policy allows
                 if ($shift === null && ($tenantSettings['auto_detect_shift'] ?? true)) {
-                    $firstPunch = AttendanceLog::where('tenant_id', $tenantId)
-                        ->where('employee_id', $employee->id)
-                        ->whereDate('punch_datetime', $dateString)
-                        ->orderBy('punch_datetime')
-                        ->first();
+                    $candidatePunches = $this->getPunchesForDate($tenantId, $employee, $date, null);
+                    $firstPunch = $candidatePunches->first();
 
                     if ($firstPunch !== null) {
                         $shift = $this->autoDetectShiftForPunch($tenantId, $date, Carbon::parse($firstPunch->punch_datetime));
@@ -133,7 +130,7 @@ final class AttendanceProcessingService
 
                 if ($existing && $existing->is_manual && ! $overwriteManual) {
                     // Reconcile raw biometric punches so they don't remain dangling/unprocessed
-                    $punches = $this->getPunchesForDate($tenantId, $employee->id, $date, $shift);
+                    $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
                     if ($punches->isNotEmpty()) {
                         AttendanceLog::whereIn('id', $punches->pluck('id'))
                             ->where('is_processed', false)
@@ -175,7 +172,7 @@ final class AttendanceProcessingService
                 $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
 
                 // Query punches within window
-                $punches = $this->getPunchesForDate($tenantId, $employee->id, $date, $shift);
+                $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
 
                 // Calculate attendance record
                 $calculatedData = $this->calculateDailyAttendance(
@@ -286,6 +283,20 @@ final class AttendanceProcessingService
         ?string $departmentId = null,
         bool $overwriteManual = false
     ): array {
+        $today = Carbon::today();
+        if ($startDate->gt($today)) {
+            return [
+                'start_date' => $startDate->toDateString(),
+                'end_date' => $endDate->toDateString(),
+                'total_processed' => 0,
+                'present' => 0,
+                'absent' => 0,
+                'late' => 0,
+                'missing_punch' => 0,
+            ];
+        }
+
+        $clampedEnd = $endDate->gt($today) ? $today : $endDate;
         $current = $startDate->copy();
         $totalProcessed = 0;
         $totalPresent = 0;
@@ -293,7 +304,7 @@ final class AttendanceProcessingService
         $totalLate = 0;
         $totalMissingPunch = 0;
 
-        while ($current->lte($endDate)) {
+        while ($current->lte($clampedEnd)) {
             $result = $this->processDate(
                 $current,
                 $employeeId,
@@ -339,6 +350,12 @@ final class AttendanceProcessingService
         $isSunday = $date->isSunday();
         $isHoliday = $holiday !== null;
 
+        // Check for explicit roster entry on this date
+        $rosterEntry = $this->shiftService->getRosterEntryForEmployee($employee, $date);
+        $isRosterRestDay = $rosterEntry !== null && ($rosterEntry->schedule_type === 'rest_day' || $rosterEntry->schedule_type === 'off');
+        $isSundayRestDay = $isSunday && ($rosterEntry === null || $rosterEntry->schedule_type !== 'shift');
+        $isRestDay = $isRosterRestDay || $isSundayRestDay;
+
         // Check for active approved leave on this date
         $approvedLeave = LeaveRequest::where('tenant_id', $employee->tenant_id)
             ->where('employee_id', $employee->id)
@@ -363,21 +380,19 @@ final class AttendanceProcessingService
                     'ot_hours' => 0.00,
                     'double_ot_hours' => 0.00,
                     'status' => $status,
+                    'anomalies' => [],
                     'calculation_breakdown' => [
                         'rule' => $rule->rule_name,
-                        'leave_type' => $approvedLeave->leaveType->name,
-                        'leave_type_code' => $approvedLeave->leaveType->code,
+                        'leave_type' => $approvedLeave->leaveType?->name,
+                        'leave_type_code' => $approvedLeave->leaveType?->code,
                         'leave_request_id' => $approvedLeave->id,
-                        'is_half_day' => $approvedLeave->is_half_day,
+                        'is_half_day' => (bool) $approvedLeave->is_half_day,
                         'half_day_type' => $approvedLeave->half_day_type,
-                        'notes' => "Approved Leave: {$approvedLeave->leaveType->name}",
+                        'is_paid' => (bool) ($approvedLeave->leaveType?->is_paid ?? true),
+                        'notes' => "Approved Leave: {$approvedLeave->leaveType?->name}",
                     ],
                 ];
             }
-
-            // Check for explicit roster entry on this date
-            $rosterEntry = $this->shiftService->getRosterEntryForEmployee($employee, $date);
-            $isRosterRestDay = $rosterEntry !== null && ($rosterEntry->schedule_type === 'rest_day' || $rosterEntry->schedule_type === 'off');
 
             if ($isHoliday) {
                 $status = 'holiday';
@@ -415,6 +430,7 @@ final class AttendanceProcessingService
                 'ot_hours' => 0.00,
                 'double_ot_hours' => 0.00,
                 'status' => $status,
+                'anomalies' => [],
                 'calculation_breakdown' => [
                     'rule' => $rule->rule_name,
                     'punches_count' => 0,
@@ -626,7 +642,8 @@ final class AttendanceProcessingService
         $lateMinutes = 0;
         if ($shift !== null) {
             $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
-            $graceCutoff = $shiftStart->copy()->addMinutes($rule->grace_period_minutes);
+            $graceMinutes = $shift->grace_minutes ?? $rule->grace_period_minutes ?? 10;
+            $graceCutoff = $shiftStart->copy()->addMinutes($graceMinutes);
 
             if ($checkIn->gt($graceCutoff)) {
                 $lateMinutes = (int) abs($checkIn->diffInMinutes($shiftStart));
@@ -641,23 +658,25 @@ final class AttendanceProcessingService
                 $shiftEnd->addDay();
             }
 
-            $earlyCutoff = $shiftEnd->copy()->subMinutes($rule->early_departure_grace_minutes);
+            $earlyGraceMinutes = $shift->early_departure_grace_minutes ?? $rule->early_departure_grace_minutes ?? 0;
+            $earlyCutoff = $shiftEnd->copy()->subMinutes($earlyGraceMinutes);
             if ($checkOut->lt($earlyCutoff)) {
                 $earlyDepartureMinutes = (int) abs($shiftEnd->diffInMinutes($checkOut));
             }
         }
 
         // 5. Overtime Calculation via Engine (applying pre-shift arrival OT policy)
+        $earlyArrivalMinutes = 0;
         $hoursForOt = $workedHours;
         if ($shift !== null && ! $allowEarlyInAsOt) {
             $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
             if ($checkIn->lt($shiftStart)) {
-                $earlyMinutes = (int) abs($shiftStart->diffInMinutes($checkIn));
-                $hoursForOt = max(0.00, round(($netMinutes - $earlyMinutes) / 60.0, 2));
+                $earlyArrivalMinutes = (int) abs($shiftStart->diffInMinutes($checkIn));
+                $hoursForOt = max(0.00, round(($netMinutes - $earlyArrivalMinutes) / 60.0, 2));
             }
         }
 
-        $otResult = $this->overtimeService->calculate($rule, $shift, $date, $hoursForOt, $holiday);
+        $otResult = $this->overtimeService->calculate($rule, $shift, $date, $hoursForOt, $holiday, $isRestDay);
 
         // 6. Collect Structured Anomalies
         $anomalies = [];
@@ -684,8 +703,10 @@ final class AttendanceProcessingService
         $status = 'present';
         if ($isHoliday) {
             $status = 'present';
-        } elseif ($isSunday) {
+        } elseif ($isRestDay) {
             $status = 'present';
+        } elseif ($approvedLeave && $approvedLeave->is_half_day) {
+            $status = 'half_day';
         } elseif ($shift && $shift->shift_type === 'half_day') {
             $status = 'half_day';
         } elseif ($workedHours >= $rule->half_day_min_hours && $workedHours < $rule->half_day_max_hours) {
@@ -694,11 +715,25 @@ final class AttendanceProcessingService
             $status = 'absent';
         }
 
+        $regularHours = $otResult['regular_hours'];
+        if ($approvedLeave && $approvedLeave->is_half_day) {
+            $regularHours = min(8.00, round($regularHours + 4.00, 2));
+        }
+
+        $isScheduledHalfDay = $shift && $shift->shift_type === 'half_day';
+        $isPaid = true;
+        if ($approvedLeave) {
+            $isPaid = (bool) ($approvedLeave->leaveType?->is_paid ?? true);
+        } elseif ($status === 'half_day' && ! $isScheduledHalfDay) {
+            // Unauthorized half day (worked less than standard day without approved leave)
+            $isPaid = false;
+        }
+
         return [
             'check_in' => $checkIn->toDateTimeString(),
             'check_out' => $checkOut->toDateTimeString(),
             'worked_hours' => $workedHours,
-            'regular_hours' => $otResult['regular_hours'],
+            'regular_hours' => $regularHours,
             'late_minutes' => $lateMinutes,
             'early_departure_minutes' => $earlyDepartureMinutes,
             'ot_hours' => $otResult['ot_hours'],
@@ -717,6 +752,14 @@ final class AttendanceProcessingService
                 'intermediate_punch_mode' => $punchMode,
                 'segments_breakdown' => $segmentBreakdown,
                 'holiday_name' => $holiday?->name,
+                'is_roster_rest_day' => $isRestDay,
+                'is_scheduled_half_day' => $isScheduledHalfDay,
+                'is_paid' => $isPaid,
+                'uncredited_early_arrival_minutes' => $earlyArrivalMinutes,
+                'leave_type' => $approvedLeave?->leaveType?->name,
+                'leave_type_code' => $approvedLeave?->leaveType?->code,
+                'leave_request_id' => $approvedLeave?->id,
+                'is_half_day' => (bool) ($approvedLeave?->is_half_day ?? false),
             ],
         ];
     }
@@ -826,33 +869,84 @@ final class AttendanceProcessingService
     }
 
     /**
-     * Query raw attendance logs for an employee on a date, accounting for night shifts.
+     * Query raw attendance logs for an employee on a date, accounting for night shifts and consumed checkout punches.
      *
      * @return Collection<int, AttendanceLog>
      */
-    private function getPunchesForDate(string $tenantId, string $employeeId, CarbonInterface $date, ?Shift $shift): Collection
+    private function getPunchesForDate(string $tenantId, Employee $employee, CarbonInterface $date, ?Shift $shift): Collection
     {
         $dateStr = $date->toDateString();
+        $employeeId = $employee->id;
 
-        if ($shift && $shift->is_night_shift) {
-            // Night shift window: from 18:00 on date to 12:00 on next day
-            $windowStart = Carbon::parse($dateStr.' 18:00:00');
-            $windowEnd = Carbon::parse($dateStr.' 12:00:00')->addDay();
+        // Check if previous day had a night shift to avoid claiming Day D-1 checkout punches as Day D check-in
+        $prevDate = $date->copy()->subDay();
+        $consumedCheckoutCutoff = null;
 
-            return AttendanceLog::query()
-                ->where('tenant_id', $tenantId)
-                ->where('employee_id', $employeeId)
-                ->whereBetween('punch_datetime', [$windowStart, $windowEnd])
-                ->orderBy('punch_datetime')
-                ->get();
+        $prevAttendance = AttendanceDaily::where('tenant_id', $tenantId)
+            ->where('employee_id', $employeeId)
+            ->whereDate('attendance_date', $prevDate->toDateString())
+            ->first();
+
+        if ($prevAttendance && $prevAttendance->check_out) {
+            $prevCheckOut = Carbon::parse($prevAttendance->check_out);
+            if ($prevCheckOut->toDateString() === $dateStr) {
+                // If previous shift checked out on this date, all punches on or prior to that checkout
+                // belong to the previous day's shift and must not leak into today
+                $consumedCheckoutCutoff = $prevCheckOut;
+            }
+        } else {
+            $prevSchedule = $this->shiftService->resolveDailySchedule($employee, $prevDate);
+            $prevShift = $prevSchedule['shift'] ?? null;
+            if ($prevShift && $prevShift->is_night_shift) {
+                $prevInPunch = AttendanceLog::where('tenant_id', $tenantId)
+                    ->where('employee_id', $employeeId)
+                    ->whereBetween('punch_datetime', [
+                        Carbon::parse($prevDate->toDateString().' 18:00:00'),
+                        Carbon::parse($dateStr.' 04:00:00'),
+                    ])
+                    ->first();
+
+                if ($prevInPunch) {
+                    $morningOutPunch = AttendanceLog::where('tenant_id', $tenantId)
+                        ->where('employee_id', $employeeId)
+                        ->whereBetween('punch_datetime', [
+                            Carbon::parse($dateStr.' 04:00:01'),
+                            Carbon::parse($dateStr.' 12:00:00'),
+                        ])
+                        ->orderByDesc('punch_datetime')
+                        ->first();
+
+                    if ($morningOutPunch) {
+                        $consumedCheckoutCutoff = Carbon::parse($morningOutPunch->punch_datetime);
+                    }
+                }
+            }
         }
 
-        return AttendanceLog::query()
-            ->where('tenant_id', $tenantId)
-            ->where('employee_id', $employeeId)
-            ->whereDate('punch_datetime', $dateStr)
-            ->orderBy('punch_datetime')
-            ->get();
+        if ($shift) {
+            [$inStart, $inEnd] = $shift->getInWindow($date);
+            [$outStart, $outEnd] = $shift->getOutWindow($date);
+
+            $windowStart = $inStart->copy()->subMinutes(60);
+            $windowEnd = $outEnd->copy()->addMinutes(180);
+
+            $query = AttendanceLog::query()
+                ->where('tenant_id', $tenantId)
+                ->where('employee_id', $employeeId)
+                ->whereBetween('punch_datetime', [$windowStart, $windowEnd]);
+        } else {
+            // No shift assigned (e.g. rest day, holiday, or off day)
+            $query = AttendanceLog::query()
+                ->where('tenant_id', $tenantId)
+                ->where('employee_id', $employeeId)
+                ->whereDate('punch_datetime', $dateStr);
+        }
+
+        if ($consumedCheckoutCutoff !== null) {
+            $query->where('punch_datetime', '>', $consumedCheckoutCutoff->toDateTimeString());
+        }
+
+        return $query->orderBy('punch_datetime')->get();
     }
 
     /**
@@ -868,8 +962,7 @@ final class AttendanceProcessingService
             $date = Carbon::parse($record->attendance_date);
 
             if (! $shift && $record->employee) {
-                $rosterEntry = $this->shiftService->getRosterEntryForEmployee($record->employee, $date);
-                $shift = $rosterEntry?->shift ?? Shift::where('tenant_id', $tenantId)->first();
+                $shift = $this->shiftService->getEffectiveShiftForEmployee($record->employee, $date);
                 if ($shift) {
                     $record->shift_id = $shift->id;
                 }
@@ -1229,8 +1322,8 @@ final class AttendanceProcessingService
 
         foreach ($shifts as $candidate) {
             [$inStart, $inEnd] = $candidate->getInWindow($date);
-            $inStartGrace = $inStart->subMinutes(30);
-            $inEndGrace = $inEnd->addMinutes(30);
+            $inStartGrace = $inStart->copy()->subMinutes(30);
+            $inEndGrace = $inEnd->copy()->addMinutes(30);
 
             if ($punchTime->gte($inStartGrace) && $punchTime->lte($inEndGrace)) {
                 $shiftStart = Carbon::parse($date->toDateString().' '.$candidate->start_time);

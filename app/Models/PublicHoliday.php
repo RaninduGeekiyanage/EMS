@@ -30,6 +30,7 @@ final class PublicHoliday extends Model
         'holiday_date',
         'name',
         'type',
+        'custom_ot_rate',
         'description',
     ];
 
@@ -42,6 +43,7 @@ final class PublicHoliday extends Model
     {
         return [
             'holiday_date' => 'date',
+            'custom_ot_rate' => 'float',
         ];
     }
 }

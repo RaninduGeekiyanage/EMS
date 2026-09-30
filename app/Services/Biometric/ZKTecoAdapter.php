@@ -140,10 +140,11 @@ final class ZKTecoAdapter implements BiometricImportAdapterInterface
      *     summary: array{total: int, valid: int, invalid: int}
      * }
      */
-    public function validate(array $rawRecords): array
+    public function validate(array $rawRecords, array $config = []): array
     {
         $valid = [];
         $invalid = [];
+        $dateFormat = $config['date_format'] ?? null;
 
         foreach ($rawRecords as $record) {
             $biometricId = trim((string) ($record['biometric_id'] ?? ''));
@@ -156,7 +157,7 @@ final class ZKTecoAdapter implements BiometricImportAdapterInterface
             }
 
             try {
-                $carbon = Carbon::parse($datetimeStr);
+                $carbon = $this->parseDatetime($datetimeStr, $dateFormat);
                 $normalizedDatetime = $carbon->format('Y-m-d H:i:s');
             } catch (Exception) {
                 $invalid[] = array_merge($record, ['error' => "Malformed datetime: '{$datetimeStr}'"]);
@@ -188,5 +189,48 @@ final class ZKTecoAdapter implements BiometricImportAdapterInterface
                 'invalid' => count($invalid),
             ],
         ];
+    }
+
+    /**
+     * Parse datetime string prioritizing configured format and international d/m/Y standards.
+     */
+    private function parseDatetime(string $datetimeStr, ?string $configuredFormat = null): Carbon
+    {
+        if ($configuredFormat) {
+            try {
+                return Carbon::createFromFormat($configuredFormat, $datetimeStr);
+            } catch (\Throwable) {
+                // fallback to common candidate formats
+            }
+        }
+
+        $formats = [
+            'Y-m-d H:i:s',
+            'Y-m-d H:i',
+            'd/m/Y H:i:s',
+            'd/m/Y H:i',
+            'd-m-Y H:i:s',
+            'd-m-Y H:i',
+            'Y/m/d H:i:s',
+            'Y/m/d H:i',
+            'm/d/Y H:i:s',
+            'm/d/Y H:i',
+            'Y-m-d',
+            'd/m/Y',
+            'd-m-Y',
+        ];
+
+        foreach ($formats as $fmt) {
+            try {
+                $dt = Carbon::createFromFormat($fmt, $datetimeStr);
+                if ($dt !== false) {
+                    return $dt;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return Carbon::parse($datetimeStr);
     }
 }

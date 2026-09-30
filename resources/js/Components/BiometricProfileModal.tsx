@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
     X,
     Cpu,
@@ -306,13 +307,6 @@ export default function BiometricProfileModal({
     const [isSaving, setIsSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
 
-    const getCsrfToken = () => {
-        const meta = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-        if (meta) return meta;
-        const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-        return match ? decodeURIComponent(match[1]) : '';
-    };
-
     // Client-side quick tokenizer for live visual grid
     useEffect(() => {
         if (!sampleText.trim() || sourceType === 'database_staging') {
@@ -414,8 +408,6 @@ export default function BiometricProfileModal({
             }
         });
 
-        const csrfToken = getCsrfToken();
-
         if (sourceType === 'database_staging') {
             const payload = {
                 source_type: 'database_staging',
@@ -431,25 +423,14 @@ export default function BiometricProfileModal({
             };
 
             try {
-                const res = await fetch('/biometric-devices/test-db-query', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': csrfToken,
-                        'X-XSRF-TOKEN': csrfToken,
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify(payload),
-                });
-
-                const json = await res.json();
-                if (res.ok && json.success) {
-                    setTestResult(json.data);
+                const res = await axios.post('/biometric-devices/test-db-query', payload);
+                if (res.data && res.data.success) {
+                    setTestResult(res.data.data);
                 } else {
-                    setTestError(json.message || 'Staging query test failed.');
+                    setTestError(res.data?.message || 'Staging query test failed.');
                 }
             } catch (e: any) {
-                setTestError(e.message || 'Network error while testing staging query.');
+                setTestError(e.response?.data?.message || e.message || 'Network error while testing staging query.');
             } finally {
                 setIsTesting(false);
             }
@@ -490,25 +471,14 @@ export default function BiometricProfileModal({
         };
 
         try {
-            const res = await fetch('/biometric-devices/test-parse', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
-
-            const json = await res.json();
-            if (res.ok && json.success) {
-                setTestResult(json.data);
+            const res = await axios.post('/biometric-devices/test-parse', payload);
+            if (res.data && res.data.success) {
+                setTestResult(res.data.data);
             } else {
-                setTestError(json.message || 'Parser test failed. Check delimiter or column mapping.');
+                setTestError(res.data?.message || 'Parser test failed. Check delimiter or column mapping.');
             }
         } catch (e: any) {
-            setTestError(e.message || 'Network error while testing configuration.');
+            setTestError(e.response?.data?.message || e.message || 'Network error while testing configuration.');
         } finally {
             setIsTesting(false);
         }
@@ -579,32 +549,21 @@ export default function BiometricProfileModal({
             is_active: true,
         };
 
-        const csrfToken = getCsrfToken();
-
         const url = editingProfile ? `/biometric-devices/${editingProfile.id}` : '/biometric-devices';
-        const method = editingProfile ? 'PUT' : 'POST';
 
         try {
-            const res = await fetch(url, {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
+            const res = editingProfile
+                ? await axios.put(url, payload)
+                : await axios.post(url, payload);
 
-            const json = await res.json();
-            if (res.ok && json.success) {
-                onSaved(json.data);
+            if (res.data && res.data.success) {
+                onSaved(res.data.data);
                 onClose();
             } else {
-                setSaveError(json.message || 'Failed to save biometric profile.');
+                setSaveError(res.data?.message || 'Failed to save biometric profile.');
             }
         } catch (e: any) {
-            setSaveError(e.message || 'Error occurred while saving profile.');
+            setSaveError(e.response?.data?.message || e.message || 'Error occurred while saving profile.');
         } finally {
             setIsSaving(false);
         }

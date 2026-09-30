@@ -19,6 +19,10 @@ use Illuminate\Validation\ValidationException;
 
 final class LeaveService
 {
+    public function __construct(
+        private readonly ?ShiftService $shiftService = null
+    ) {}
+
     /**
      * Sri Lankan Statutory Leave Type Presets.
      */
@@ -284,13 +288,14 @@ final class LeaveService
     }
 
     /**
-     * Compute working days for a proposed leave span (excluding Sundays & statutory holidays).
+     * Compute working days for a proposed leave span (excluding scheduled rest days & statutory holidays).
      */
     public function calculateLeaveDays(
         string $tenantId,
         Carbon $startDate,
         Carbon $endDate,
-        bool $isHalfDay = false
+        bool $isHalfDay = false,
+        ?string $employeeId = null
     ): float {
         if ($isHalfDay) {
             return 0.5;
@@ -306,17 +311,27 @@ final class LeaveService
             ->map(fn ($d) => Carbon::parse($d)->toDateString())
             ->toArray();
 
+        $employee = $employeeId ? Employee::find($employeeId) : null;
+        $shiftService = $this->shiftService ?? app(ShiftService::class);
+
         $days = 0.0;
         $period = CarbonPeriod::create($startDate, $endDate);
 
         foreach ($period as $date) {
-            // Exclude Sunday rest day
-            if ($date->isSunday()) {
+            $dateStr = $date->toDateString();
+
+            // Exclude public holidays
+            if (in_array($dateStr, $holidays, true)) {
                 continue;
             }
 
-            // Exclude public holidays
-            if (in_array($date->toDateString(), $holidays, true)) {
+            // Exclude rest day (schedule-aware if employee provided, otherwise default Sunday)
+            if ($employee !== null) {
+                $schedule = $shiftService->resolveDailySchedule($employee, $date);
+                if (($schedule['schedule_type'] ?? '') === 'rest_day' || ! empty($schedule['is_rest_day'])) {
+                    continue;
+                }
+            } elseif ($date->isSunday()) {
                 continue;
             }
 
@@ -360,7 +375,7 @@ final class LeaveService
         }
 
         // Calculate actual leave days required
-        $daysCount = $this->calculateLeaveDays($tenantId, $startDate, $endDate, $isHalfDay);
+        $daysCount = $this->calculateLeaveDays($tenantId, $startDate, $endDate, $isHalfDay, $employee->id);
 
         if ($daysCount <= 0.0) {
             throw ValidationException::withMessages([
@@ -544,14 +559,17 @@ final class LeaveService
                 'actioned_at' => now(),
             ]);
 
-            // If was approved, revert any attendance daily records marked as leave
+            // If was approved, recalculate attendance daily records accurately instead of deleting
             if ($wasApproved) {
-                AttendanceDaily::where('tenant_id', $request->tenant_id)
-                    ->where('employee_id', $request->employee_id)
-                    ->whereBetween('attendance_date', [$request->start_date, $request->end_date])
-                    ->where('status', 'leave')
-                    ->where('calculation_breakdown->leave_request_id', $request->id)
-                    ->delete();
+                $attendanceProcessingService = app(AttendanceProcessingService::class);
+                $period = CarbonPeriod::create(
+                    Carbon::parse($request->start_date),
+                    Carbon::parse($request->end_date)
+                );
+
+                foreach ($period as $date) {
+                    $attendanceProcessingService->processDate($date, $request->employee_id, null, true);
+                }
             }
 
             return $request->load(['employee', 'leaveType', 'actionedBy']);
@@ -573,11 +591,24 @@ final class LeaveService
             ->pluck('holiday_date')
             ->toArray();
 
+        $request->loadMissing(['employee', 'leaveType']);
+        $shiftService = $this->shiftService ?? app(ShiftService::class);
+
         foreach ($period as $date) {
             $dateStr = $date->toDateString();
 
-            // Skip Sundays and Public Holidays
-            if ($date->isSunday() || in_array($dateStr, $holidays, true)) {
+            // Skip Public Holidays
+            if (in_array($dateStr, $holidays, true)) {
+                continue;
+            }
+
+            // Skip rest day for this employee (otherwise default Sunday)
+            if ($request->employee !== null) {
+                $schedule = $shiftService->resolveDailySchedule($request->employee, $date);
+                if (($schedule['schedule_type'] ?? '') === 'rest_day' || ! empty($schedule['is_rest_day'])) {
+                    continue;
+                }
+            } elseif ($date->isSunday()) {
                 continue;
             }
 
@@ -599,13 +630,13 @@ final class LeaveService
                 'double_ot_hours' => 0.00,
                 'is_manual' => false,
                 'calculation_breakdown' => [
-                    'leave_type' => $request->leaveType->name,
-                    'leave_type_code' => $request->leaveType->code,
+                    'leave_type' => $request->leaveType?->name,
+                    'leave_type_code' => $request->leaveType?->code,
                     'leave_request_id' => $request->id,
-                    'is_paid' => $request->leaveType->is_paid,
-                    'is_half_day' => $request->is_half_day,
+                    'is_paid' => (bool) ($request->leaveType?->is_paid ?? true),
+                    'is_half_day' => (bool) $request->is_half_day,
                     'half_day_type' => $request->half_day_type,
-                    'notes' => "Approved {$request->leaveType->name}",
+                    'notes' => "Approved {$request->leaveType?->name}",
                 ],
             ];
 

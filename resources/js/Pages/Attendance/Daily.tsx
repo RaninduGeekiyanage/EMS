@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { Head, useForm, router, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
@@ -404,7 +405,6 @@ export default function Daily({
             processedRecordsCount: 0,
         });
 
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         let totalRecordsProcessed = 0;
 
         for (let i = 0; i < dateList.length; i++) {
@@ -418,27 +418,13 @@ export default function Daily({
             }));
 
             try {
-                const response = await fetch('/attendance/daily/process-date', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'X-CSRF-TOKEN': csrfToken,
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify({
-                        date: dateStr,
-                        department_id: reprocessForm.data.department_id || undefined,
-                        overwrite_manual: reprocessForm.data.overwrite_manual,
-                    }),
+                const response = await axios.post('/attendance/daily/process-date', {
+                    date: dateStr,
+                    department_id: reprocessForm.data.department_id || undefined,
+                    overwrite_manual: reprocessForm.data.overwrite_manual,
                 });
 
-                if (!response.ok) {
-                    const errData = await response.json().catch(() => ({}));
-                    throw new Error(errData.message || `Processing failed for ${dateStr} (HTTP ${response.status})`);
-                }
-
-                const resData = await response.json();
+                const resData = response.data;
                 totalRecordsProcessed += (resData.records_processed || 0);
 
                 setBatchProgress(prev => ({

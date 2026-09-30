@@ -26,7 +26,7 @@ final class ShiftSwapController extends Controller
      */
     public function index(Request $request): Response
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $user = $request->user();
 
         $query = ShiftSwapRequest::query()
@@ -75,7 +75,7 @@ final class ShiftSwapController extends Controller
      */
     public function preview(Request $request): JsonResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $validated = $request->validate([
             'requesting_employee_id' => ['required', 'string', 'exists:employees,id'],
@@ -95,7 +95,7 @@ final class ShiftSwapController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $user = $request->user();
 
         $validated = $request->validate([
@@ -122,7 +122,7 @@ final class ShiftSwapController extends Controller
      */
     public function approve(Request $request, ShiftSwapRequest $swap): RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $user = $request->user();
 
         $validated = $request->validate([
@@ -139,7 +139,7 @@ final class ShiftSwapController extends Controller
      */
     public function reject(Request $request, ShiftSwapRequest $swap): RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $user = $request->user();
 
         $validated = $request->validate([

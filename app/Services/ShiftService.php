@@ -334,13 +334,13 @@ final class ShiftService
             ->with('leaveType:id,name,code')
             ->first();
 
-        if ($leave !== null) {
+        if ($leave !== null && ! $leave->is_half_day) {
             $leaveName = $leave->leaveType?->name ?? 'Approved Leave';
 
             return [
                 'schedule_type' => 'leave',
-                'is_off' => ! $leave->is_half_day,
-                'label' => $leave->is_half_day ? "Half-Day Leave ({$leaveName})" : "Leave: {$leaveName}",
+                'is_off' => true,
+                'label' => "Leave: {$leaveName}",
                 'shift' => null,
                 'shift_times' => null,
                 'roster_entry' => null,
@@ -353,9 +353,17 @@ final class ShiftService
         // 2. Check for public/company holiday
         $holiday = $preloadedHoliday ?? $this->isHoliday($date);
 
-        // 3. Check for specific roster entry on this date
+        // 3. Check for specific published roster entry on this date
         $rosterEntry = $preloadedRoster ?? RosterEntry::where('employee_id', $employee->id)
             ->whereDate('roster_date', $dateString)
+            ->where(function ($query) {
+                $query->whereIn('status', ['published', 'locked'])
+                    ->orWhere('is_overridden', true)
+                    ->orWhereHas('roster', function ($r) {
+                        $r->where('status', '!=', 'archived');
+                    })
+                    ->orWhereNull('roster_id');
+            })
             ->with('shift')
             ->first();
 
@@ -368,7 +376,7 @@ final class ShiftService
                     'shift' => null,
                     'shift_times' => null,
                     'roster_entry' => $rosterEntry,
-                    'leave' => null,
+                    'leave' => $leave,
                     'holiday' => $holiday,
                     'source' => 'roster',
                 ];
@@ -378,14 +386,18 @@ final class ShiftService
                 $start = substr($rosterEntry->shift->start_time, 0, 5);
                 $end = substr($rosterEntry->shift->end_time, 0, 5);
 
+                $label = $leave !== null
+                    ? "Half-Day Leave ({$leave->leaveType?->name}) / {$rosterEntry->shift->name}"
+                    : $rosterEntry->shift->name;
+
                 return [
-                    'schedule_type' => 'shift',
+                    'schedule_type' => $leave !== null ? 'half_day' : 'shift',
                     'is_off' => false,
-                    'label' => $rosterEntry->shift->name,
+                    'label' => $label,
                     'shift' => $rosterEntry->shift,
                     'shift_times' => "{$start} - {$end}",
                     'roster_entry' => $rosterEntry,
-                    'leave' => null,
+                    'leave' => $leave,
                     'holiday' => $holiday,
                     'source' => 'roster',
                 ];
@@ -407,16 +419,35 @@ final class ShiftService
             $start = substr($assignment->shift->start_time, 0, 5);
             $end = substr($assignment->shift->end_time, 0, 5);
 
+            $label = $leave !== null
+                ? "Half-Day Leave ({$leave->leaveType?->name}) / {$assignment->shift->name}"
+                : $assignment->shift->name;
+
             return [
-                'schedule_type' => 'shift',
+                'schedule_type' => $leave !== null ? 'half_day' : 'shift',
                 'is_off' => false,
-                'label' => $assignment->shift->name,
+                'label' => $label,
                 'shift' => $assignment->shift,
                 'shift_times' => "{$start} - {$end}",
                 'roster_entry' => null,
-                'leave' => null,
+                'leave' => $leave,
                 'holiday' => $holiday,
                 'source' => 'assignment',
+            ];
+        }
+
+        if ($leave !== null) {
+            // Half-day leave with no underlying shift
+            return [
+                'schedule_type' => 'half_day',
+                'is_off' => false,
+                'label' => "Half-Day Leave ({$leave->leaveType?->name})",
+                'shift' => null,
+                'shift_times' => null,
+                'roster_entry' => null,
+                'leave' => $leave,
+                'holiday' => $holiday,
+                'source' => 'leave',
             ];
         }
 
@@ -480,6 +511,14 @@ final class ShiftService
     {
         return RosterEntry::where('employee_id', $employee->id)
             ->whereDate('roster_date', $date->toDateString())
+            ->where(function ($query) {
+                $query->whereIn('status', ['published', 'locked'])
+                    ->orWhere('is_overridden', true)
+                    ->orWhereHas('roster', function ($r) {
+                        $r->where('status', '!=', 'archived');
+                    })
+                    ->orWhereNull('roster_id');
+            })
             ->with('shift')
             ->first();
     }

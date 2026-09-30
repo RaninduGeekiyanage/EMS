@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { Head, router, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
@@ -68,13 +69,6 @@ export default function Biometric({
         setTimeout(() => setCopiedKey(null), 2500);
     };
 
-    const getCsrfToken = () => {
-        const meta = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-        if (meta) return meta;
-        const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-        return match ? decodeURIComponent(match[1]) : '';
-    };
-
     const handleProfileSaved = (saved: BiometricDeviceProfile) => {
         setProfilesList((prev) => {
             const exists = prev.some((p) => p.id === saved.id);
@@ -102,34 +96,24 @@ export default function Biometric({
         e.stopPropagation();
         if (!confirm(`Are you sure you want to delete biometric profile "${profileName}"?`)) return;
 
-        const csrfToken = getCsrfToken();
         try {
-            const res = await fetch(`/biometric-devices/${profileId}`, {
-                method: 'DELETE',
-                headers: {
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-            });
-            if (res.ok) {
-                setProfilesList((prev) => prev.filter((p) => p.id !== profileId));
-                if (activeConfig.profile_id === profileId) {
-                    setActiveConfig({
-                        adapter_type: 'zkteco',
-                        profile_id: null,
-                    });
-                }
-                setFeedbackMessage({
-                    type: 'success',
-                    text: `Profile "${profileName}" deleted.`,
+            await axios.delete(`/biometric-devices/${profileId}`);
+            setProfilesList((prev) => prev.filter((p) => p.id !== profileId));
+            if (activeConfig.profile_id === profileId) {
+                setActiveConfig({
+                    adapter_type: 'zkteco',
+                    profile_id: null,
                 });
-                setTimeout(() => setFeedbackMessage(null), 4000);
             }
+            setFeedbackMessage({
+                type: 'success',
+                text: `Profile "${profileName}" deleted.`,
+            });
+            setTimeout(() => setFeedbackMessage(null), 4000);
         } catch (err: any) {
             setFeedbackMessage({
                 type: 'error',
-                text: 'Failed to delete profile: ' + err.message,
+                text: 'Failed to delete profile: ' + (err.response?.data?.message || err.message),
             });
         }
     };
@@ -141,24 +125,14 @@ export default function Biometric({
         setIsSettingDefault(key);
         setFeedbackMessage(null);
 
-        const csrfToken = getCsrfToken();
         try {
-            const res = await fetch('/settings/biometric/default', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    adapter_type: adapterType,
-                    profile_id: profileId,
-                }),
+            const res = await axios.post('/settings/biometric/default', {
+                adapter_type: adapterType,
+                profile_id: profileId,
             });
 
-            const data = await res.json();
-            if (res.ok && data.success) {
+            const data = res.data;
+            if (data && data.success) {
                 setActiveConfig({
                     adapter_type: adapterType,
                     profile_id: profileId,
@@ -177,13 +151,13 @@ export default function Biometric({
             } else {
                 setFeedbackMessage({
                     type: 'error',
-                    text: data.message || 'Failed to update default configuration.',
+                    text: data?.message || 'Failed to update default configuration.',
                 });
             }
         } catch (err: any) {
             setFeedbackMessage({
                 type: 'error',
-                text: err.message || 'Error updating default configuration.',
+                text: err.response?.data?.message || err.message || 'Error updating default configuration.',
             });
         } finally {
             setIsSettingDefault(null);

@@ -85,7 +85,7 @@ class DatabaseSeeder extends Seeder
         $shiftService->seedSriLankanHolidays((int) now()->year);
 
         // 5. Populate Realistic Sri Lankan AMS Shift Groups & Scenarios
-        // $this->call(AmsDemoSeeder::class);
+        $this->call(AmsDemoSeeder::class);
 
         // 6. Populate Realistic Biometric Staging Punches for Manual Testing
         // $this->call(RawBiometricPunchSeeder::class);

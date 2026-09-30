@@ -54,7 +54,7 @@ final class DatabaseStagingAdapter implements BiometricImportAdapterInterface
             // 2. Query from database staging table
             $query = RawBiometricPunch::query();
 
-            $tenantId = $config['tenant_id'] ?? session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+            $tenantId = $config['tenant_id'] ?? session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
             if ($tenantId !== null) {
                 $query->where('tenant_id', $tenantId);
             }

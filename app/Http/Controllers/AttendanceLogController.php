@@ -24,7 +24,7 @@ final class AttendanceLogController extends Controller
      */
     public function index(Request $request): Response
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $executed = $request->boolean('executed', false);
 
         $departments = Department::query()
@@ -106,7 +106,7 @@ final class AttendanceLogController extends Controller
      */
     public function exportExcel(Request $request): StreamedResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $query = $this->buildFilterQuery($request, $tenantId);
 
         $filename = 'attendance_logs_' . Carbon::now()->format('Ymd_His') . '.csv';
@@ -185,7 +185,7 @@ final class AttendanceLogController extends Controller
      */
     public function exportPdf(Request $request): HttpResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $query = $this->buildFilterQuery($request, $tenantId);
 
         // Cap at 1,000 records for DomPDF rendering safety

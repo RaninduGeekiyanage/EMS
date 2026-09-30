@@ -28,20 +28,23 @@ final class OvertimeCalculationService
         ?Shift $shift,
         CarbonInterface $date,
         float $workedHours,
-        ?PublicHoliday $holiday = null
+        ?PublicHoliday $holiday = null,
+        bool $isRosteredRestDay = false
     ): array {
+        $isRestDay = $isRosteredRestDay;
+
         if ($workedHours <= 0.00) {
             return [
                 'regular_hours' => 0.00,
                 'ot_hours' => 0.00,
                 'double_ot_hours' => 0.00,
-                'day_type' => $holiday !== null ? 'holiday' : ($date->isSunday() ? 'rest_day' : 'weekday'),
+                'day_type' => $holiday !== null ? 'holiday' : ($isRestDay ? 'rest_day' : 'weekday'),
                 'applied_rate' => 1.00,
                 'rule_name' => $rule->rule_name,
             ];
         }
 
-        // Case 1: Public / Company / Poya Holiday (2.0x or configured holiday rate)
+        // Case 1: Public / Company / Poya Holiday (Management-configured holiday rate)
         if ($holiday !== null) {
             $otHours = $this->applyRoundingAndThreshold(
                 $workedHours,
@@ -49,18 +52,20 @@ final class OvertimeCalculationService
                 $rule->round_ot_interval_minutes
             );
 
+            $holidayRate = (float) ($holiday->custom_ot_rate ?? $rule->ot_rate_holiday ?? 2.00);
+
             return [
                 'regular_hours' => 0.00,
                 'ot_hours' => 0.00,
                 'double_ot_hours' => round($otHours, 2),
                 'day_type' => 'holiday',
-                'applied_rate' => (float) $rule->ot_rate_holiday,
+                'applied_rate' => $holidayRate,
                 'rule_name' => $rule->rule_name,
             ];
         }
 
-        // Case 2: Sunday / Rest Day (1.5x or configured rest day rate)
-        if ($date->isSunday()) {
+        // Case 2: Rostered Rest Day or Default Sunday (1.5x or configured rest day rate)
+        if ($isRestDay) {
             $otHours = $this->applyRoundingAndThreshold(
                 $workedHours,
                 $rule->ot_minimum_minutes,
@@ -77,8 +82,8 @@ final class OvertimeCalculationService
             ];
         }
 
-        // Case 3: Standard Weekday Overtime (Threshold + Buffer rules)
-        $thresholdMinutes = $shift ? $shift->ot_threshold_minutes : 480; // default 8 hours = 480 mins
+        // Case 3: Standard Shift Overtime (Weekdays or Scheduled Sunday working shifts)
+        $thresholdMinutes = $shift ? ($shift->ot_threshold_minutes ?? $shift->working_minutes ?? 480) : 480;
         $thresholdHours = $thresholdMinutes / 60.0;
 
         $excessHours = max(0.00, $workedHours - $thresholdHours);

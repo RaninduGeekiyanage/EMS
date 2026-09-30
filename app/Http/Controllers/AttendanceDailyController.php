@@ -32,7 +32,7 @@ final class AttendanceDailyController extends Controller
      */
     public function index(Request $request): Response
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $dateInput = $request->query('date') ?? Carbon::today()->toDateString();
         $date = Carbon::parse((string) $dateInput);
 
@@ -182,7 +182,7 @@ final class AttendanceDailyController extends Controller
         ]);
 
         $date = Carbon::parse($validated['date']);
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         if ($this->processingService->isDateInLockedPayrollPeriod($date, $tenantId)) {
             return response()->json([
@@ -222,7 +222,7 @@ final class AttendanceDailyController extends Controller
      */
     public function processBacklog(Request $request): RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $result = $this->processingService->processUnprocessedBacklog($tenantId);
 
         if ($result['dates_count'] === 0) {
@@ -245,7 +245,7 @@ final class AttendanceDailyController extends Controller
     {
         $validated = $request->validated();
         $user = $request->user();
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $record = null;
         if (! empty($validated['attendance_daily_id'])) {
@@ -296,7 +296,7 @@ final class AttendanceDailyController extends Controller
     public function update(AdjustDailyPunchRequest $request, AttendanceDaily $attendanceDaily): RedirectResponse
     {
         $user = $request->user();
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         if ($this->processingService->isDateInLockedPayrollPeriod(Carbon::parse($attendanceDaily->attendance_date), $tenantId)) {
             return redirect()->back()->with('error', 'Cannot adjust attendance: Payroll period for this month is approved and locked.');
@@ -316,7 +316,7 @@ final class AttendanceDailyController extends Controller
      */
     public function saveRule(SaveAttendanceRuleRequest $request): RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         if ($tenantId === null) {
             return redirect()->back()->with('error', 'Tenant context required.');
         }

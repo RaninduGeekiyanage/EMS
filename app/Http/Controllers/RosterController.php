@@ -75,6 +75,10 @@ final class RosterController extends Controller
             ])->with('success', "Roster '{$roster->name}' created successfully.");
         } catch (\DomainException $e) {
             return redirect()->back()->with('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+
+            return redirect()->back()->with('error', 'Unable to create roster: ' . $e->getMessage());
         }
     }
 

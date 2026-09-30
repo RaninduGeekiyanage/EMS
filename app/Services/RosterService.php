@@ -318,9 +318,9 @@ final class RosterService
                         $currentShiftStartDateTime = Carbon::parse("{$dateString} {$entry->shift->start_time}");
                         if ($prevShiftEndDateTime !== null) {
                             $gapMinutes = $prevShiftEndDateTime->diffInMinutes($currentShiftStartDateTime, false);
-                            if ($gapMinutes < 660 && $gapMinutes >= 0) { // Under 11 hours
+                            if ($gapMinutes < 660) { // Under 11 hours or overlapping
                                 $fatigueWarning = true;
-                                $restHours = round($gapMinutes / 60, 1);
+                                $restHours = max(0.0, round($gapMinutes / 60, 1));
                             }
                         }
 
@@ -923,9 +923,13 @@ final class RosterService
             $targetRosterId = $rosterId ?? $entry?->roster_id;
 
             if ($targetRosterId === null) {
+                $employee = Employee::find($employeeId);
                 $targetRosterId = Roster::where('start_date', '<=', $date)
                     ->where('end_date', '>=', $date)
                     ->where('status', '!=', 'archived')
+                    ->when($employee?->department_id, function ($q, $deptId) {
+                        $q->where('department_id', $deptId);
+                    })
                     ->value('id');
             }
 
@@ -956,13 +960,13 @@ final class RosterService
             ]))->load(['shift:id,name,code,color,start_time,end_time,is_night_shift', 'originalShift:id,name,code,color', 'overriddenBy:id,name']);
         });
 
-        // Trigger automatic attendance reprocessing for this employee on this date
+        // Trigger automatic attendance reprocessing for this employee on this date (preserve manual adjustments)
         try {
             $this->attendanceProcessingService->processDate(
                 Carbon::parse($date),
                 $employeeId,
                 null,
-                true
+                false
             );
         } catch (\Throwable $e) {
             report($e);
@@ -1302,8 +1306,8 @@ final class RosterService
             return $roster;
         });
 
-        // Trigger automatic attendance reprocessing for allocated staff on affected dates
-        if (! empty($allAllocatedEmpIds)) {
+        // Trigger automatic attendance reprocessing for allocated staff on affected dates (only for published rosters)
+        if ($roster->status === 'published' && ! empty($allAllocatedEmpIds)) {
             try {
                 foreach ($allAllocatedEmpIds as $empId) {
                     $this->attendanceProcessingService->reprocessDateRange(
@@ -2003,8 +2007,8 @@ final class RosterService
             return $count;
         });
 
-        // Trigger automatic attendance reprocessing for allocated staff on affected dates
-        if (! empty($empIds)) {
+        // Trigger automatic attendance reprocessing for allocated staff on affected dates (only for published rosters)
+        if ($roster->status === 'published' && ! empty($empIds)) {
             try {
                 foreach ($empIds as $empId) {
                     $this->attendanceProcessingService->reprocessDateRange(
@@ -2129,16 +2133,18 @@ final class RosterService
                 );
             }
 
-            try {
-                $this->attendanceProcessingService->reprocessDateRange(
-                    $startDate,
-                    $endDate,
-                    $employeeId,
-                    null,
-                    false
-                );
-            } catch (\Throwable $e) {
-                report($e);
+            if ($targetRoster->status === 'published') {
+                try {
+                    $this->attendanceProcessingService->reprocessDateRange(
+                        $startDate,
+                        $endDate,
+                        $employeeId,
+                        null,
+                        false
+                    );
+                } catch (\Throwable $e) {
+                    report($e);
+                }
             }
 
             return true;

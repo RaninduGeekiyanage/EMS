@@ -27,7 +27,7 @@ final class AttendanceImportController extends Controller
      */
     public function index(Request $request): InertiaResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $imports = $this->importService->listImports(10);
         $stats = $this->importService->getDashboardStats();

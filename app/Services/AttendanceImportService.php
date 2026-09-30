@@ -88,7 +88,7 @@ final class AttendanceImportService
         $validation = $adapter->validate($rawRecords, $config);
 
         // Preload tenant employees mapped by biometric_device_id and emp_no
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $employeesQuery = Employee::query()->with('department:id,name');
         if ($tenantId !== null) {
             $employeesQuery->where('tenant_id', $tenantId);
@@ -223,7 +223,7 @@ final class AttendanceImportService
         $validation = $adapter->validate($rawRecords, $config);
 
         // 2. Resolve tenant
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         if (! $tenantId) {
             $firstEmployee = Employee::first();
             $tenantId = $firstEmployee?->tenant_id;
@@ -290,6 +290,7 @@ final class AttendanceImportService
 
             $punchesToInsert = [];
             $unmappedPunches = [];
+            $rawPunchesToStage = [];
             $seenInBatch = [];
             $insertedCount = 0;
             $duplicateCount = 0;
@@ -305,6 +306,19 @@ final class AttendanceImportService
                         'biometric_id' => $bioId,
                         'punch_datetime' => $record['punch_datetime'],
                         'reason' => 'Unmapped Biometric ID',
+                    ];
+                    $rawPunchesToStage[] = [
+                        'id' => (string) Str::ulid(),
+                        'tenant_id' => $tenantId,
+                        'device_sn' => (string) ($record['device_id'] ?? 'FILE_IMPORT'),
+                        'raw_user_id' => (string) $bioId,
+                        'punch_time' => Carbon::parse($record['punch_datetime'])->format('Y-m-d H:i:s'),
+                        'punch_type' => (string) $record['punch_type'],
+                        'status' => 'failed',
+                        'error_message' => 'Unmapped Biometric ID',
+                        'raw_payload' => json_encode($record),
+                        'created_at' => $now,
+                        'updated_at' => $now,
                     ];
                     $failedCount++;
 
@@ -341,6 +355,13 @@ final class AttendanceImportService
                 foreach (array_chunk($punchesToInsert, 500) as $chunk) {
                     $inserted = DB::table('attendance_logs')->insertOrIgnore($chunk);
                     $insertedCount += $inserted;
+                }
+            }
+
+            // Stage unmapped punches into raw_biometric_punches for audit and later reconciliation
+            if (! empty($rawPunchesToStage)) {
+                foreach (array_chunk($rawPunchesToStage, 500) as $chunk) {
+                    DB::table('raw_biometric_punches')->insertOrIgnore($chunk);
                 }
             }
 
@@ -398,7 +419,7 @@ final class AttendanceImportService
         $rawRecords = $adapter->parse('', $config);
         $validation = $adapter->validate($rawRecords, $config);
 
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $employeesQuery = Employee::query()->with('department:id,name');
         if ($tenantId !== null) {
             $employeesQuery->where('tenant_id', $tenantId);
@@ -523,7 +544,7 @@ final class AttendanceImportService
         $rawRecords = $adapter->parse('', $config);
         $validation = $adapter->validate($rawRecords, $config);
 
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         if (! $tenantId) {
             $firstEmployee = Employee::first();
             $tenantId = $firstEmployee?->tenant_id;

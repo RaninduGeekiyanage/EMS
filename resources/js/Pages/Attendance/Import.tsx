@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import axios from 'axios';
 import { Head, useForm, router, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import {
@@ -210,13 +211,6 @@ export default function Import({
         }
     };
 
-    const getCsrfToken = () => {
-        const meta = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-        if (meta) return meta;
-        const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-        return match ? decodeURIComponent(match[1]) : '';
-    };
-
     const runPreview = async () => {
         if (!selectedFile) return;
 
@@ -234,26 +228,14 @@ export default function Import({
         }
 
         try {
-            const csrfToken = getCsrfToken();
-            const response = await fetch('/attendance/import/preview', {
-                method: 'POST',
-                headers: {
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: formData,
-            });
-
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                setPreviewData(result.data);
+            const response = await axios.post('/attendance/import/preview', formData);
+            if (response.data && response.data.success) {
+                setPreviewData(response.data.data);
             } else {
-                setPreviewError(result.message || 'Failed to parse attendance file preview.');
+                setPreviewError(response.data?.message || 'Failed to parse attendance file preview.');
             }
         } catch (err: any) {
-            setPreviewError(err.message || 'Network error while generating file preview.');
+            setPreviewError(err.response?.data?.message || err.message || 'Network error while generating file preview.');
         } finally {
             setPreviewLoading(false);
         }
@@ -289,33 +271,21 @@ export default function Import({
         setStagingSuccessMessage(null);
 
         try {
-            const csrfToken = getCsrfToken();
-            const response = await fetch('/attendance/import/staging-preview', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    profile_id: stagingProfileId || null,
-                    start_date: stagingStartDate || null,
-                    end_date: stagingEndDate || null,
-                    device_sn: stagingDeviceSn || null,
-                    status: stagingStatus,
-                }),
+            const response = await axios.post('/attendance/import/staging-preview', {
+                profile_id: stagingProfileId || null,
+                start_date: stagingStartDate || null,
+                end_date: stagingEndDate || null,
+                device_sn: stagingDeviceSn || null,
+                status: stagingStatus,
             });
 
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                setPreviewData(result.data);
+            if (response.data && response.data.success) {
+                setPreviewData(response.data.data);
             } else {
-                setPreviewError(result.message || 'Failed to fetch staging preview.');
+                setPreviewError(response.data?.message || 'Failed to fetch staging preview.');
             }
         } catch (err: any) {
-            setPreviewError(err.message || 'Network error fetching staging preview.');
+            setPreviewError(err.response?.data?.message || err.message || 'Network error fetching staging preview.');
         } finally {
             setPreviewLoading(false);
         }
@@ -327,35 +297,23 @@ export default function Import({
         setStagingSuccessMessage(null);
 
         try {
-            const csrfToken = getCsrfToken();
-            const response = await fetch('/attendance/import/staging-commit', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    profile_id: stagingProfileId || null,
-                    start_date: stagingStartDate || null,
-                    end_date: stagingEndDate || null,
-                    device_sn: stagingDeviceSn || null,
-                    status: stagingStatus,
-                }),
+            const response = await axios.post('/attendance/import/staging-commit', {
+                profile_id: stagingProfileId || null,
+                start_date: stagingStartDate || null,
+                end_date: stagingEndDate || null,
+                device_sn: stagingDeviceSn || null,
+                status: stagingStatus,
             });
 
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                setStagingSuccessMessage(result.message || 'Staging punches committed successfully.');
+            if (response.data && response.data.success) {
+                setStagingSuccessMessage(response.data.message || 'Staging punches committed successfully.');
                 setPreviewData(null);
                 router.reload();
             } else {
-                setPreviewError(result.message || 'Failed to commit staging punches.');
+                setPreviewError(response.data?.message || 'Failed to commit staging punches.');
             }
         } catch (err: any) {
-            setPreviewError(err.message || 'Error committing staging punches.');
+            setPreviewError(err.response?.data?.message || err.message || 'Error committing staging punches.');
         } finally {
             setIsCommittingStaging(false);
         }
@@ -367,24 +325,12 @@ export default function Import({
         setStagingSuccessMessage(null);
 
         try {
-            const csrfToken = getCsrfToken();
-            const response = await fetch('/attendance/import/staging-retry', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    device_sn: stagingDeviceSn || null,
-                }),
+            const response = await axios.post('/attendance/import/staging-retry', {
+                device_sn: stagingDeviceSn || null,
             });
 
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                setStagingSuccessMessage(result.message);
+            if (response.data && response.data.success) {
+                setStagingSuccessMessage(response.data.message);
                 if (stagingStatus === 'failed') {
                     setStagingStatus('pending');
                 }
@@ -394,10 +340,10 @@ export default function Import({
                     runStagingPreview();
                 }, 200);
             } else {
-                setPreviewError(result.message || 'Failed to retry punches.');
+                setPreviewError(response.data?.message || 'Failed to retry punches.');
             }
         } catch (err: any) {
-            setPreviewError(err.message || 'Network error while retrying failed punches.');
+            setPreviewError(err.response?.data?.message || err.message || 'Network error while retrying failed punches.');
         } finally {
             setIsRetryingFailed(false);
         }
@@ -429,27 +375,16 @@ export default function Import({
         if (!selectedEmployeeId || !mappingBioId) return;
 
         setIsMappingSubmitting(true);
-        const csrfToken = getCsrfToken();
 
         try {
-            const res = await fetch('/attendance/import/map-employee', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-XSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    employee_id: selectedEmployeeId,
-                    biometric_id: mappingBioId,
-                }),
+            const res = await axios.post('/attendance/import/map-employee', {
+                employee_id: selectedEmployeeId,
+                biometric_id: mappingBioId,
             });
 
-            const json = await res.json();
-            if (res.ok && json.success) {
+            if (res.data && res.data.success) {
                 setIsMapModalOpen(false);
-                setStagingSuccessMessage(json.message || 'Employee mapped successfully.');
+                setStagingSuccessMessage(res.data.message || 'Employee mapped successfully.');
                 // Re-run preview if file or staging is loaded to update the grid
                 if (selectedFile) {
                     runPreview();
@@ -458,10 +393,10 @@ export default function Import({
                 }
                 router.reload({ only: ['stats', 'employees'] });
             } else {
-                alert(json.message || 'Failed to map employee');
+                alert(res.data?.message || 'Failed to map employee');
             }
         } catch (e: any) {
-            alert('Error mapping employee: ' + e.message);
+            alert('Error mapping employee: ' + (e.response?.data?.message || e.message));
         } finally {
             setIsMappingSubmitting(false);
         }

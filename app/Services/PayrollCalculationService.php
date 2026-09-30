@@ -213,16 +213,16 @@ final class PayrollCalculationService
      *
      * @return array<string, mixed>
      */
-    private function calculateEmployeePayroll(
+    public function calculateEmployeePayroll(
         Employee $employee,
         Carbon $startDate,
         Carbon $endDate,
-        bool $isCompanyEpfEnabled,
-        float $epfEmployeeRate,
-        float $epfEmployerRate,
-        float $etfEmployerRate,
-        float $shopOfficeNoPayDivisor,
-        float $wagesBoardNoPayDivisor
+        bool $isCompanyEpfEnabled = true,
+        float $epfEmployeeRate = 0.08,
+        float $epfEmployerRate = 0.12,
+        float $etfEmployerRate = 0.03,
+        float $shopOfficeNoPayDivisor = 30.0,
+        float $wagesBoardNoPayDivisor = 26.0
     ): array {
         $paymentInfo = $employee->paymentInfo;
         $epfInfo = $employee->epfInfo;
@@ -265,11 +265,27 @@ final class PayrollCalculationService
         if ($attendanceLogs->isNotEmpty()) {
             foreach ($attendanceLogs as $log) {
                 $status = (string) $log->status;
-                if (in_array($status, ['present', 'holiday', 'rest_day', 'leave'], true)) {
+                $breakdown = is_array($log->calculation_breakdown) ? $log->calculation_breakdown : [];
+                $isPaid = $breakdown['is_paid'] ?? true;
+                $isScheduledHalfDay = $breakdown['is_scheduled_half_day'] ?? false;
+
+                if ($status === 'leave') {
+                    if ($isPaid) {
+                        $workedDays += 1.00;
+                    } else {
+                        $noPayDays += 1.00;
+                    }
+                } elseif (in_array($status, ['present', 'holiday', 'rest_day'], true)) {
                     $workedDays += 1.00;
                 } elseif ($status === 'half_day') {
-                    $workedDays += 0.50;
-                    $noPayDays += 0.50;
+                    if ($isScheduledHalfDay || $isPaid) {
+                        // Scheduled half-day shift or worked half day + paid approved leave
+                        $workedDays += 1.00;
+                    } else {
+                        // Unpaid half-day leave or unauthorized half day
+                        $workedDays += 0.50;
+                        $noPayDays += 0.50;
+                    }
                 } elseif ($status === 'absent') {
                     $noPayDays += 1.00;
                 }

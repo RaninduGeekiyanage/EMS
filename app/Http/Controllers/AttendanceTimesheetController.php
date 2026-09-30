@@ -31,7 +31,7 @@ final class AttendanceTimesheetController extends Controller
      */
     public function index(Request $request): Response
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         // Employees list for selection dropdown
         $employees = Employee::query()
@@ -100,7 +100,7 @@ final class AttendanceTimesheetController extends Controller
      */
     public function exportCsv(Request $request): StreamedResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $employeeId = $request->query('employee_id');
         $monthInput = $request->query('month') ?? Carbon::today()->format('Y-m');
         $onlyMissing = (bool) $request->query('only_missing', false);
@@ -290,14 +290,20 @@ final class AttendanceTimesheetController extends Controller
                 $dailyId = $daily->id;
                 $status = $daily->status;
 
-                // Reconcile non-manual unpunched absent records if duty roster or holiday designates this as rest day, holiday or leave
+                // Self-heal legacy non-manual unpunched absent records if duty roster or holiday designates this as rest day, holiday or leave
                 if (! $daily->is_manual && empty($daily->check_in) && empty($daily->check_out) && $status === 'absent') {
+                    $newStatus = null;
                     if ($activeLeave) {
-                        $status = $activeLeave->is_half_day ? 'half_day' : 'leave';
+                        $newStatus = $activeLeave->is_half_day ? 'half_day' : 'leave';
                     } elseif ($holiday) {
-                        $status = 'holiday';
+                        $newStatus = 'holiday';
                     } elseif ($isRosterOff) {
-                        $status = 'rest_day';
+                        $newStatus = 'rest_day';
+                    }
+
+                    if ($newStatus !== null) {
+                        $status = $newStatus;
+                        $daily->update(['status' => $newStatus]);
                     }
                 }
 

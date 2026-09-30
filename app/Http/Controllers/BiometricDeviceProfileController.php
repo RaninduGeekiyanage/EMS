@@ -53,7 +53,7 @@ final class BiometricDeviceProfileController extends Controller
      */
     public function settingsPage(Request $request): InertiaResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
 
         $query = BiometricDeviceProfile::query()->with('createdBy:id,name,email');
@@ -101,7 +101,7 @@ final class BiometricDeviceProfileController extends Controller
             'profile_id' => ['nullable', 'string', 'exists:biometric_device_profiles,id'],
         ]);
 
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
 
         if (! $tenant) {
@@ -163,7 +163,7 @@ final class BiometricDeviceProfileController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $query = BiometricDeviceProfile::query()->with('createdBy:id,name,email');
         if ($tenantId !== null) {
@@ -183,7 +183,7 @@ final class BiometricDeviceProfileController extends Controller
      */
     public function store(StoreBiometricDeviceProfileRequest $request): JsonResponse|RedirectResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         if (! $tenantId) {
             return response()->json(['success' => false, 'message' => 'Active tenant required.'], 400);
         }
@@ -245,7 +245,7 @@ final class BiometricDeviceProfileController extends Controller
             abort(403, 'Unauthorized to delete biometric device profiles.');
         }
 
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
         $tenant = app()->bound('current_tenant') ? app('current_tenant') : ($tenantId ? Tenant::find($tenantId) : null);
 
         $name = $profile->name;
@@ -356,7 +356,7 @@ final class BiometricDeviceProfileController extends Controller
      */
     public function testDbQuery(Request $request): JsonResponse
     {
-        $tenantId = session('tenant_id') ?? app()->make('current_tenant_id') ?? null;
+        $tenantId = session('tenant_id') ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
 
         $config = $request->all();
         if ($tenantId !== null) {
