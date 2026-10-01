@@ -30,6 +30,10 @@ import {
     HeartHandshake,
     AlertTriangle,
     Loader2,
+    Users,
+    Zap,
+    ArrowRight,
+    ShieldCheck,
 } from 'lucide-react';
 
 interface Employee {
@@ -37,6 +41,7 @@ interface Employee {
     emp_no: string;
     full_name: string;
     date_of_joining?: string | null;
+    department_id?: string | null;
     department?: {
         id: string;
         name: string;
@@ -78,6 +83,23 @@ interface LeaveEntitlement {
     };
 }
 
+interface CompensatoryRecord {
+    id: string;
+    employee_id: string;
+    earned_date: string;
+    earned_days: number;
+    used_days: number;
+    remaining_days: number;
+    expires_at: string;
+    status: 'available' | 'used' | 'expired';
+    reason: string;
+    employee?: Employee;
+    createdBy?: {
+        id: number;
+        name: string;
+    };
+}
+
 interface LeaveRequestItem {
     id: string;
     tenant_id: string;
@@ -88,13 +110,28 @@ interface LeaveRequestItem {
     days_count: number;
     is_half_day: boolean;
     half_day_type?: string | null;
+    is_short_leave: boolean;
+    short_leave_from?: string | null;
+    short_leave_to?: string | null;
+    short_leave_duration_minutes?: number | null;
+    covering_employee_id?: string | null;
     reason: string;
     status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+    approval_stage: 'pending_hod' | 'pending_hr' | 'approved' | 'rejected' | 'cancelled';
+    hod_id?: number | null;
+    hod_actioned_at?: string | null;
+    hod_remarks?: string | null;
+    is_bypassed_by_hr?: boolean;
     actioned_at?: string | null;
     rejection_reason?: string | null;
     created_at: string;
     employee?: Employee;
+    covering_employee?: Employee | null;
     leave_type?: LeaveType;
+    hod?: {
+        id: number;
+        name: string;
+    } | null;
     actioned_by?: {
         id: number;
         name: string;
@@ -116,15 +153,22 @@ interface Props {
     leaveTypes: LeaveType[];
     employees: Employee[];
     entitlements: LeaveEntitlement[];
+    compensatoryRecords: CompensatoryRecord[];
     metrics: {
         pending_count: number;
+        pending_hod_count: number;
+        pending_hr_count: number;
         approved_count: number;
         rejected_count: number;
+        short_leaves_month: number;
         on_leave_today: number;
+        available_c_off_days: number;
     };
     filters: {
         year: number;
         status: string;
+        approval_stage?: string;
+        type?: string;
         employee_id?: string | null;
         leave_type_id?: string | null;
         search?: string | null;
@@ -136,13 +180,20 @@ export default function LeaveRequestsIndex({
     leaveTypes,
     employees,
     entitlements,
+    compensatoryRecords,
     metrics,
     filters,
 }: Props) {
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
     const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+    const [isHodActionModalOpen, setIsHodActionModalOpen] = useState(false);
+    const [isCreditCofModalOpen, setIsCreditCofModalOpen] = useState(false);
     const [isEntitlementsModalOpen, setIsEntitlementsModalOpen] = useState(false);
+    const [isCofLedgerModalOpen, setIsCofLedgerModalOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState<'requests' | 'c_off_ledger'>('requests');
+
     const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+    const [hodActionTarget, setHodActionTarget] = useState<{ id: string; decision: 'approve' | 'reject' } | null>(null);
     const [entitlementFilterEmp, setEntitlementFilterEmp] = useState<string>('');
 
     // Apply Leave Form
@@ -153,6 +204,10 @@ export default function LeaveRequestsIndex({
         end_date: new Date().toISOString().split('T')[0],
         is_half_day: false,
         half_day_type: 'first_half',
+        is_short_leave: false,
+        short_leave_from: '08:30',
+        short_leave_to: '10:00',
+        covering_employee_id: '',
         reason: '',
     });
 
@@ -161,22 +216,59 @@ export default function LeaveRequestsIndex({
         rejection_reason: '',
     });
 
+    // HOD Action Form
+    const hodActionForm = useForm({
+        decision: 'approve',
+        remarks: '',
+    });
+
     // Entitlement Allocate Form
     const allocateForm = useForm({
         year: filters.year || new Date().getFullYear(),
         employee_id: '',
     });
 
-    // Calculate selected employee balance for the chosen leave type in Apply Modal
+    // Credit Compensatory Leave Form
+    const creditCofForm = useForm({
+        employee_id: '',
+        earned_date: new Date().toISOString().split('T')[0],
+        earned_days: 1.0,
+        reason: '',
+    });
+
+    // Calculate duration in minutes for short leave in the form
+    const shortLeaveDuration = useMemo(() => {
+        if (!applyForm.data.is_short_leave || !applyForm.data.short_leave_from || !applyForm.data.short_leave_to) {
+            return 0;
+        }
+        const [fromH, fromM] = applyForm.data.short_leave_from.split(':').map(Number);
+        const [toH, toM] = applyForm.data.short_leave_to.split(':').map(Number);
+        const fromTotal = fromH * 60 + fromM;
+        const toTotal = toH * 60 + toM;
+        return Math.max(0, toTotal - fromTotal);
+    }, [applyForm.data.is_short_leave, applyForm.data.short_leave_from, applyForm.data.short_leave_to]);
+
+    // Active leave type selected
+    const activeLeaveType = useMemo(() => {
+        return leaveTypes.find((t) => t.id === applyForm.data.leave_type_id);
+    }, [leaveTypes, applyForm.data.leave_type_id]);
+
+    // Active employee entitlement balance
     const activeBalance = useMemo(() => {
         if (!applyForm.data.employee_id || !applyForm.data.leave_type_id) return null;
+        if (activeLeaveType?.code === 'COMPENSATORY') {
+            const sum = compensatoryRecords
+                .filter((c) => c.employee_id === applyForm.data.employee_id && c.status === 'available')
+                .reduce((acc, c) => acc + c.remaining_days, 0);
+            return sum;
+        }
         const match = entitlements.find(
             (e) =>
                 e.employee_id === applyForm.data.employee_id &&
                 e.leave_type_id === applyForm.data.leave_type_id
         );
         return match ? match.remaining_days : null;
-    }, [applyForm.data.employee_id, applyForm.data.leave_type_id, entitlements]);
+    }, [applyForm.data.employee_id, applyForm.data.leave_type_id, entitlements, activeLeaveType, compensatoryRecords]);
 
     const handleFilterChange = (key: string, value: any) => {
         router.get(
@@ -202,8 +294,32 @@ export default function LeaveRequestsIndex({
         });
     };
 
-    const handleApprove = (id: string) => {
-        router.post(`/leave/requests/${id}/approve`);
+    const openHodActionModal = (id: string, decision: 'approve' | 'reject') => {
+        setHodActionTarget({ id, decision });
+        hodActionForm.setData({
+            decision,
+            remarks: '',
+        });
+        setIsHodActionModalOpen(true);
+    };
+
+    const handleHodActionSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!hodActionTarget) return;
+
+        hodActionForm.post(`/leave/requests/${hodActionTarget.id}/hod-action`, {
+            onSuccess: () => {
+                setIsHodActionModalOpen(false);
+                setHodActionTarget(null);
+                hodActionForm.reset();
+            },
+        });
+    };
+
+    const handleApprove = (id: string, directBypass = false) => {
+        router.post(`/leave/requests/${id}/approve`, {
+            direct_bypass: directBypass,
+        });
     };
 
     const openRejectModal = (id: string) => {
@@ -226,7 +342,19 @@ export default function LeaveRequestsIndex({
     };
 
     const handleCancel = (id: string) => {
-        router.delete(`/leave/requests/${id}`);
+        if (confirm('Are you sure you want to cancel this leave request?')) {
+            router.delete(`/leave/requests/${id}`);
+        }
+    };
+
+    const handleCreditCofSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        creditCofForm.post('/leave/compensatory/credit', {
+            onSuccess: () => {
+                setIsCreditCofModalOpen(false);
+                creditCofForm.reset();
+            },
+        });
     };
 
     const handleSeedStatutory = () => {
@@ -242,21 +370,35 @@ export default function LeaveRequestsIndex({
         });
     };
 
-    const getStatusBadge = (status: LeaveRequestItem['status']) => {
-        switch (status) {
-            case 'approved':
-                return (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Approved
-                    </span>
-                );
-            case 'pending':
+    const getStageBadge = (stage: LeaveRequestItem['approval_stage'], isBypassed?: boolean) => {
+        switch (stage) {
+            case 'pending_hod':
                 return (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        <Clock className="w-3.5 h-3.5" />
-                        Pending Approval
+                        <UserCheck className="w-3.5 h-3.5" />
+                        Pending HOD Review
                     </span>
+                );
+            case 'pending_hr':
+                return (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                        <Clock className="w-3.5 h-3.5" />
+                        Pending HR Sign-Off
+                    </span>
+                );
+            case 'approved':
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Approved
+                        </span>
+                        {isBypassed && (
+                            <span className="text-[10px] font-mono text-purple-400 uppercase tracking-wider pl-1">
+                                ⚡ HR Direct Bypass
+                            </span>
+                        )}
+                    </div>
                 );
             case 'rejected':
                 return (
@@ -290,47 +432,35 @@ export default function LeaveRequestsIndex({
                         <div>
                             <div className="flex items-center gap-2">
                                 <h1 className="text-xl font-bold tracking-tight text-white">
-                                    Leave Management
+                                    Leave & Absence Architecture
                                 </h1>
                                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                    M02 · AMS
+                                    M04 · AMS Phase 2
                                 </span>
                             </div>
                             <p className="text-xs text-slate-400">
-                                Statutory Entitlements, Proration & Managerial Approvals
+                                Short Leaves, Shift Coverage, C-Off Expiry (90d) & 2-Tier Approvals
                             </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <Link
-                            href="/shifts"
-                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
+                        <button
+                            type="button"
+                            onClick={() => setIsCreditCofModalOpen(true)}
+                            className="text-xs font-medium text-purple-300 hover:text-white px-3 py-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/40 transition flex items-center gap-1.5"
                         >
-                            <Briefcase className="w-3.5 h-3.5 text-indigo-400" />
-                            Shifts
-                        </Link>
-                        <Link
-                            href="/work-calendar"
-                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
-                        >
-                            <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                            Work Calendar
-                        </Link>
-                        <Link
-                            href="/attendance/import"
-                            className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
-                        >
-                            <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
-                            Biometric Ingestion
-                        </Link>
-                        <Link
-                            href="/attendance/daily"
+                            <Award className="w-3.5 h-3.5 text-purple-400" />
+                            + Credit C-Off
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setIsCofLedgerModalOpen(true)}
                             className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900/60 transition flex items-center gap-1.5"
                         >
                             <Clock className="w-3.5 h-3.5 text-purple-400" />
-                            Daily Ledger
-                        </Link>
+                            C-Off Ledger
+                        </button>
                         <button
                             type="button"
                             onClick={() => setIsEntitlementsModalOpen(true)}
@@ -345,82 +475,100 @@ export default function LeaveRequestsIndex({
                             className="text-xs font-semibold text-white px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 shadow-md shadow-emerald-600/20 transition flex items-center gap-1.5"
                         >
                             <Plus className="w-3.5 h-3.5" />
-                            Apply Leave
+                            Apply Leave / Short Leave
                         </button>
                     </div>
                 </div>
 
                 {/* Metric Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400">Pending Approvals</span>
+                            <span className="text-xs font-medium text-slate-400">Awaiting HOD</span>
                             <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                <Clock className="w-4 h-4" />
+                                <UserCheck className="w-4 h-4" />
                             </div>
                         </div>
-                        <div className="mt-3 flex items-baseline gap-2">
-                            <span className="text-3xl font-bold font-mono text-amber-400">
-                                {metrics.pending_count}
+                        <div className="mt-2 flex items-baseline gap-2">
+                            <span className="text-2xl font-bold font-mono text-amber-400">
+                                {metrics.pending_hod_count}
                             </span>
                             <span className="text-xs text-slate-500">requests</span>
                         </div>
                         <p className="mt-1 text-[11px] text-slate-400">
-                            Awaiting managerial sign-off
+                            Stage 1: HOD recommendation
                         </p>
                     </div>
 
-                    <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
+                    <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400">Approved Leaves</span>
-                            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                <CheckCircle2 className="w-4 h-4" />
+                            <span className="text-xs font-medium text-slate-400">Awaiting HR Sign-Off</span>
+                            <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                <Clock className="w-4 h-4" />
                             </div>
                         </div>
-                        <div className="mt-3 flex items-baseline gap-2">
-                            <span className="text-3xl font-bold font-mono text-emerald-400">
-                                {metrics.approved_count}
+                        <div className="mt-2 flex items-baseline gap-2">
+                            <span className="text-2xl font-bold font-mono text-sky-400">
+                                {metrics.pending_hr_count}
                             </span>
-                            <span className="text-xs text-slate-500">granted</span>
+                            <span className="text-xs text-slate-500">requests</span>
                         </div>
                         <p className="mt-1 text-[11px] text-slate-400">
-                            Synchronized with Daily Ledger
+                            Stage 2: Final approval
                         </p>
                     </div>
 
-                    <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
+                    <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-slate-400">Short Leaves (Month)</span>
+                            <div className="p-2 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                <Zap className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <div className="mt-2 flex items-baseline gap-2">
+                            <span className="text-2xl font-bold font-mono text-violet-400">
+                                {metrics.short_leaves_month}
+                            </span>
+                            <span className="text-xs text-slate-500">instances</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                            Max 2 per staff / month
+                        </p>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-slate-400">Available C-Off Pool</span>
+                            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                <Award className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <div className="mt-2 flex items-baseline gap-2">
+                            <span className="text-2xl font-bold font-mono text-purple-400">
+                                {metrics.available_c_off_days}
+                            </span>
+                            <span className="text-xs text-slate-500">days</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                            90-day expiry window
+                        </p>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
                         <div className="flex items-center justify-between">
                             <span className="text-xs font-medium text-slate-400">On Leave Today</span>
-                            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                 <CalendarIcon className="w-4 h-4" />
                             </div>
                         </div>
-                        <div className="mt-3 flex items-baseline gap-2">
-                            <span className="text-3xl font-bold font-mono text-indigo-400">
+                        <div className="mt-2 flex items-baseline gap-2">
+                            <span className="text-2xl font-bold font-mono text-emerald-400">
                                 {metrics.on_leave_today}
                             </span>
-                            <span className="text-xs text-slate-500">employees</span>
+                            <span className="text-xs text-slate-500">staff</span>
                         </div>
                         <p className="mt-1 text-[11px] text-slate-400">
-                            Active today in Sri Lanka
-                        </p>
-                    </div>
-
-                    <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden group">
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400">Rejected Requests</span>
-                            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                <XCircle className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <div className="mt-3 flex items-baseline gap-2">
-                            <span className="text-3xl font-bold font-mono text-rose-400">
-                                {metrics.rejected_count}
-                            </span>
-                            <span className="text-xs text-slate-500">declined</span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-slate-400">
-                            With audit justification
+                            Daily ledger active
                         </p>
                     </div>
                 </div>
@@ -428,22 +576,40 @@ export default function LeaveRequestsIndex({
                 {/* Filter and Search Bar */}
                 <div className="p-4 md:p-6 rounded-3xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-sm flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                        {/* Approval Stage filter */}
                         <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
-                            {['all', 'pending', 'approved', 'rejected'].map((st) => (
+                            {[
+                                { key: 'all', label: 'All Stages' },
+                                { key: 'pending_hod', label: 'HOD Queue' },
+                                { key: 'pending_hr', label: 'HR Queue' },
+                                { key: 'approved', label: 'Approved' },
+                                { key: 'rejected', label: 'Rejected' },
+                            ].map((st) => (
                                 <button
-                                    key={st}
+                                    key={st.key}
                                     type="button"
-                                    onClick={() => handleFilterChange('status', st)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition ${
-                                        filters.status === st
+                                    onClick={() => handleFilterChange('approval_stage', st.key)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                        (filters.approval_stage || 'all') === st.key
                                             ? 'bg-emerald-600 text-white shadow-sm'
                                             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                                     }`}
                                 >
-                                    {st === 'all' ? 'All Statuses' : st}
+                                    {st.label}
                                 </button>
                             ))}
                         </div>
+
+                        {/* Leave Format Filter */}
+                        <select
+                            value={filters.type || 'all'}
+                            onChange={(e) => handleFilterChange('type', e.target.value)}
+                            className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-500"
+                        >
+                            <option value="all">All Formats</option>
+                            <option value="standard">Standard & Half-Day Leaves</option>
+                            <option value="short_leave">Short Leaves (Gate Passes)</option>
+                        </select>
 
                         <select
                             value={filters.leave_type_id || ''}
@@ -464,7 +630,7 @@ export default function LeaveRequestsIndex({
                             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                             <input
                                 type="text"
-                                placeholder="Search employee or reason..."
+                                placeholder="Search employee, reason..."
                                 defaultValue={filters.search || ''}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
@@ -494,11 +660,11 @@ export default function LeaveRequestsIndex({
                             <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
                                 <tr>
                                     <th className="px-6 py-4">Employee</th>
-                                    <th className="px-6 py-4">Leave Type</th>
-                                    <th className="px-6 py-4">Duration & Dates</th>
-                                    <th className="px-6 py-4">Reason</th>
-                                    <th className="px-6 py-4">Status</th>
-                                    <th className="px-6 py-4">Decision / Log</th>
+                                    <th className="px-6 py-4">Leave Type / Nature</th>
+                                    <th className="px-6 py-4">Duration & Timing</th>
+                                    <th className="px-6 py-4">Shift Coverage</th>
+                                    <th className="px-6 py-4">Approval Stage</th>
+                                    <th className="px-6 py-4">Audit Trail</th>
                                     <th className="px-6 py-4 text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -509,7 +675,7 @@ export default function LeaveRequestsIndex({
                                             <HeartHandshake className="w-10 h-10 mx-auto mb-3 opacity-30 text-emerald-400" />
                                             <p className="text-sm font-medium text-slate-400">No leave requests found</p>
                                             <p className="text-xs mt-1">
-                                                Click "+ Apply Leave" or adjust filter criteria above.
+                                                Click "+ Apply Leave / Short Leave" or adjust filter criteria above.
                                             </p>
                                         </td>
                                     </tr>
@@ -533,90 +699,165 @@ export default function LeaveRequestsIndex({
                                                 </div>
                                             </td>
 
-                                            {/* Leave Type */}
+                                            {/* Leave Type / Nature */}
                                             <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <span
-                                                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                                                        style={{ backgroundColor: req.leave_type?.color || '#10b981' }}
-                                                    />
-                                                    <span className="font-medium text-white">
-                                                        {req.leave_type?.name}
-                                                    </span>
-                                                </div>
-                                                <span className="text-[10px] uppercase font-mono text-slate-400">
-                                                    {req.leave_type?.code} · {req.leave_type?.is_paid ? 'Paid' : 'Unpaid (No-Pay)'}
-                                                </span>
-                                            </td>
-
-                                            {/* Duration & Dates */}
-                                            <td className="px-6 py-4">
-                                                <div className="font-mono text-slate-200 font-semibold">
-                                                    {req.start_date} {req.start_date !== req.end_date && `→ ${req.end_date}`}
-                                                </div>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className="text-xs font-bold text-emerald-400">
-                                                        {req.days_count} {req.days_count === 1 ? 'day' : 'days'}
-                                                    </span>
-                                                    {req.is_half_day && (
-                                                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono">
-                                                            Half-Day ({req.half_day_type === 'first_half' ? '1st Half' : '2nd Half'})
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-
-                                            {/* Reason */}
-                                            <td className="px-6 py-4 max-w-xs">
-                                                <p className="text-xs text-slate-300 line-clamp-2" title={req.reason}>
-                                                    {req.reason}
-                                                </p>
-                                            </td>
-
-                                            {/* Status */}
-                                            <td className="px-6 py-4">
-                                                {getStatusBadge(req.status)}
-                                            </td>
-
-                                            {/* Decision Log */}
-                                            <td className="px-6 py-4">
-                                                {req.actioned_by ? (
+                                                {req.is_short_leave ? (
                                                     <div>
-                                                        <div className="text-xs text-slate-300 font-medium">
-                                                            {req.actioned_by.name}
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">
+                                                            <Zap className="w-3 h-3 text-violet-400" />
+                                                            Short Leave (Gate Pass)
+                                                        </span>
+                                                        <div className="text-[10px] text-slate-400 mt-0.5">
+                                                            Zero balance deduction
                                                         </div>
-                                                        <div className="text-[10px] text-slate-500">
-                                                            {req.actioned_at ? new Date(req.actioned_at).toLocaleDateString() : ''}
-                                                        </div>
-                                                        {req.rejection_reason && (
-                                                            <p className="text-[11px] text-rose-400 mt-1 italic line-clamp-1" title={req.rejection_reason}>
-                                                                "{req.rejection_reason}"
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-[11px] text-slate-500 italic">Pending</span>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span
+                                                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                style={{ backgroundColor: req.leave_type?.color || '#10b981' }}
+                                                            />
+                                                            <span className="font-medium text-white">
+                                                                {req.leave_type?.name}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-[10px] uppercase font-mono text-slate-400">
+                                                            {req.leave_type?.code} · {req.leave_type?.is_paid ? 'Paid' : 'Unpaid (No-Pay)'}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            {/* Duration & Timing */}
+                                            <td className="px-6 py-4">
+                                                {req.is_short_leave ? (
+                                                    <div>
+                                                        <div className="font-mono text-slate-200 font-semibold">
+                                                            {req.start_date}
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 mt-0.5 text-xs text-violet-400 font-mono">
+                                                            <Clock className="w-3 h-3" />
+                                                            {req.short_leave_from} → {req.short_leave_to} ({req.short_leave_duration_minutes} min)
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <div className="font-mono text-slate-200 font-semibold">
+                                                            {req.start_date} {req.start_date !== req.end_date && `→ ${req.end_date}`}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-xs font-bold text-emerald-400">
+                                                                {req.days_count} {req.days_count === 1 ? 'day' : 'days'}
+                                                            </span>
+                                                            {req.is_half_day && (
+                                                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono">
+                                                                    Half-Day ({req.half_day_type === 'first_half' ? '1st Half' : '2nd Half'})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            {/* Shift Coverage */}
+                                            <td className="px-6 py-4">
+                                                {req.covering_employee ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Users className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                                        <div>
+                                                            <div className="text-xs text-slate-200 font-medium">
+                                                                {req.covering_employee.full_name}
+                                                            </div>
+                                                            <div className="text-[10px] font-mono text-slate-400">
+                                                                {req.covering_employee.emp_no}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-[11px] text-slate-500 italic">None assigned</span>
+                                                )}
+                                            </td>
+
+                                            {/* Approval Stage */}
+                                            <td className="px-6 py-4">
+                                                {getStageBadge(req.approval_stage, req.is_bypassed_by_hr)}
+                                            </td>
+
+                                            {/* Audit Trail */}
+                                            <td className="px-6 py-4 max-w-xs">
+                                                {req.approval_stage === 'pending_hod' && (
+                                                    <span className="text-[11px] text-amber-400 italic">
+                                                        Awaiting HOD sign-off
+                                                    </span>
+                                                )}
+                                                {req.hod_actioned_at && (
+                                                    <div className="text-[11px] text-slate-400 mb-1">
+                                                        <span className="text-slate-300 font-medium">HOD:</span> {req.hod?.name || 'Assigned HOD'}
+                                                        {req.hod_remarks && <p className="italic text-slate-500 line-clamp-1">"{req.hod_remarks}"</p>}
+                                                    </div>
+                                                )}
+                                                {req.actioned_by && (
+                                                    <div className="text-[11px] text-slate-300 font-medium">
+                                                        <span>HR:</span> {req.actioned_by.name}
+                                                        {req.rejection_reason && (
+                                                            <p className="text-rose-400 italic line-clamp-1">"{req.rejection_reason}"</p>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
 
                                             {/* Actions */}
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-1.5">
-                                                    {req.status === 'pending' && (
+                                                    {/* Stage 1: Pending HOD Action */}
+                                                    {req.approval_stage === 'pending_hod' && (
                                                         <>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => handleApprove(req.id)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition flex items-center gap-1"
-                                                                title="Approve Leave"
+                                                                onClick={() => openHodActionModal(req.id, 'approve')}
+                                                                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs shadow-sm transition flex items-center gap-1"
+                                                                title="Recommend & Advance to HR"
+                                                            >
+                                                                <UserCheck className="w-3 h-3" />
+                                                                HOD Recommend
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleApprove(req.id, true)}
+                                                                className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600 text-purple-200 border border-purple-500/30 font-medium text-xs transition flex items-center gap-1"
+                                                                title="HR Direct Managerial Bypass"
+                                                            >
+                                                                <Zap className="w-3 h-3 text-purple-300" />
+                                                                HR Bypass
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openHodActionModal(req.id, 'reject')}
+                                                                className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/40 border border-rose-500/20 transition"
+                                                                title="HOD Decline"
+                                                            >
+                                                                <X className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </>
+                                                    )}
+
+                                                    {/* Stage 2: Pending HR Final Action */}
+                                                    {req.approval_stage === 'pending_hr' && (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleApprove(req.id, false)}
+                                                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition flex items-center gap-1"
+                                                                title="HR Final Approve"
                                                             >
                                                                 <Check className="w-3.5 h-3.5" />
-                                                                Approve
+                                                                HR Sign-Off
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => openRejectModal(req.id)}
-                                                                className="px-2.5 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-medium text-xs transition flex items-center gap-1"
+                                                                className="px-2.5 py-1 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-medium text-xs transition flex items-center gap-1"
                                                                 title="Reject Leave"
                                                             >
                                                                 <X className="w-3.5 h-3.5" />
@@ -624,7 +865,8 @@ export default function LeaveRequestsIndex({
                                                             </button>
                                                         </>
                                                     )}
-                                                    {['pending', 'approved'].includes(req.status) && (
+
+                                                    {['pending_hod', 'pending_hr', 'approved'].includes(req.approval_stage) && (
                                                         <button
                                                             type="button"
                                                             onClick={() => handleCancel(req.id)}
@@ -644,19 +886,19 @@ export default function LeaveRequestsIndex({
                     </div>
                 </div>
 
-            {/* Apply Leave Modal */}
+            {/* Apply Leave / Short Leave Modal */}
             {isApplyModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
                         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                             <div className="flex items-center gap-2.5">
                                 <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                     <Plus className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <h3 className="text-base font-bold text-white">Apply for Leave</h3>
+                                    <h3 className="text-base font-bold text-white">Apply for Leave / Absence</h3>
                                     <p className="text-xs text-slate-400">
-                                        Sri Lankan Statutory Leave Booking Form
+                                        Multi-tier statutory approvals & short leave gate pass
                                     </p>
                                 </div>
                             </div>
@@ -669,11 +911,45 @@ export default function LeaveRequestsIndex({
                             </button>
                         </div>
 
-                        <form onSubmit={handleApplySubmit} className="mt-5 space-y-4">
+                        {/* Format Switcher: Standard Leave vs Short Leave */}
+                        <div className="my-4 p-1 rounded-xl bg-slate-950 border border-slate-800 grid grid-cols-2 gap-1">
+                            <button
+                                type="button"
+                                onClick={() => applyForm.setData('is_short_leave', false)}
+                                className={`py-2 rounded-lg text-xs font-semibold transition ${
+                                    !applyForm.data.is_short_leave
+                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                Standard / Half-Day
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    applyForm.setData({
+                                        ...applyForm.data,
+                                        is_short_leave: true,
+                                        is_half_day: false,
+                                        end_date: applyForm.data.start_date,
+                                    });
+                                }}
+                                className={`py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 ${
+                                    applyForm.data.is_short_leave
+                                        ? 'bg-violet-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                <Zap className="w-3.5 h-3.5" />
+                                Short Leave (Max 2h)
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleApplySubmit} className="space-y-4">
                             {/* Employee */}
                             <div>
                                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                    Employee <span className="text-rose-400">*</span>
+                                    Applicant Employee <span className="text-rose-400">*</span>
                                 </label>
                                 <select
                                     value={applyForm.data.employee_id}
@@ -681,7 +957,7 @@ export default function LeaveRequestsIndex({
                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                                     required
                                 >
-                                    <option value="">Select Employee</option>
+                                    <option value="">Select Employee...</option>
                                     {employees.map((emp) => (
                                         <option key={emp.id} value={emp.id}>
                                             {emp.full_name} ({emp.emp_no}) · {emp.department?.name || 'General'}
@@ -693,106 +969,209 @@ export default function LeaveRequestsIndex({
                                 )}
                             </div>
 
-                            {/* Leave Type */}
-                            <div>
-                                <div className="flex items-center justify-between mb-1">
-                                    <label className="text-xs font-semibold text-slate-300">
-                                        Leave Type <span className="text-rose-400">*</span>
-                                    </label>
-                                    {activeBalance !== null && (
-                                        <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                                            Balance: {activeBalance} days remaining
-                                        </span>
+                            {/* Leave Type (If Standard) */}
+                            {!applyForm.data.is_short_leave ? (
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-xs font-semibold text-slate-300">
+                                            Leave Type <span className="text-rose-400">*</span>
+                                        </label>
+                                        {activeBalance !== null && (
+                                            <span className="text-[11px] font-mono text-emerald-400">
+                                                Available Balance: {activeBalance} days
+                                            </span>
+                                        )}
+                                    </div>
+                                    <select
+                                        value={applyForm.data.leave_type_id}
+                                        onChange={(e) => applyForm.setData('leave_type_id', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                        required
+                                    >
+                                        {leaveTypes.map((type) => (
+                                            <option key={type.id} value={type.id}>
+                                                {type.name} ({type.code}) · {type.is_paid ? 'Paid' : 'Unpaid'}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {applyForm.errors.leave_type_id && (
+                                        <p className="text-xs text-rose-400 mt-1">{applyForm.errors.leave_type_id}</p>
                                     )}
                                 </div>
-                                <select
-                                    value={applyForm.data.leave_type_id}
-                                    onChange={(e) => applyForm.setData('leave_type_id', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                                    required
-                                >
-                                    {leaveTypes.map((t) => (
-                                        <option key={t.id} value={t.id}>
-                                            {t.name} ({t.code}) — {t.is_paid ? 'Paid' : 'Unpaid'}
-                                        </option>
-                                    ))}
-                                </select>
-                                {applyForm.errors.leave_type_id && (
-                                    <p className="text-xs text-rose-400 mt-1">{applyForm.errors.leave_type_id}</p>
-                                )}
-                            </div>
+                            ) : (
+                                <div className="p-3 rounded-xl bg-violet-950/40 border border-violet-500/20 text-xs text-violet-200">
+                                    <div className="flex items-center gap-1.5 font-semibold text-violet-300">
+                                        <Info className="w-4 h-4" />
+                                        Short Leave Policy (Sri Lanka Enterprise Standard)
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-violet-300/80">
+                                        Permitted maximum: 2 short leaves per calendar month (max 120 minutes each). Does not deduct from statutory annual or casual leave quota.
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Dates */}
-                            <div className="grid grid-cols-2 gap-3">
+                            {!applyForm.data.is_short_leave ? (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                            Start Date <span className="text-rose-400">*</span>
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={applyForm.data.start_date}
+                                            onChange={(e) => {
+                                                applyForm.setData({
+                                                    ...applyForm.data,
+                                                    start_date: e.target.value,
+                                                    end_date: e.target.value >= applyForm.data.end_date ? e.target.value : applyForm.data.end_date,
+                                                });
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                            End Date <span className="text-rose-400">*</span>
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={applyForm.data.end_date}
+                                            onChange={(e) => applyForm.setData('end_date', e.target.value)}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                            ) : (
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        Start Date <span className="text-rose-400">*</span>
+                                        Absence Date <span className="text-rose-400">*</span>
                                     </label>
                                     <input
                                         type="date"
                                         value={applyForm.data.start_date}
-                                        onChange={(e) => applyForm.setData('start_date', e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                        onChange={(e) => {
+                                            applyForm.setData({
+                                                ...applyForm.data,
+                                                start_date: e.target.value,
+                                                end_date: e.target.value,
+                                            });
+                                        }}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
                                         required
                                     />
-                                    {applyForm.errors.start_date && (
-                                        <p className="text-xs text-rose-400 mt-1">{applyForm.errors.start_date}</p>
-                                    )}
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                        End Date <span className="text-rose-400">*</span>
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={applyForm.data.end_date}
-                                        onChange={(e) => applyForm.setData('end_date', e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                                        required
-                                    />
-                                    {applyForm.errors.end_date && (
-                                        <p className="text-xs text-rose-400 mt-1">{applyForm.errors.end_date}</p>
-                                    )}
-                                </div>
-                            </div>
+                            )}
 
-                            {/* Half Day Option */}
-                            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-300">
-                                    <input
-                                        type="checkbox"
-                                        checked={applyForm.data.is_half_day}
-                                        onChange={(e) => applyForm.setData('is_half_day', e.target.checked)}
-                                        className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
-                                    />
-                                    Apply as Half-Day Leave (0.5 days)
-                                </label>
-
-                                {applyForm.data.is_half_day && (
-                                    <div className="flex items-center gap-4 pt-1 pl-5">
-                                        <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                            {/* Short Leave Times */}
+                            {applyForm.data.is_short_leave && (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                From Time (HH:mm) <span className="text-rose-400">*</span>
+                                            </label>
                                             <input
-                                                type="radio"
-                                                name="half_day_type"
-                                                value="first_half"
-                                                checked={applyForm.data.half_day_type === 'first_half'}
-                                                onChange={(e) => applyForm.setData('half_day_type', e.target.value)}
-                                                className="text-emerald-500 focus:ring-0"
+                                                type="time"
+                                                value={applyForm.data.short_leave_from}
+                                                onChange={(e) => applyForm.setData('short_leave_from', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-violet-500"
+                                                required
                                             />
-                                            First Half (Morning)
-                                        </label>
-                                        <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                                To Time (HH:mm) <span className="text-rose-400">*</span>
+                                            </label>
                                             <input
-                                                type="radio"
-                                                name="half_day_type"
-                                                value="second_half"
-                                                checked={applyForm.data.half_day_type === 'second_half'}
-                                                onChange={(e) => applyForm.setData('half_day_type', e.target.value)}
-                                                className="text-emerald-500 focus:ring-0"
+                                                type="time"
+                                                value={applyForm.data.short_leave_to}
+                                                onChange={(e) => applyForm.setData('short_leave_to', e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-violet-500"
+                                                required
                                             />
-                                            Second Half (Afternoon)
-                                        </label>
+                                        </div>
                                     </div>
+                                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-950 border border-slate-800">
+                                        <span className="text-xs text-slate-400">Calculated Duration:</span>
+                                        <span className={`text-xs font-mono font-bold ${shortLeaveDuration > 120 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                            {shortLeaveDuration} minutes ({Math.round((shortLeaveDuration / 60) * 10) / 10} hrs)
+                                        </span>
+                                    </div>
+                                    {shortLeaveDuration > 120 && (
+                                        <p className="text-xs text-rose-400">
+                                            Duration exceeds maximum allowed 120 minutes (2 hours). Please adjust times or apply for a half-day.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Half-Day Option (Only for Standard) */}
+                            {!applyForm.data.is_short_leave && (
+                                <div className="space-y-3 pt-1">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={applyForm.data.is_half_day}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                applyForm.setData({
+                                                    ...applyForm.data,
+                                                    is_half_day: checked,
+                                                    end_date: checked ? applyForm.data.start_date : applyForm.data.end_date,
+                                                });
+                                            }}
+                                            className="rounded border-slate-800 bg-slate-950 text-emerald-600 focus:ring-0"
+                                        />
+                                        <span className="text-xs text-slate-300 font-medium">
+                                            Request as Half-Day Leave (0.5 day)
+                                        </span>
+                                    </label>
+
+                                    {applyForm.data.is_half_day && (
+                                        <div className="grid grid-cols-2 gap-2 pl-6">
+                                            {['first_half', 'second_half'].map((hType) => (
+                                                <button
+                                                    key={hType}
+                                                    type="button"
+                                                    onClick={() => applyForm.setData('half_day_type', hType)}
+                                                    className={`py-1.5 px-3 rounded-lg text-xs font-medium border transition capitalize ${
+                                                        applyForm.data.half_day_type === hType
+                                                            ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                                                            : 'border-slate-800 text-slate-400 hover:text-slate-200'
+                                                    }`}
+                                                >
+                                                    {hType.replace('_', ' ')}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Covering Employee Selector */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Designated Covering Colleague <span className="text-slate-500 font-normal">(Shift Handover)</span>
+                                </label>
+                                <select
+                                    value={applyForm.data.covering_employee_id}
+                                    onChange={(e) => applyForm.setData('covering_employee_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                >
+                                    <option value="">None / Handover Unnecessary</option>
+                                    {employees
+                                        .filter((e) => e.id !== applyForm.data.employee_id)
+                                        .map((emp) => (
+                                            <option key={emp.id} value={emp.id}>
+                                                {emp.full_name} ({emp.emp_no}) · {emp.department?.name || 'General'}
+                                            </option>
+                                        ))}
+                                </select>
+                                {applyForm.errors.covering_employee_id && (
+                                    <p className="text-xs text-rose-400 mt-1">{applyForm.errors.covering_employee_id}</p>
                                 )}
                             </div>
 
@@ -805,7 +1184,7 @@ export default function LeaveRequestsIndex({
                                     rows={3}
                                     value={applyForm.data.reason}
                                     onChange={(e) => applyForm.setData('reason', e.target.value)}
-                                    placeholder="State the reason for this leave request..."
+                                    placeholder="State the justification for this absence..."
                                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
                                     required
                                 />
@@ -824,13 +1203,296 @@ export default function LeaveRequestsIndex({
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={applyForm.processing}
+                                    disabled={applyForm.processing || (applyForm.data.is_short_leave && shortLeaveDuration > 120)}
                                     className="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 transition disabled:opacity-50"
                                 >
                                     {applyForm.processing ? 'Submitting...' : 'Submit Application'}
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* HOD Action Modal */}
+            {isHodActionModalOpen && hodActionTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                            <div className="flex items-center gap-2.5">
+                                <div className={`p-2 rounded-xl ${hodActionTarget.decision === 'approve' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                    {hodActionTarget.decision === 'approve' ? <UserCheck className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">
+                                        {hodActionTarget.decision === 'approve' ? 'HOD Leave Recommendation' : 'HOD Decline Request'}
+                                    </h3>
+                                    <p className="text-xs text-slate-400">
+                                        {hodActionTarget.decision === 'approve' ? 'Recommend and advance to HR final sign-off' : 'Decline request with audit remarks'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsHodActionModalOpen(false)}
+                                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleHodActionSubmit} className="mt-5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    HOD Remarks / Handover Notes {hodActionTarget.decision === 'reject' && <span className="text-rose-400">*</span>}
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={hodActionForm.data.remarks}
+                                    onChange={(e) => hodActionForm.setData('remarks', e.target.value)}
+                                    placeholder={hodActionTarget.decision === 'approve' ? 'Optional comments regarding shift coverage or recommendations...' : 'State reasons for declining this request...'}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 resize-none"
+                                    required={hodActionTarget.decision === 'reject'}
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsHodActionModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={hodActionForm.processing}
+                                    className={`px-5 py-2 rounded-xl text-xs font-semibold text-white shadow-lg transition disabled:opacity-50 ${
+                                        hodActionTarget.decision === 'approve'
+                                            ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+                                            : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20'
+                                    }`}
+                                >
+                                    {hodActionForm.processing ? 'Processing...' : hodActionTarget.decision === 'approve' ? 'Confirm Recommendation' : 'Confirm Decline'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Credit Compensatory Leave Modal */}
+            {isCreditCofModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                    <Award className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">Credit Compensatory Off (C-Off)</h3>
+                                    <p className="text-xs text-slate-400">
+                                        Grant off-in-lieu for holiday / rest-day duty (90d validity)
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsCreditCofModalOpen(false)}
+                                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleCreditCofSubmit} className="mt-5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Employee <span className="text-rose-400">*</span>
+                                </label>
+                                <select
+                                    value={creditCofForm.data.employee_id}
+                                    onChange={(e) => creditCofForm.setData('employee_id', e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                                    required
+                                >
+                                    <option value="">Select Employee...</option>
+                                    {employees.map((emp) => (
+                                        <option key={emp.id} value={emp.id}>
+                                            {emp.full_name} ({emp.emp_no}) · {emp.department?.name || 'General'}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Date Worked <span className="text-rose-400">*</span>
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={creditCofForm.data.earned_date}
+                                        onChange={(e) => creditCofForm.setData('earned_date', e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                        Days Credited <span className="text-rose-400">*</span>
+                                    </label>
+                                    <select
+                                        value={creditCofForm.data.earned_days}
+                                        onChange={(e) => creditCofForm.setData('earned_days', parseFloat(e.target.value))}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                                    >
+                                        <option value={0.5}>0.5 Day (Half Day)</option>
+                                        <option value={1.0}>1.0 Day (Full Day)</option>
+                                        <option value={1.5}>1.5 Days</option>
+                                        <option value={2.0}>2.0 Days</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                    Duty Justification <span className="text-rose-400">*</span>
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={creditCofForm.data.reason}
+                                    onChange={(e) => creditCofForm.setData('reason', e.target.value)}
+                                    placeholder="Explain the holiday or rest day shift worked..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 resize-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCreditCofModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={creditCofForm.processing}
+                                    className="px-5 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20 transition disabled:opacity-50"
+                                >
+                                    {creditCofForm.processing ? 'Crediting...' : 'Credit Compensatory Days'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* C-Off Ledger Modal */}
+            {isCofLedgerModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                    <Clock className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">Compensatory Off (C-Off) Ledger</h3>
+                                    <p className="text-xs text-slate-400">
+                                        Active earned credits with strict 90-day expiry tracking
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsCofLedgerModalOpen(false)}
+                                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto mt-4 rounded-2xl border border-slate-800">
+                            <table className="w-full text-left text-xs text-slate-300">
+                                <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-semibold sticky top-0 border-b border-slate-800">
+                                    <tr>
+                                        <th className="px-4 py-3">Employee</th>
+                                        <th className="px-4 py-3">Earned Date</th>
+                                        <th className="px-4 py-3">Duty Justification</th>
+                                        <th className="px-4 py-3 text-center">Credited</th>
+                                        <th className="px-4 py-3 text-center">Remaining</th>
+                                        <th className="px-4 py-3">Valid Until (90d)</th>
+                                        <th className="px-4 py-3">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/60 font-mono">
+                                    {compensatoryRecords.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={7} className="px-4 py-10 text-center text-slate-500 font-sans">
+                                                No compensatory leave records found. Use "+ Credit C-Off" to grant days.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        compensatoryRecords.map((c) => (
+                                            <tr key={c.id} className="hover:bg-slate-800/40 transition">
+                                                <td className="px-4 py-3 font-sans">
+                                                    <div className="font-semibold text-white">
+                                                        {c.employee?.full_name}
+                                                    </div>
+                                                    <div className="text-[11px] text-slate-400 font-mono">
+                                                        {c.employee?.emp_no}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-200">
+                                                    {c.earned_date}
+                                                </td>
+                                                <td className="px-4 py-3 font-sans max-w-xs truncate text-slate-300" title={c.reason}>
+                                                    {c.reason}
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-purple-400 font-bold">
+                                                    {c.earned_days}d
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-emerald-400 font-bold">
+                                                    {c.remaining_days}d
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-400">
+                                                    {c.expires_at}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {c.status === 'available' ? (
+                                                        <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold uppercase">
+                                                            Available
+                                                        </span>
+                                                    ) : c.status === 'used' ? (
+                                                        <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold uppercase">
+                                                            Redeemed
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 font-semibold uppercase">
+                                                            Expired (90d)
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="pt-4 mt-4 border-t border-slate-800 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setIsCofLedgerModalOpen(false)}
+                                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition"
+                            >
+                                Close Ledger
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -1043,15 +1705,6 @@ export default function LeaveRequestsIndex({
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
-
-            {/* Global Leave Allocation Processing Overlay */}
-            {allocateForm.processing && (
-                <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
-                    <Loader2 className="w-12 h-12 animate-spin text-indigo-400 mb-3" />
-                    <p className="text-lg font-semibold">Allocating Leave Quotas...</p>
-                    <p className="text-xs text-slate-400 mt-1">Applying statutory annual, casual & medical quotas within database transaction...</p>
                 </div>
             )}
             </div>

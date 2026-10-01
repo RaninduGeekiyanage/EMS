@@ -229,12 +229,14 @@ Route::middleware(['tenant'])->group(function (): void {
         // Leave Management & Statutory Entitlements
         Route::get('/leave/requests', [LeaveRequestController::class, 'index'])->name('leave.requests.index');
         Route::post('/leave/requests', [LeaveRequestController::class, 'store'])->name('leave.requests.store');
+        Route::post('/leave/requests/{leaveRequest}/hod-action', [LeaveRequestController::class, 'hodAction'])->name('leave.requests.hod-action');
         Route::post('/leave/requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])->name('leave.requests.approve');
         Route::post('/leave/requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])->name('leave.requests.reject');
         Route::delete('/leave/requests/{leaveRequest}', [LeaveRequestController::class, 'cancel'])->name('leave.requests.cancel');
         Route::post('/leave/types', [LeaveRequestController::class, 'storeType'])->name('leave.types.store');
         Route::post('/leave/types/seed-statutory', [LeaveRequestController::class, 'seedStatutoryTypes'])->name('leave.types.seed-statutory');
         Route::post('/leave/entitlements/allocate', [LeaveRequestController::class, 'allocateEntitlements'])->name('leave.entitlements.allocate');
+        Route::post('/leave/compensatory/credit', [LeaveRequestController::class, 'creditCompensatory'])->name('leave.compensatory.credit');
 
         // Dynamic Custom HR Report Builder
         Route::get('/reports/custom', [CustomReportController::class, 'index'])->name('reports.custom.index');

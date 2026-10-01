@@ -216,6 +216,26 @@ final class Employee extends Model
     }
 
     /**
+     * Get the compensatory leave records for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<CompensatoryLeaveRecord, $this>
+     */
+    public function compensatoryLeaveRecords(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CompensatoryLeaveRecord::class, 'employee_id');
+    }
+
+    /**
+     * Get leave requests where this employee is serving as covering staff.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<LeaveRequest, $this>
+     */
+    public function coveringLeaveRequests(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(LeaveRequest::class, 'covering_employee_id');
+    }
+
+    /**
      * Get the roster entries for the employee.
      *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany<RosterEntry, $this>

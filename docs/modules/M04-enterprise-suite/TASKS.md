@@ -37,13 +37,44 @@
     6. Added employee filter dropdown to `Anomalies.tsx`. Verified 1-to-1 data parity across both pages using MCP Chrome.
 
 ## Phase 2: Absence, Short Leaves & Shift Coverage Architecture (M04-L)
-- [ ] **M04-L01**: Create migration adding Short Leave fields (`is_short_leave`, `short_leave_from`, `short_leave_to`, `short_leave_duration_minutes`), `covering_employee_id`, and `approval_stage` (`pending_hod`, `pending_hr`, `approved`) to `leave_requests`.
-- [ ] **M04-L02**: Update `LeaveService.php` to handle Short Leave validation (monthly quota check, max minutes check, lateness penalty waiver, zero leave balance deduction).
-- [ ] **M04-L03**: Implement HOD Shift Coverage Selection logic in `LeaveService.php` (auto-validates covering employee's rest day and roster conflicts).
-- [ ] **M04-L04**: Create migration `create_compensatory_leave_records_table` and `CompensatoryLeaveRecord` model.
-- [ ] **M04-L05**: Implement Compensatory Off (C-Off / Shift Off-in-Lieu) crediting, tracking, and 90-day expiry rules in `LeaveService.php`.
-- [ ] **M04-L06**: Update `LeaveRequestController.php` and FormRequests to support Short Leaves, C-Off, HOD approvals with covering staff, and HR direct bypass.
-- [ ] **M04-L07**: Update UI `resources/js/Pages/Leave/Requests.tsx` with Short Leave tabs, remaining monthly quota badge, covering employee selector, and multi-tier approval actions.
+- [x] **M04-L01**: Create migration adding Short Leave fields (`is_short_leave`, `short_leave_from`, `short_leave_to`, `short_leave_duration_minutes`), `covering_employee_id`, and `approval_stage` (`pending_hod`, `pending_hr`, `approved`) to `leave_requests`.
+  - *Completed*: Created `2026_10_01_000004_add_short_leave_and_coverage_to_leave_requests_table.php` adding short leave time tracking, duration, `covering_employee_id`, multi-tier approval tracking (`approval_stage`, `hod_id`, `hod_actioned_at`, `hod_remarks`, `is_bypassed_by_hr`), and MySQL 64-char identifier safe indexes (`idx_lr_approval_stage`, `idx_lr_short_leave`, `idx_lr_covering_emp`).
+- [x] **M04-L02**: Update `LeaveService.php` to handle Short Leave validation (monthly quota check, max minutes check, lateness penalty waiver, zero leave balance deduction).
+  - *Completed*: Enforced Sri Lankan enterprise standards:
+    1. Single-day window enforcement with start/end time validity (`short_leave_to` > `short_leave_from`).
+    2. Strict maximum duration cap of 120 minutes (2 hours).
+    3. Monthly quota enforcement: max 2 short leaves per calendar month per employee (`getRemainingMonthlyShortLeaves`).
+    4. Zero deduction from statutory annual, casual, or medical balances (`days_count = 0.00`).
+    5. Daily Attendance Ledger synchronization (`syncAttendanceLedgerForLeave`) waiving lateness penalty and early departure minutes without converting day status into absent or leave.
+- [x] **M04-L03**: Implement HOD Shift Coverage Selection logic in `LeaveService.php` (auto-validates covering employee's rest day and roster conflicts).
+  - *Completed*: Implemented `validateShiftCoverage` enforcing:
+    1. Anti-self designation check (`covering_employee_id !== employee_id`).
+    2. Active employee tenant verification.
+    3. Anti-overlap leave check: verifies covering colleague does not have approved or pending leave on the requested date range.
+    4. Schedule conflict check: resolves covering colleague's daily schedule via `ShiftService` to ensure colleague is not scheduled for a rest day on duty coverage dates.
+- [x] **M04-L04**: Create migration `create_compensatory_leave_records_table` and `CompensatoryLeaveRecord` model.
+  - *Completed*: Created `2026_10_01_000005_create_compensatory_leave_records_table.php` and `App\Models\CompensatoryLeaveRecord` with ULID PK, tenant scoping, fractional days support (`earned_days`, `used_days`, `remaining_days`), 90-day expiry tracking, and relations to `Employee`, `User`, and `LeaveRequest`.
+- [x] **M04-L05**: Implement Compensatory Off (C-Off / Shift Off-in-Lieu) crediting, tracking, and 90-day expiry rules in `LeaveService.php`.
+  - *Completed*: Added `COMPENSATORY` leave preset and methods:
+    1. `creditCompensatoryLeave`: grants C-Off days with automated 90-day expiry (`earned_date + 90 days`).
+    2. `getAvailableCompensatoryDays`: computes active, unexpired C-Off days.
+    3. `expireOverdueCompensatoryRecords`: auto-expires records where `expires_at < today`.
+    4. Balance verification in `applyLeave` and FIFO deduction from oldest unexpired records in `approveLeave`.
+    5. Full credit restoration on request cancellation or rejection.
+- [x] **M04-L06**: Update `LeaveRequestController.php` and FormRequests to support Short Leaves, C-Off, HOD approvals with covering staff, and HR direct bypass.
+  - *Completed*:
+    1. Updated `ApplyLeaveRequest` with short leave time regex, covering colleague rules, and custom error messages.
+    2. Created `HodActionLeaveRequest` and `CreditCompensatoryLeaveRequest`.
+    3. Added controller endpoints `hodAction`, `creditCompensatory`, and enhanced `approve` with direct HR managerial bypass (`direct_bypass = true`).
+    4. Added cut-off freeze protection (`isPeriodLocked` prevents submissions in locked HR periods).
+- [x] **M04-L07**: Update UI `resources/js/Pages/Leave/Requests.tsx` with Short Leave tabs, remaining monthly quota badge, covering employee selector, and multi-tier approval actions.
+  - *Completed*:
+    1. Dark-mode UI with 5 KPI summary cards (Awaiting HOD, Awaiting HR, Short Leaves Month, Available C-Off Pool, On Leave Today).
+    2. Segmented format switcher: "Standard / Half-Day" vs "Short Leave (Max 2h)" with live time duration calculator and policy hints.
+    3. Designated covering colleague selector with active department annotations.
+    4. Multi-tier approval actions: HOD Recommend & Decline modal, HR Direct Managerial Bypass button, and HR Final Sign-Off.
+    5. Dedicated Compensatory Off Ledger modal and "+ Credit C-Off" modal.
+    6. Verified 100% in test suite (`17 passed, 88 assertions`) and validated end-to-end via MCP Chrome browser.
 
 ## Phase 3: Dynamic Payroll Engine & Master Data (M04-P)
 - [ ] **M04-P01**: Create migrations `create_pay_items_table` and `create_employee_pay_items_table`.

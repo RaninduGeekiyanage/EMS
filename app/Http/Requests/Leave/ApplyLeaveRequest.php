@@ -30,7 +30,28 @@ final class ApplyLeaveRequest extends FormRequest
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'is_half_day' => ['nullable', 'boolean'],
             'half_day_type' => ['nullable', 'string', 'in:first_half,second_half'],
+            'is_short_leave' => ['nullable', 'boolean'],
+            'short_leave_from' => ['required_if:is_short_leave,true', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}(:\d{2})?$/'],
+            'short_leave_to' => ['required_if:is_short_leave,true', 'nullable', 'string', 'regex:/^\d{1,2}:\d{2}(:\d{2})?$/'],
+            'covering_employee_id' => ['nullable', 'string', 'different:employee_id', 'exists:employees,id'],
             'reason' => ['required', 'string', 'max:1000'],
+        ];
+    }
+
+    /**
+     * Get the error messages for the defined validation rules.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'short_leave_from.required_if' => 'Start time is required for a short leave request.',
+            'short_leave_to.required_if' => 'End time is required for a short leave request.',
+            'short_leave_from.regex' => 'Start time must be a valid time in HH:mm format.',
+            'short_leave_to.regex' => 'End time must be a valid time in HH:mm format.',
+            'covering_employee_id.different' => 'The covering colleague cannot be the applicant employee.',
+            'covering_employee_id.exists' => 'The selected covering colleague was not found.',
         ];
     }
 }

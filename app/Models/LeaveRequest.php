@@ -17,6 +17,12 @@ final class LeaveRequest extends Model
 {
     use BelongsToTenant, HasFactory, HasUlids, SoftDeletes;
 
+    public const STAGE_PENDING_HOD = 'pending_hod';
+    public const STAGE_PENDING_HR = 'pending_hr';
+    public const STAGE_APPROVED = 'approved';
+    public const STAGE_REJECTED = 'rejected';
+    public const STAGE_CANCELLED = 'cancelled';
+
     /**
      * The table associated with the model.
      *
@@ -38,8 +44,18 @@ final class LeaveRequest extends Model
         'days_count',
         'is_half_day',
         'half_day_type',
+        'is_short_leave',
+        'short_leave_from',
+        'short_leave_to',
+        'short_leave_duration_minutes',
+        'covering_employee_id',
         'reason',
         'status',
+        'approval_stage',
+        'hod_id',
+        'hod_actioned_at',
+        'hod_remarks',
+        'is_bypassed_by_hr',
         'actioned_by',
         'actioned_at',
         'rejection_reason',
@@ -57,6 +73,10 @@ final class LeaveRequest extends Model
             'end_date' => 'date:Y-m-d',
             'days_count' => 'float',
             'is_half_day' => 'boolean',
+            'is_short_leave' => 'boolean',
+            'short_leave_duration_minutes' => 'integer',
+            'is_bypassed_by_hr' => 'boolean',
+            'hod_actioned_at' => 'datetime:Y-m-d H:i:s',
             'actioned_at' => 'datetime:Y-m-d H:i:s',
         ];
     }
@@ -79,6 +99,52 @@ final class LeaveRequest extends Model
     public function scopeApproved(Builder $query): void
     {
         $query->where('status', 'approved');
+    }
+
+    /**
+     * Scope for pending HOD review.
+     *
+     * @param  Builder<LeaveRequest>  $query
+     */
+    public function scopePendingHod(Builder $query): void
+    {
+        $query->where('approval_stage', self::STAGE_PENDING_HOD);
+    }
+
+    /**
+     * Scope for pending HR review.
+     *
+     * @param  Builder<LeaveRequest>  $query
+     */
+    public function scopePendingHr(Builder $query): void
+    {
+        $query->where('approval_stage', self::STAGE_PENDING_HR);
+    }
+
+    /**
+     * Scope for short leave requests.
+     *
+     * @param  Builder<LeaveRequest>  $query
+     */
+    public function scopeShortLeaves(Builder $query): void
+    {
+        $query->where('is_short_leave', true);
+    }
+
+    /**
+     * Check if request is currently waiting for HOD review.
+     */
+    public function isPendingHod(): bool
+    {
+        return $this->approval_stage === self::STAGE_PENDING_HOD;
+    }
+
+    /**
+     * Check if request is currently waiting for HR review.
+     */
+    public function isPendingHr(): bool
+    {
+        return $this->approval_stage === self::STAGE_PENDING_HR;
     }
 
     /**
@@ -120,6 +186,16 @@ final class LeaveRequest extends Model
     }
 
     /**
+     * Get the covering employee assigned to cover shifts/duties.
+     *
+     * @return BelongsTo<Employee, $this>
+     */
+    public function coveringEmployee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'covering_employee_id');
+    }
+
+    /**
      * Get the leave type for this request.
      *
      * @return BelongsTo<LeaveType, $this>
@@ -130,6 +206,16 @@ final class LeaveRequest extends Model
     }
 
     /**
+     * Get the HOD user who recommended/approved or rejected at stage 1.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function hod(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'hod_id');
+    }
+
+    /**
      * Get the user who approved or rejected the request.
      *
      * @return BelongsTo<User, $this>
@@ -137,5 +223,13 @@ final class LeaveRequest extends Model
     public function actionedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'actioned_by');
+    }
+
+    /**
+     * Get compensatory leave records associated with this request.
+     */
+    public function compensatoryRecords(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CompensatoryLeaveRecord::class, 'leave_request_id');
     }
 }
