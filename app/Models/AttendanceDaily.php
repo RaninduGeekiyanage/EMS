@@ -55,7 +55,7 @@ final class AttendanceDaily extends Model
     protected function casts(): array
     {
         return [
-            'attendance_date' => 'date',
+            'attendance_date' => 'date:Y-m-d',
             'check_in' => 'datetime:Y-m-d H:i:s',
             'check_out' => 'datetime:Y-m-d H:i:s',
             'worked_hours' => 'float',

@@ -88,8 +88,8 @@ final class Employee extends Model
         return [
             'nic' => 'encrypted',
             'employment_type' => EmploymentType::class,
-            'date_of_birth' => 'date',
-            'date_of_joining' => 'date',
+            'date_of_birth' => 'date:Y-m-d',
+            'date_of_joining' => 'date:Y-m-d',
         ];
     }
 

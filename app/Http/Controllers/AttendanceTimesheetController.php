@@ -240,6 +240,7 @@ final class AttendanceTimesheetController extends Controller
         $restDays = 0;
         $holidayDays = 0;
         $leaveDays = 0;
+        $halfDays = 0;
         $missingPunchesCount = 0;
         $lateDaysCount = 0;
         $manualAdjustedCount = 0;
@@ -312,8 +313,8 @@ final class AttendanceTimesheetController extends Controller
                 $earlyMinutes = (int) $daily->early_departure_minutes;
                 $otHours = (float) $daily->ot_hours;
                 $doubleOtHours = (float) $daily->double_ot_hours;
-                $checkIn = $daily->check_in;
-                $checkOut = $daily->check_out;
+                $checkIn = $daily->check_in?->format('Y-m-d H:i:s');
+                $checkOut = $daily->check_out?->format('Y-m-d H:i:s');
                 $isManual = (bool) $daily->is_manual;
                 $manualReason = $daily->manual_reason;
                 $anomalies = $daily->anomalies ?? [];
@@ -352,6 +353,7 @@ final class AttendanceTimesheetController extends Controller
                 'rest_day' => $restDays++,
                 'holiday' => $holidayDays++,
                 'leave' => $leaveDays++,
+                'half_day' => $halfDays++,
                 default => null,
             };
 
@@ -394,6 +396,7 @@ final class AttendanceTimesheetController extends Controller
         $summary = [
             'total_calendar_days' => count($days),
             'present_days' => $presentDays,
+            'half_days' => $halfDays,
             'absent_days' => $absentDays,
             'rest_days' => $restDays,
             'holiday_days' => $holidayDays,

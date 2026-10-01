@@ -143,6 +143,27 @@ final class Shift extends Model
     }
 
     /**
+     * Get the sliding punch window for 2nd half check-in when employee arrives for afternoon/2nd-half shift.
+     *
+     * @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon}|null
+     */
+    public function getSecondHalfInWindow(\Carbon\CarbonInterface $date): ?array
+    {
+        $secondHalfTime = $this->second_half_start_time ?? $this->first_half_end_time;
+        if (empty($secondHalfTime)) {
+            return null;
+        }
+
+        $halfStart = \Carbon\Carbon::parse($date->toDateString() . ' ' . $secondHalfTime);
+
+        // Allow 60 mins before 2nd half start, and up to 120 mins after
+        return [
+            $halfStart->copy()->subMinutes(60),
+            $halfStart->copy()->addMinutes(120),
+        ];
+    }
+
+    /**
      * Get the assignments for this shift.
      *
      * @return HasMany<ShiftAssignment, $this>

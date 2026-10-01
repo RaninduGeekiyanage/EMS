@@ -86,5 +86,9 @@ final class ShiftWindowTest extends TestCase
         [$outStart, $outEnd] = $shift->getOutWindow($date);
         $this->assertSame('2026-09-21 16:00:00', $outStart->toDateTimeString());
         $this->assertSame('2026-09-21 19:30:00', $outEnd->toDateTimeString());
+
+        [$halfStart, $halfEnd] = $shift->getSecondHalfInWindow($date);
+        $this->assertSame('2026-09-21 12:30:00', $halfStart->toDateTimeString());
+        $this->assertSame('2026-09-21 15:30:00', $halfEnd->toDateTimeString());
     }
 }

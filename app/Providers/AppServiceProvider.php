@@ -48,5 +48,14 @@ class AppServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\Gate::before(function ($user, string $ability): ?bool {
             return $user->isSuperAdmin() ? true : null;
         });
+
+        // Prevent Carbon and Date objects from converting to UTC when serializing to JSON.
+        // Preserves local Asia/Colombo time everywhere across the application.
+        $localFormat = fn (\DateTimeInterface $date): string => $date->format('Y-m-d H:i:s');
+        \Illuminate\Support\Facades\Date::serializeUsing($localFormat);
+        \Illuminate\Support\Carbon::serializeUsing($localFormat);
+        \Carbon\Carbon::serializeUsing($localFormat);
+        \Carbon\CarbonImmutable::serializeUsing($localFormat);
     }
+
 }

@@ -11,6 +11,7 @@ use App\Models\Department;
 use App\Models\Employee;
 use App\Models\PayrollRun;
 use App\Models\PublicHoliday;
+use App\Models\RosterEntry;
 use App\Models\Shift;
 use App\Models\ShiftAssignment;
 use App\Models\Tenant;
@@ -568,6 +569,35 @@ final class AttendanceProcessingTest extends TestCase
         );
     }
 
+    public function test_timesheet_and_daily_preserve_local_time_without_utc_translation(): void
+    {
+        AttendanceDaily::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'attendance_date' => '2026-06-15',
+            'shift_id' => $this->standardShift->id,
+            'check_in' => '2026-06-15 08:35:00',
+            'check_out' => '2026-06-15 17:35:00',
+            'status' => 'present',
+            'worked_hours' => 9.00,
+            'is_manual' => false,
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->get('/attendance/timesheet?employee_id=' . $this->employee->id . '&month=2026-06');
+
+        $response->assertOk();
+        $response->assertInertia(function ($page) {
+            $days = $page->toArray()['props']['timesheetDays'];
+            $day15 = collect($days)->firstWhere('date', '2026-06-15');
+            $this->assertNotNull($day15);
+            $this->assertEquals('2026-06-15 08:35:00', $day15['check_in']);
+            $this->assertEquals('2026-06-15 17:35:00', $day15['check_out']);
+            $this->assertFalse(str_ends_with((string) $day15['check_in'], 'Z'));
+            $this->assertFalse(str_ends_with((string) $day15['check_out'], 'Z'));
+        });
+    }
+
     public function test_can_export_monthly_timesheet_csv(): void
     {
         $response = $this->actingAs($this->manager)
@@ -680,4 +710,179 @@ final class AttendanceProcessingTest extends TestCase
         $this->assertEquals('missing_punch', $daily->status);
         $this->assertFalse($daily->is_manual);
     }
+
+    public function test_pairs_mid_day_arrival_as_check_in_and_detects_unapproved_half_day(): void
+    {
+        $date = Carbon::parse('2026-09-09'); // Wednesday
+
+        // Create 8H-M shift (07:00 - 15:00) with in window ending at 09:00
+        $shift8HM = Shift::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => '8H-M',
+            'code' => '8HM-TEST',
+            'shift_type' => 'rotational',
+            'start_time' => '07:00',
+            'end_time' => '15:00',
+            'break_minutes' => 60,
+            'grace_minutes' => 10,
+            'ot_threshold_minutes' => 480,
+            'in_window_before_start' => 60,
+            'in_window_after_start' => 120, // 09:00
+            'out_window_before_end' => 120, // 13:00
+            'out_window_after_end' => 180,
+            'first_half_end_time' => '11:00',
+            'second_half_start_time' => '11:30',
+            'is_active' => true,
+        ]);
+
+        \App\Models\ShiftAssignment::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'shift_id' => $shift8HM->id,
+            'effective_from' => '2026-09-01',
+            'is_active' => true,
+        ]);
+
+        // Punches: 10:59 AM and 15:11 (3:11 PM)
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-09 10:59:00',
+            'punch_type' => 'auto',
+            'source' => 'import',
+        ]);
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-09 15:11:00',
+            'punch_type' => 'auto',
+            'source' => 'import',
+        ]);
+
+        $service = app(AttendanceProcessingService::class);
+        $result = $service->processDate($date, $this->employee->id, null, true, $this->tenant->id);
+
+        $this->assertEquals(1, $result['processed']);
+        $this->assertEquals(0, $result['missing_punch']);
+        $this->assertEquals(1, $result['half_day']);
+
+        $daily = AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-09-09')
+            ->first();
+
+        $this->assertNotNull($daily);
+        // Check-in must be 10:59 AM, check-out must be 15:11
+        $this->assertSame('2026-09-09 10:59:00', $daily->check_in?->toDateTimeString());
+        $this->assertSame('2026-09-09 15:11:00', $daily->check_out?->toDateTimeString());
+        $this->assertSame('half_day', $daily->status);
+        $this->assertGreaterThan(3.5, $daily->worked_hours);
+        $this->assertSame(239, $daily->late_minutes); // 07:00 to 10:59 = 239m late
+
+        // Must have UNAPPROVED_HALF_DAY anomaly
+        $hasUnapprovedAnomaly = collect($daily->anomalies)->contains('type', 'UNAPPROVED_HALF_DAY');
+        $this->assertTrue($hasUnapprovedAnomaly, 'Expected UNAPPROVED_HALF_DAY anomaly to be flagged');
+    }
+
+    public function test_overnight_punch_pairing_across_holiday_and_prevents_next_day_missing_punch(): void
+    {
+        $holiday = PublicHoliday::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Binara Full Moon Poya Day',
+            'holiday_date' => '2026-09-17',
+            'type' => 'poya',
+        ]);
+
+        $nightShift = Shift::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => '8H-N',
+            'code' => '8HN',
+            'shift_type' => 'regular',
+            'start_time' => '23:00:00',
+            'end_time' => '07:00:00',
+            'is_night_shift' => true,
+            'break_minutes' => 60,
+            'in_window_before_start' => 60,
+            'in_window_after_start' => 120,
+            'out_window_before_end' => 120,
+            'out_window_after_end' => 180,
+            'is_active' => true,
+        ]);
+
+        $dayShift = Shift::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => '8H-M',
+            'code' => '8HM',
+            'shift_type' => 'regular',
+            'start_time' => '07:00:00',
+            'end_time' => '15:00:00',
+            'is_night_shift' => false,
+            'break_minutes' => 60,
+            'in_window_before_start' => 60,
+            'in_window_after_start' => 120,
+            'out_window_before_end' => 120,
+            'out_window_after_end' => 180,
+            'is_active' => true,
+        ]);
+
+        // Scheduled day shift on both days in roster
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'shift_id' => $dayShift->id,
+            'roster_date' => '2026-09-17',
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+        RosterEntry::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'shift_id' => $dayShift->id,
+            'roster_date' => '2026-09-18',
+            'schedule_type' => 'shift',
+            'status' => 'published',
+        ]);
+
+        // Biometric punches: Night arrival on holiday 17th, checkout on morning 18th
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-17 22:25:00',
+            'punch_type' => 'auto',
+            'source' => 'import',
+        ]);
+        AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-18 07:10:00',
+            'punch_type' => 'auto',
+            'source' => 'import',
+        ]);
+
+        $service = app(AttendanceProcessingService::class);
+        $service->processDate(Carbon::parse('2026-09-17'), $this->employee->id, null, true, $this->tenant->id);
+        $service->processDate(Carbon::parse('2026-09-18'), $this->employee->id, null, true, $this->tenant->id);
+
+        $daily17 = AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-09-17')
+            ->first();
+
+        $daily18 = AttendanceDaily::where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-09-18')
+            ->first();
+
+        $this->assertNotNull($daily17);
+        $this->assertSame('2026-09-17 22:25:00', $daily17->check_in?->toDateTimeString());
+        $this->assertSame('2026-09-18 07:10:00', $daily17->check_out?->toDateTimeString());
+        $this->assertSame('present', $daily17->status);
+        $this->assertEquals($nightShift->id, $daily17->shift_id);
+        $this->assertGreaterThan(7.0, $daily17->worked_hours);
+        $this->assertGreaterThan(0.0, $daily17->double_ot_hours);
+
+        $this->assertNotNull($daily18);
+        $this->assertNull($daily18->check_in);
+        $this->assertNull($daily18->check_out);
+        $this->assertSame('absent', $daily18->status);
+        $this->assertEquals(0.0, $daily18->worked_hours);
+    }
 }
+

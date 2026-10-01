@@ -454,12 +454,33 @@ export default function Daily({
         }, 1200);
     };
 
+    const toLocalDatetimeInput = (dateTimeStr?: string | null): string => {
+        if (!dateTimeStr) return '';
+        if (dateTimeStr.endsWith('Z')) {
+            const d = new Date(dateTimeStr);
+            if (isNaN(d.getTime())) return '';
+            const formatter = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Colombo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            });
+            const parts = formatter.formatToParts(d);
+            const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+            return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
+        }
+        return dateTimeStr.replace(' ', 'T').substring(0, 16);
+    };
+
     // Open Adjustment Modal
     const openAdjustModal = (rec: AttendanceDailyRecord) => {
         setAdjustModalRecord(rec);
         adjustForm.setData({
-            check_in: rec.check_in ? rec.check_in.replace(' ', 'T').substring(0, 16) : '',
-            check_out: rec.check_out ? rec.check_out.replace(' ', 'T').substring(0, 16) : '',
+            check_in: toLocalDatetimeInput(rec.check_in),
+            check_out: toLocalDatetimeInput(rec.check_out),
             status: rec.status,
             manual_reason: rec.manual_reason || '',
         });

@@ -11,7 +11,9 @@ use App\Models\Employee;
 use App\Models\LeaveRequest;
 use App\Models\PayrollRun;
 use App\Models\PublicHoliday;
+use App\Models\RosterEntry;
 use App\Models\Shift;
+use App\Models\ShiftAssignment;
 use App\Models\Tenant;
 use App\Models\User;
 use Carbon\Carbon;
@@ -124,13 +126,25 @@ final class AttendanceProcessingService
                     $firstPunch = $candidatePunches->first();
 
                     if ($firstPunch !== null) {
-                        $shift = $this->autoDetectShiftForPunch($tenantId, $date, Carbon::parse($firstPunch->punch_datetime));
+                        $shift = $this->autoDetectShiftForPunch($tenantId, $date, Carbon::parse($firstPunch->punch_datetime), $employee);
                     }
                 }
 
                 if ($existing && $existing->is_manual && ! $overwriteManual) {
                     // Reconcile raw biometric punches so they don't remain dangling/unprocessed
                     $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
+                    if ($punches->isEmpty() && ($tenantSettings['auto_detect_shift'] ?? true)) {
+                        $unconsumed = $this->getPunchesForDate($tenantId, $employee, $date, null);
+                        $firstUnconsumed = $unconsumed->first();
+                        if ($firstUnconsumed !== null) {
+                            $detected = $this->autoDetectShiftForPunch($tenantId, $date, Carbon::parse($firstUnconsumed->punch_datetime), $employee);
+                            if ($detected !== null) {
+                                $shift = $detected;
+                                $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
+                            }
+                        }
+                    }
+
                     if ($punches->isNotEmpty()) {
                         AttendanceLog::whereIn('id', $punches->pluck('id'))
                             ->where('is_processed', false)
@@ -168,11 +182,31 @@ final class AttendanceProcessingService
                     continue;
                 }
 
-                // Resolve applicable management rule (shift-level or tenant default)
-                $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
-
                 // Query punches within window
                 $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
+
+                // If scheduled shift produced zero punches in its window, but unconsumed candidate punches exist on this date (shift swap or unscheduled shift work)
+                if ($punches->isEmpty() && ($tenantSettings['auto_detect_shift'] ?? true)) {
+                    $unconsumedPunches = $this->getPunchesForDate($tenantId, $employee, $date, null);
+                    $firstPunch = $unconsumedPunches->first();
+
+                    if ($firstPunch !== null) {
+                        $detectedShift = $this->autoDetectShiftForPunch(
+                            $tenantId,
+                            $date,
+                            Carbon::parse($firstPunch->punch_datetime),
+                            $employee
+                        );
+
+                        if ($detectedShift !== null && ($shift === null || $detectedShift->id !== $shift->id)) {
+                            $shift = $detectedShift;
+                            $punches = $this->getPunchesForDate($tenantId, $employee, $date, $shift);
+                        }
+                    }
+                }
+
+                // Resolve applicable management rule (shift-level or tenant default)
+                $rule = AttendanceRule::resolveRuleForShift($shift, $tenantId);
 
                 // Calculate attendance record
                 $calculatedData = $this->calculateDailyAttendance(
@@ -668,7 +702,8 @@ final class AttendanceProcessingService
         // 5. Overtime Calculation via Engine (applying pre-shift arrival OT policy)
         $earlyArrivalMinutes = 0;
         $hoursForOt = $workedHours;
-        if ($shift !== null && ! $allowEarlyInAsOt) {
+        $isEarlyInAsOt = $allowEarlyInAsOt || (bool) ($shift?->early_in_as_ot ?? false);
+        if ($shift !== null && ! $isEarlyInAsOt) {
             $shiftStart = Carbon::parse($date->toDateString().' '.$shift->start_time);
             if ($checkIn->lt($shiftStart)) {
                 $earlyArrivalMinutes = (int) abs($shiftStart->diffInMinutes($checkIn));
@@ -680,6 +715,15 @@ final class AttendanceProcessingService
 
         // 6. Collect Structured Anomalies
         $anomalies = [];
+        if ($earlyArrivalMinutes > 0) {
+            $anomalies[] = [
+                'type' => 'EARLY_ARRIVAL',
+                'label' => "Early Arrival ({$earlyArrivalMinutes}m)",
+                'minutes' => $earlyArrivalMinutes,
+                'color' => '#60A5FA', // blue-400
+                'severity' => 'low',
+            ];
+        }
         if ($lateMinutes > 0) {
             $anomalies[] = [
                 'type' => 'LATE_ARRIVAL',
@@ -725,8 +769,16 @@ final class AttendanceProcessingService
         if ($approvedLeave) {
             $isPaid = (bool) ($approvedLeave->leaveType?->is_paid ?? true);
         } elseif ($status === 'half_day' && ! $isScheduledHalfDay) {
-            // Unauthorized half day (worked less than standard day without approved leave)
+            // Unauthorized half day (worked half day without approved leave or scheduled half-day shift)
             $isPaid = false;
+            $anomalies[] = [
+                'type' => 'UNAPPROVED_HALF_DAY',
+                'label' => 'Unapproved Half Day',
+                'minutes' => $lateMinutes,
+                'color' => '#EF4444', // red-500
+                'severity' => 'high',
+                'note' => 'Worked half-day duration without approved leave. Requires managerial/HR approval or roster adjustment.',
+            ];
         }
 
         return [
@@ -815,6 +867,36 @@ final class AttendanceProcessingService
 
             $matchedIn = $inCandidates->first();
 
+            // Tier 2.1: If no normal start candidate found, check if employee punched for 2nd half
+            if (! $matchedIn) {
+                $secondHalfWindow = $shift->getSecondHalfInWindow($date);
+                if ($secondHalfWindow !== null) {
+                    [$halfInStart, $halfInEnd] = $secondHalfWindow;
+                    $halfInCandidates = $punches->filter(function (AttendanceLog $log) use ($halfInStart, $halfInEnd) {
+                        $time = Carbon::parse($log->punch_datetime);
+                        return $time->gte($halfInStart) && $time->lte($halfInEnd);
+                    })->sortBy('punch_datetime');
+
+                    $matchedIn = $halfInCandidates->first();
+                }
+            }
+
+            // Tier 2.1b: Early arrival on non-rotational shift
+            // If employee arrived earlier than standard in-window (e.g. 06:00 AM for 08:30 AM shift),
+            // match early arrival punch as Check-In when early_in_as_att_in is enabled or when no standard window candidate exists
+            if ($shift->shift_type !== 'rotational' && ! $shift->is_night_shift) {
+                $earlyCandidates = $punches->filter(function (AttendanceLog $log) use ($inStartGrace, $outStartGrace) {
+                    $time = Carbon::parse($log->punch_datetime);
+                    return $time->lt($inStartGrace) && $time->lt($outStartGrace);
+                })->sortBy('punch_datetime');
+
+                if ($earlyCandidates->isNotEmpty()) {
+                    if (($shift->early_in_as_att_in ?? true) || ! $matchedIn) {
+                        $matchedIn = $earlyCandidates->first();
+                    }
+                }
+            }
+
             if ($matchedIn) {
                 $inTime = Carbon::parse($matchedIn->punch_datetime);
 
@@ -838,7 +920,20 @@ final class AttendanceProcessingService
                 return [$inTime, null, true];
             }
 
-            // If no In candidate found in window, check if Out candidate exists
+            // Tier 2.2: If employee has multiple punches separated by work time, never discard the first punch!
+            // When multiple punches exist on this date, pair the earliest and latest as In and Out
+            // (e.g. employee arrived mid-day without a predefined 2nd half window and left at shift end)
+            if ($punches->count() >= 2) {
+                $sorted = $punches->sortBy('punch_datetime')->values();
+                $earliest = Carbon::parse($sorted->first()->punch_datetime);
+                $latest = Carbon::parse($sorted->last()->punch_datetime);
+
+                if (abs($latest->diffInMinutes($earliest)) >= 30) {
+                    return [$earliest, $latest, false];
+                }
+            }
+
+            // If only single punch exists and it's near/in Out window, treat as Out-only
             $outOnlyCandidates = $punches->filter(function (AttendanceLog $log) use ($outStartGrace) {
                 $time = Carbon::parse($log->punch_datetime);
                 return $time->gte($outStartGrace);
@@ -895,30 +990,27 @@ final class AttendanceProcessingService
                 $consumedCheckoutCutoff = $prevCheckOut;
             }
         } else {
-            $prevSchedule = $this->shiftService->resolveDailySchedule($employee, $prevDate);
-            $prevShift = $prevSchedule['shift'] ?? null;
-            if ($prevShift && $prevShift->is_night_shift) {
-                $prevInPunch = AttendanceLog::where('tenant_id', $tenantId)
+            // Check if previous date had a late evening in-punch or night shift to avoid morning checkout leakage
+            $prevInPunch = AttendanceLog::where('tenant_id', $tenantId)
+                ->where('employee_id', $employeeId)
+                ->whereBetween('punch_datetime', [
+                    Carbon::parse($prevDate->toDateString().' 18:00:00'),
+                    Carbon::parse($dateStr.' 04:00:00'),
+                ])
+                ->first();
+
+            if ($prevInPunch) {
+                $morningOutPunch = AttendanceLog::where('tenant_id', $tenantId)
                     ->where('employee_id', $employeeId)
                     ->whereBetween('punch_datetime', [
-                        Carbon::parse($prevDate->toDateString().' 18:00:00'),
-                        Carbon::parse($dateStr.' 04:00:00'),
+                        Carbon::parse($dateStr.' 04:00:01'),
+                        Carbon::parse($dateStr.' 12:00:00'),
                     ])
+                    ->orderByDesc('punch_datetime')
                     ->first();
 
-                if ($prevInPunch) {
-                    $morningOutPunch = AttendanceLog::where('tenant_id', $tenantId)
-                        ->where('employee_id', $employeeId)
-                        ->whereBetween('punch_datetime', [
-                            Carbon::parse($dateStr.' 04:00:01'),
-                            Carbon::parse($dateStr.' 12:00:00'),
-                        ])
-                        ->orderByDesc('punch_datetime')
-                        ->first();
-
-                    if ($morningOutPunch) {
-                        $consumedCheckoutCutoff = Carbon::parse($morningOutPunch->punch_datetime);
-                    }
+                if ($morningOutPunch) {
+                    $consumedCheckoutCutoff = Carbon::parse($morningOutPunch->punch_datetime);
                 }
             }
         }
@@ -927,7 +1019,16 @@ final class AttendanceProcessingService
             [$inStart, $inEnd] = $shift->getInWindow($date);
             [$outStart, $outEnd] = $shift->getOutWindow($date);
 
-            $windowStart = $inStart->copy()->subMinutes(60);
+            // For non-rotational day shifts (regular, half_day, flexible), the employee has a single fixed schedule
+            // on this duty roster date. Early morning arrivals on that date (e.g. 06:00 AM for 08:30 AM shift)
+            // must not be clipped by a narrow window.
+            // For rotational and night shifts, keep sliding windows to avoid cross-shift punch collision.
+            if ($shift->shift_type !== 'rotational' && ! $shift->is_night_shift) {
+                $windowStart = Carbon::parse($dateStr . ' 00:00:00');
+            } else {
+                $windowStart = $inStart->copy()->subMinutes(60);
+            }
+
             $windowEnd = $outEnd->copy()->addMinutes(180);
 
             $query = AttendanceLog::query()
@@ -936,10 +1037,29 @@ final class AttendanceProcessingService
                 ->whereBetween('punch_datetime', [$windowStart, $windowEnd]);
         } else {
             // No shift assigned (e.g. rest day, holiday, or off day)
-            $query = AttendanceLog::query()
-                ->where('tenant_id', $tenantId)
+            // If employee swiped late in the evening (>= 18:00), allow query window to extend into morning of D+1 (up to 12:00:00)
+            $hasLateEvening = AttendanceLog::where('tenant_id', $tenantId)
                 ->where('employee_id', $employeeId)
-                ->whereDate('punch_datetime', $dateStr);
+                ->whereBetween('punch_datetime', [
+                    Carbon::parse($dateStr.' 18:00:00'),
+                    Carbon::parse($dateStr.' 23:59:59'),
+                ])
+                ->exists();
+
+            if ($hasLateEvening) {
+                $query = AttendanceLog::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('employee_id', $employeeId)
+                    ->whereBetween('punch_datetime', [
+                        Carbon::parse($dateStr.' 00:00:00'),
+                        Carbon::parse($dateStr.' 12:00:00')->addDay(),
+                    ]);
+            } else {
+                $query = AttendanceLog::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('employee_id', $employeeId)
+                    ->whereDate('punch_datetime', $dateStr);
+            }
         }
 
         if ($consumedCheckoutCutoff !== null) {
@@ -1313,25 +1433,70 @@ final class AttendanceProcessingService
 
     /**
      * Auto-detect the best matching active company shift based on punch arrival time.
+     * Prioritizes shifts associated with the employee's roster or assignments if provided.
      */
-    public function autoDetectShiftForPunch(string $tenantId, CarbonInterface $date, CarbonInterface $punchTime): ?Shift
-    {
+    public function autoDetectShiftForPunch(
+        string $tenantId,
+        CarbonInterface $date,
+        CarbonInterface $punchTime,
+        ?Employee $employee = null
+    ): ?Shift {
         $shifts = Shift::where('tenant_id', $tenantId)->where('is_active', true)->get();
-        $bestShift = null;
-        $smallestDiff = null;
+        if ($shifts->isEmpty()) {
+            return null;
+        }
 
-        foreach ($shifts as $candidate) {
+        $preferredShiftIds = collect();
+        if ($employee !== null) {
+            $rosterShiftIds = RosterEntry::where('employee_id', $employee->id)
+                ->whereNotNull('shift_id')
+                ->pluck('shift_id');
+            $assignedShiftIds = ShiftAssignment::where('employee_id', $employee->id)
+                ->pluck('shift_id');
+            $preferredShiftIds = $rosterShiftIds->merge($assignedShiftIds)->filter()->unique();
+        }
+
+        $evaluateShift = function (Shift $candidate) use ($date, $punchTime): ?int {
             [$inStart, $inEnd] = $candidate->getInWindow($date);
             $inStartGrace = $inStart->copy()->subMinutes(30);
             $inEndGrace = $inEnd->copy()->addMinutes(30);
 
             if ($punchTime->gte($inStartGrace) && $punchTime->lte($inEndGrace)) {
                 $shiftStart = Carbon::parse($date->toDateString().' '.$candidate->start_time);
-                $diff = abs($punchTime->diffInMinutes($shiftStart));
-                if ($smallestDiff === null || $diff < $smallestDiff) {
+                return (int) abs($punchTime->diffInMinutes($shiftStart));
+            }
+
+            return null;
+        };
+
+        // Pass 1: Prioritize employee's assigned or rostered shift family (e.g. 8HM, 8HE, 8HN)
+        if ($preferredShiftIds->isNotEmpty()) {
+            $preferredCandidates = $shifts->whereIn('id', $preferredShiftIds);
+            $bestPreferred = null;
+            $smallestDiff = null;
+
+            foreach ($preferredCandidates as $candidate) {
+                $diff = $evaluateShift($candidate);
+                if ($diff !== null && ($smallestDiff === null || $diff < $smallestDiff)) {
                     $smallestDiff = $diff;
-                    $bestShift = $candidate;
+                    $bestPreferred = $candidate;
                 }
+            }
+
+            if ($bestPreferred !== null) {
+                return $bestPreferred;
+            }
+        }
+
+        // Pass 2: Fallback across all active company shifts
+        $bestShift = null;
+        $smallestDiff = null;
+
+        foreach ($shifts as $candidate) {
+            $diff = $evaluateShift($candidate);
+            if ($diff !== null && ($smallestDiff === null || $diff < $smallestDiff)) {
+                $smallestDiff = $diff;
+                $bestShift = $candidate;
             }
         }
 

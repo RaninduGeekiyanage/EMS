@@ -55,9 +55,9 @@ final class ShiftSwapRequest extends Model
     protected function casts(): array
     {
         return [
-            'shift_date' => 'date',
-            'target_date' => 'date',
-            'approved_at' => 'datetime',
+            'shift_date' => 'date:Y-m-d',
+            'target_date' => 'date:Y-m-d',
+            'approved_at' => 'datetime:Y-m-d H:i:s',
             'metadata' => 'array',
         ];
     }

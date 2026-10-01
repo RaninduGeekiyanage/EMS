@@ -209,4 +209,75 @@ final class AttendanceWindowProcessingTest extends TestCase
         $this->assertEquals(1, $reprocessResult['present']);
         $this->assertEquals(1, $reprocessResult['missing_punch']);
     }
+
+    public function test_early_morning_punch_on_regular_shift_pairs_as_check_in_and_is_present(): void
+    {
+        $date = Carbon::parse('2026-09-04'); // Friday
+
+        // Custom shift matching General Day Shift (08:30 - 17:00, in_window_before_start = 60)
+        $genShift = Shift::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'General Day Shift',
+            'code' => 'GEN-DAY',
+            'shift_type' => 'regular',
+            'start_time' => '08:30',
+            'end_time' => '17:00',
+            'break_minutes' => 60,
+            'working_minutes' => 450, // 7.5h
+            'in_window_before_start' => 60,   // Window [07:30 .. 10:30]
+            'in_window_after_start' => 120,
+            'out_window_before_end' => 120,
+            'out_window_after_end' => 180,
+            'early_in_as_att_in' => true,
+            'early_in_as_ot' => false,
+            'is_night_shift' => false,
+            'is_active' => true,
+        ]);
+
+        $this->employee->update(['default_shift_id' => $genShift->id]);
+
+        // Raw punch 1: 06:00 AM (150 minutes early, outside standard 60-min in-window)
+        $inLog = AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-04 06:00:00',
+            'punch_type' => 'auto',
+            'device_id' => 'DEV01',
+            'source' => 'biometric_device',
+        ]);
+
+        // Raw punch 2: 05:21 PM (17:21:00)
+        $outLog = AttendanceLog::create([
+            'tenant_id' => $this->tenant->id,
+            'employee_id' => $this->employee->id,
+            'punch_datetime' => '2026-09-04 17:21:00',
+            'punch_type' => 'auto',
+            'device_id' => 'DEV01',
+            'source' => 'biometric_device',
+        ]);
+
+        /** @var AttendanceProcessingService $service */
+        $service = app(AttendanceProcessingService::class);
+        $result = $service->processDate($date, $this->employee->id);
+
+        $this->assertEquals(1, $result['processed']);
+        $this->assertEquals(1, $result['present']);
+        $this->assertEquals(0, $result['missing_punch']);
+
+        $daily = AttendanceDaily::where('tenant_id', $this->tenant->id)
+            ->where('employee_id', $this->employee->id)
+            ->whereDate('attendance_date', '2026-09-04')
+            ->first();
+
+        $this->assertNotNull($daily);
+        $this->assertEquals('present', $daily->status);
+        $this->assertEquals('2026-09-04 06:00:00', $daily->check_in->toDateTimeString());
+        $this->assertEquals('2026-09-04 17:21:00', $daily->check_out->toDateTimeString());
+
+        // Verify both raw logs are marked as processed
+        $inLog->refresh();
+        $outLog->refresh();
+        $this->assertTrue($inLog->is_processed);
+        $this->assertTrue($outLog->is_processed);
+    }
 }

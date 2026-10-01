@@ -50,7 +50,7 @@ final class EmployeePaymentInfo extends Model
             'basic_salary' => 'decimal:2',
             'daily_rate' => 'decimal:2',
             'hourly_rate' => 'decimal:2',
-            'effective_date' => 'date',
+            'effective_date' => 'date:Y-m-d',
         ];
     }
 

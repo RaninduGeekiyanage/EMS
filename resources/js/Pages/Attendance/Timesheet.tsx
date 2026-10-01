@@ -76,6 +76,7 @@ interface TimesheetDay {
 interface TimesheetSummary {
     total_calendar_days: number;
     present_days: number;
+    half_days?: number;
     absent_days: number;
     rest_days: number;
     holiday_days: number;
@@ -249,6 +250,27 @@ export default function Timesheet({
         });
     };
 
+    const toLocalDatetimeInput = (dateTimeStr?: string | null): string => {
+        if (!dateTimeStr) return '';
+        if (dateTimeStr.endsWith('Z')) {
+            const d = new Date(dateTimeStr);
+            if (isNaN(d.getTime())) return '';
+            const formatter = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Colombo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            });
+            const parts = formatter.formatToParts(d);
+            const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+            return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
+        }
+        return dateTimeStr.replace(' ', 'T').substring(0, 16);
+    };
+
     // Open Adjust modal (Atomic consistency with Daily Ledger)
     const openAdjustModal = (day: TimesheetDay) => {
         setAdjustModalDay(day);
@@ -256,8 +278,8 @@ export default function Timesheet({
             attendance_daily_id: day.daily_id || '',
             employee_id: selectedEmployee?.id || '',
             date: day.date,
-            check_in: day.check_in ? day.check_in.replace(' ', 'T').substring(0, 16) : '',
-            check_out: day.check_out ? day.check_out.replace(' ', 'T').substring(0, 16) : '',
+            check_in: toLocalDatetimeInput(day.check_in),
+            check_out: toLocalDatetimeInput(day.check_out),
             status: (day.status === 'unprocessed' || day.status === 'missing_punch') ? 'present' : day.status,
             manual_reason: day.manual_reason || '',
         });
@@ -317,12 +339,21 @@ export default function Timesheet({
                         Leave ({day.leave?.type || 'Approved'})
                     </span>
                 );
-            case 'half_day':
+            case 'half_day': {
+                const isUnapproved = day.anomalies?.some((a: any) => a.type === 'UNAPPROVED_HALF_DAY') || (!day.leave && !day.is_manual);
+                if (isUnapproved) {
+                    return (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1 shadow-sm" title="Unapproved Half Day: employee worked half-day duration without approved leave">
+                            <Clock className="w-3 h-3 text-rose-400" /> Half Day (Unapproved)
+                        </span>
+                    );
+                }
                 return (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center gap-1">
                         <Clock className="w-3 h-3" /> Half Day
                     </span>
                 );
+            }
             default:
                 return (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">

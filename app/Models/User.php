@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Traits\PreservesLocalTimeSerialization;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -15,7 +16,8 @@ class User extends Authenticatable
     use HasFactory, HasRoles {
         hasRole as spatieHasRole;
     }
-    use Notifiable;
+    use Notifiable, PreservesLocalTimeSerialization;
+
 
     /**
      * The attributes that are mass assignable.

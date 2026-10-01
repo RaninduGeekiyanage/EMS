@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 trait BelongsToTenant
 {
+    use PreservesLocalTimeSerialization;
+
     /**
      * Boot the BelongsToTenant trait for a model.
      */

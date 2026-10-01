@@ -1500,6 +1500,46 @@ export default function Index({ shifts, employees, stats }: Props) {
                                         </div>
                                     </div>
 
+                                    {/* 1st Half / 2nd Half Transition & Short Leave Thresholds */}
+                                    <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-3">
+                                        <div className="flex items-center gap-2">
+                                            <Clock className="w-3.5 h-3.5 text-sky-400" />
+                                            <span className="text-xs font-bold text-white uppercase tracking-wider">
+                                                Half-Day & Short Leave Cutoff Times
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                                                    1st Half End Time (Morning Half Cutoff)
+                                                </label>
+                                                <input
+                                                    type="time"
+                                                    value={shiftForm.data.first_half_end_time || ''}
+                                                    onChange={(e) => shiftForm.setData('first_half_end_time', e.target.value)}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                                                />
+                                                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                                                    Employees leaving before this are marked 1st half absent.
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                                                    2nd Half Start Time (Afternoon Half Arrival)
+                                                </label>
+                                                <input
+                                                    type="time"
+                                                    value={shiftForm.data.second_half_start_time || ''}
+                                                    onChange={(e) => shiftForm.setData('second_half_start_time', e.target.value)}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                                                />
+                                                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                                                    Late arrivals matching this window pair as 2nd half check-in.
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-3">
                                         <label className="flex items-center gap-3 cursor-pointer">
                                             <input

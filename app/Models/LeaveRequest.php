@@ -53,11 +53,11 @@ final class LeaveRequest extends Model
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
-            'end_date' => 'date',
+            'start_date' => 'date:Y-m-d',
+            'end_date' => 'date:Y-m-d',
             'days_count' => 'float',
             'is_half_day' => 'boolean',
-            'actioned_at' => 'datetime',
+            'actioned_at' => 'datetime:Y-m-d H:i:s',
         ];
     }
 
