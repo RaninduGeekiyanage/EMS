@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AccessControlController;
+use App\Http\Controllers\AttendanceAnomalyController;
 use App\Http\Controllers\AttendanceDailyController;
 use App\Http\Controllers\AttendanceImportController;
 use App\Http\Controllers\AttendanceLogController;
+use App\Http\Controllers\AttendanceRegularizationController;
 use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\AttendanceTimesheetController;
 use App\Http\Controllers\BiometricDeviceProfileController;
@@ -212,6 +214,17 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/attendance/logs', [AttendanceLogController::class, 'index'])->name('attendance.logs.index');
         Route::get('/attendance/logs/export/excel', [AttendanceLogController::class, 'exportExcel'])->name('attendance.logs.export.excel');
         Route::get('/attendance/logs/export/pdf', [AttendanceLogController::class, 'exportPdf'])->name('attendance.logs.export.pdf');
+
+        // M04: Attendance Regularizations, Exceptions Action Center & Overtime Approvals
+        Route::get('/attendance/regularizations', [AttendanceRegularizationController::class, 'index'])->name('attendance.regularizations.index');
+        Route::post('/attendance/regularizations', [AttendanceRegularizationController::class, 'store'])->name('attendance.regularizations.store');
+        Route::post('/attendance/regularizations/{regularization}/hod-action', [AttendanceRegularizationController::class, 'hodAction'])->name('attendance.regularizations.hod-action');
+        Route::post('/attendance/regularizations/{regularization}/hr-action', [AttendanceRegularizationController::class, 'hrAction'])->name('attendance.regularizations.hr-action');
+
+        Route::get('/attendance/anomalies', [AttendanceAnomalyController::class, 'index'])->name('attendance.anomalies.index');
+        Route::post('/attendance/daily/{attendanceDaily}/approve-ot', [AttendanceAnomalyController::class, 'approveOt'])->name('attendance.daily.approve-ot');
+        Route::post('/attendance/daily/{attendanceDaily}/resolve-anomaly', [AttendanceAnomalyController::class, 'resolveAnomaly'])->name('attendance.daily.resolve-anomaly');
+        Route::post('/attendance/timesheet/freeze', [AttendanceAnomalyController::class, 'freezePeriod'])->name('attendance.timesheet.freeze');
 
         // Leave Management & Statutory Entitlements
         Route::get('/leave/requests', [LeaveRequestController::class, 'index'])->name('leave.requests.index');

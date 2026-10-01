@@ -206,6 +206,16 @@ final class Employee extends Model
     }
 
     /**
+     * Get the attendance regularization requests for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<AttendanceRegularizationRequest, $this>
+     */
+    public function regularizationRequests(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(AttendanceRegularizationRequest::class, 'employee_id');
+    }
+
+    /**
      * Get the roster entries for the employee.
      *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany<RosterEntry, $this>

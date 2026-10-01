@@ -328,6 +328,48 @@ final class PermissionCatalog
             'description' => 'Manually edit attendance timestamps, approve overtime hours, and adjust no-pay statuses',
             'is_critical' => true,
         ],
+        'attendance.regularize_own' => [
+            'domain' => 'ams',
+            'name' => 'Submit Attendance Regularization',
+            'description' => 'Submit missing punch, unapproved half day, or outstation on-duty adjustment requests',
+            'is_critical' => false,
+        ],
+        'attendance.hod_approve_regularization' => [
+            'domain' => 'ams',
+            'name' => 'HOD Approve Regularizations',
+            'description' => 'Review and recommend punch regularizations and missing punch adjustments for team staff',
+            'is_critical' => false,
+        ],
+        'attendance.hr_confirm_regularization' => [
+            'domain' => 'ams',
+            'name' => 'HR Confirm Regularizations',
+            'description' => 'Final review, direct bypass, and punch ledger sync for attendance regularization requests',
+            'is_critical' => true,
+        ],
+        'attendance.hod_approve_ot' => [
+            'domain' => 'ams',
+            'name' => 'HOD Approve Overtime',
+            'description' => 'Review raw overtime hours and approve full or partial OT hours for team employees',
+            'is_critical' => true,
+        ],
+        'attendance.hr_confirm_ot' => [
+            'domain' => 'ams',
+            'name' => 'HR Confirm Overtime Hours',
+            'description' => 'Final sign-off, direct bypass, and lock on employee approved overtime hours for payroll',
+            'is_critical' => true,
+        ],
+        'attendance.period_freeze' => [
+            'domain' => 'ams',
+            'name' => 'Attendance Period Freeze & Lock',
+            'description' => 'Sign off on department attendance timesheets and lock monthly periods against edits',
+            'is_critical' => true,
+        ],
+        'hr.bypass_all' => [
+            'domain' => 'iam',
+            'name' => 'HR Master Direct Bypass',
+            'description' => 'Bypass any HOD approval stage and approve/reject requests directly without waiting for HOD review',
+            'is_critical' => true,
+        ],
 
         // Leave
         'leave.apply' => [

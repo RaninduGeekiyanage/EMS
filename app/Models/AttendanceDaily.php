@@ -39,7 +39,13 @@ final class AttendanceDaily extends Model
         'early_departure_minutes',
         'ot_hours',
         'double_ot_hours',
+        'approved_ot_hours',
+        'approved_double_ot_hours',
+        'ot_approval_status',
+        'ot_approved_by',
+        'ot_approval_remarks',
         'status',
+        'is_paid',
         'is_manual',
         'manual_reason',
         'manual_edited_by',
@@ -64,6 +70,9 @@ final class AttendanceDaily extends Model
             'early_departure_minutes' => 'integer',
             'ot_hours' => 'float',
             'double_ot_hours' => 'float',
+            'approved_ot_hours' => 'float',
+            'approved_double_ot_hours' => 'float',
+            'is_paid' => 'boolean',
             'is_manual' => 'boolean',
             'calculation_breakdown' => 'array',
             'anomalies' => 'array',
@@ -98,5 +107,15 @@ final class AttendanceDaily extends Model
     public function editor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'manual_edited_by');
+    }
+
+    /**
+     * Get the user who approved or actioned overtime for this attendance record.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function otApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'ot_approved_by');
     }
 }

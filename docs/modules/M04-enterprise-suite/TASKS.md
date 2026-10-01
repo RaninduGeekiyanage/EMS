@@ -1,15 +1,40 @@
 # M04: Master Implementation Task Checklist
 
 ## Phase 1: Attendance Exception, OT Approval & Regularization Engine (M04-A)
-- [ ] **M04-A01**: Create migration `create_attendance_regularization_requests_table` (supports missing punch, unapproved half day, outstation OD slips with 2-tier approval and HR bypass).
-- [ ] **M04-A02**: Implement `AttendanceRegularizationRequest` model with scopes, HOD/HR relationships, and status state machine.
-- [ ] **M04-A03**: Implement `AttendanceRegularizationService` (cut-off validation, anti-overlap, HOD recommendation, HR confirmation/bypass, punch ledger synchronization).
-- [ ] **M04-A04**: Create `AttendanceRegularizationController` with endpoints for employee submission, HOD review, HR direct bypass, and approval actions.
-- [ ] **M04-A05**: Create migration to add `approved_ot_hours`, `approved_double_ot_hours`, `ot_approval_status`, and `ot_approved_by` to `attendance_dailies`.
-- [ ] **M04-A06**: Implement Granular Overtime (OT) Approval Service & endpoints (HOD approves full OT or specific partial hours; HR confirms or directly overrides).
-- [ ] **M04-A07**: Add Attendance Anomaly Resolution endpoints (`AttendanceAnomalyController`) with 1-click Paid Half Day waiver, Retro-Leave conversion, or No-Pay confirmation.
-- [ ] **M04-A08**: Build UI `resources/js/Pages/Attendance/Anomalies.tsx` (Exception Action Center with OT approval modal and regularization drawers).
-- [ ] **M04-A09**: Implement Monthly Attendance Period Freeze & Sign-Off (`/attendance/timesheet/freeze`) with HOD team sign-off and HR final period lock.
+- [x] **M04-A01**: Create migration `create_attendance_regularization_requests_table` (supports missing punch, unapproved half day, outstation OD slips with 2-tier approval and HR bypass).
+  - *Completed*: Created `2026_10_01_000001_create_attendance_regularization_requests_table.php` with ULID PK, tenant isolation, request types (`missing_punch`, `unapproved_half_day`, `on_duty_gate_pass`, `overtime_claim`), 2-tier lifecycle (`pending_hod`, `pending_hr`, `approved`, `rejected`), soft deletes, and MySQL 64-char identifier safe indexes (`idx_reg_tenant`, `idx_reg_status`, `idx_reg_date`, `idx_reg_emp_date`).
+- [x] **M04-A02**: Implement `AttendanceRegularizationRequest` model with scopes, HOD/HR relationships, and status state machine.
+  - *Completed*: Implemented `App\Models\AttendanceRegularizationRequest` with `BelongsToTenant`, `HasUlids`, `SoftDeletes`, scopes (`pendingHod`, `pendingHr`, `approved`, `rejected`, `forDateRange`, `forEmployee`), and state machine helpers (`canBeActionedByHod`, `canBeActionedByHr`). Also created `AttendancePeriodLock` model and updated `AttendanceDaily` and `Employee` relations.
+- [x] **M04-A03**: Implement `AttendanceRegularizationService` (cut-off validation, anti-overlap, HOD recommendation, HR confirmation/bypass, punch ledger synchronization).
+  - *Completed*: Built `App\Services\AttendanceRegularizationService` enforcing:
+    1. Cut-off freeze validation (`isPeriodLocked` prevents submissions in locked HR periods).
+    2. Anti-overlap validation (prevents duplicate active regularization requests for the same employee and date).
+    3. Time order sanity checks (check-out after check-in).
+    4. Dynamic approval routing: Auto-routes to HOD if appointed and permitted (`attendance.hod_approve_regularization`), otherwise auto-escalates directly to HR (`pending_hr`).
+    5. Punch ledger synchronization upon approval via `adjustDailyRecord`, clearing anomalies and setting `is_paid = true`.
+- [x] **M04-A04**: Create `AttendanceRegularizationController` with endpoints for employee submission, HOD review, HR direct bypass, and approval actions.
+  - *Completed*: Built `AttendanceRegularizationController` with FormRequests (`StoreRegularizationRequest`, `ActionRegularizationRequest`). Provides endpoints for index listing, submission, HOD action (`/hod-action`), and HR action / bypass (`/hr-action`).
+- [x] **M04-A05**: Create migration to add `approved_ot_hours`, `approved_double_ot_hours`, `ot_approval_status`, and `ot_approved_by` to `attendance_daily`.
+  - *Completed*: Created `2026_10_01_000002_add_ot_approval_and_paid_flags_to_attendance_daily_table.php` adding `approved_ot_hours`, `approved_double_ot_hours`, `ot_approval_status`, `ot_approved_by`, `ot_approval_remarks`, and explicit `is_paid` boolean flag.
+- [x] **M04-A06**: Implement Granular Overtime (OT) Approval Service & endpoints (HOD approves full OT or specific partial hours; HR confirms or directly overrides).
+  - *Completed*: Implemented `approveOvertime()` supporting `'approve_all'`, `'partial'`, and `'reject'` modes with mandatory remarks for overrides and dual-tier status (`hod_approved` vs `hr_confirmed`). Exposed via `POST /attendance/daily/{id}/approve-ot`.
+- [x] **M04-A07**: Add Attendance Anomaly Resolution endpoints (`AttendanceAnomalyController`) with 1-click Paid Half Day waiver, Retro-Leave conversion, or No-Pay confirmation.
+  - *Completed*: Built `AttendanceAnomalyController` and service method `resolveUnapprovedHalfDay()` with three auditable pathways:
+    - *Mechanism A*: Punch Regularization via regularization engine (`status = 'present'`, `is_paid = true`).
+    - *Mechanism B*: Retroactive Leave Conversion (creates 0.5-day approved LeaveRequest and deducts from `LeaveEntitlement`).
+    - *Mechanism C*: Managerial Discretion (Paid Waiver) with audit justification without altering biometric records.
+- [x] **M04-A08**: Build UI `resources/js/Pages/Attendance/Anomalies.tsx` (Exception Action Center with OT approval modal and regularization drawers).
+  - *Completed*: Created `resources/js/Pages/Attendance/Anomalies.tsx` and `resources/js/Pages/Attendance/Regularizations.tsx`. Features dark-mode UI with KPI metric cards, filter bars, interactive resolution modals, granular OT approval sliders, and regularization drawers.
+- [x] **M04-A09**: Implement Monthly Attendance Period Freeze & Sign-Off (`/attendance/timesheet/freeze`) with HOD team sign-off and HR final period lock.
+  - *Completed*: Created migration `2026_10_01_000003_create_attendance_period_locks_table.php` and service method `freezePeriod()`. Supports HOD department-level sign-off, HR company-wide final lock (freezing timesheets against edits), and authorized administrative unlock. Verified in test suite and UI.
+- [x] **M04-A10**: Single Source of Truth & Reconciliation Engine Harmonization (`/attendance/timesheet` <-> `/attendance/anomalies`).
+  - *Completed*: 
+    1. Centralized timesheet building (`buildTimesheetDays`), schedule reconciliation (`reconcileMonthlySchedules`), and anomaly classification (`isMissingPunch`, `isUnapprovedHalfDay`, `hasActionableAnomaly`, `isRecordActionableAnomaly`) into `AttendanceProcessingService`.
+    2. Fixed catastrophic false-positive filter bug in `AttendanceAnomalyController` where empty punches on absent/rest days were falsely treated as 310 missing punches.
+    3. Capped anomaly search to `min(monthEnd, today)` so future scheduled dates are never flagged as anomalies.
+    4. Synchronized manual adjustments (`adjustDailyRecord`) to clear punch anomalies and set `is_paid = true`.
+    5. Added Overtime approval status badges and approved hours rendering directly to `Timesheet.tsx` and exported CSVs.
+    6. Added employee filter dropdown to `Anomalies.tsx`. Verified 1-to-1 data parity across both pages using MCP Chrome.
 
 ## Phase 2: Absence, Short Leaves & Shift Coverage Architecture (M04-L)
 - [ ] **M04-L01**: Create migration adding Short Leave fields (`is_short_leave`, `short_leave_from`, `short_leave_to`, `short_leave_duration_minutes`), `covering_employee_id`, and `approval_stage` (`pending_hod`, `pending_hr`, `approved`) to `leave_requests`.

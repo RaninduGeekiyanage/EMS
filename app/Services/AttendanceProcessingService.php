@@ -1131,6 +1131,20 @@ final class AttendanceProcessingService
 
             $status = $data['status'] ?? $record->status;
 
+            $isPaid = (bool) ($record->is_paid ?? true);
+            if ($status === 'present' || ($checkIn && $checkOut)) {
+                $isPaid = true;
+            }
+
+            // Filter out resolved punch anomalies if punches are now complete
+            $anomalies = $record->anomalies ?? [];
+            if ($checkIn && $checkOut && is_array($anomalies)) {
+                $anomalies = array_values(array_filter($anomalies, function ($a) {
+                    $type = is_array($a) ? ($a['type'] ?? '') : '';
+                    return ! in_array($type, ['MISSING_IN', 'MISSING_OUT', 'INCOMPLETE_PUNCH', 'UNAPPROVED_HALF_DAY'], true);
+                }));
+            }
+
             $record->update([
                 'check_in' => $checkIn?->toDateTimeString(),
                 'check_out' => $checkOut?->toDateTimeString(),
@@ -1141,6 +1155,8 @@ final class AttendanceProcessingService
                 'ot_hours' => $otResult['ot_hours'],
                 'double_ot_hours' => $otResult['double_ot_hours'],
                 'status' => $status,
+                'is_paid' => $isPaid,
+                'anomalies' => $anomalies,
                 'is_manual' => true,
                 'manual_reason' => $data['manual_reason'],
                 'manual_edited_by' => $editor?->id,
@@ -1501,6 +1517,433 @@ final class AttendanceProcessingService
         }
 
         return $bestShift;
+    }
+
+    /**
+     * Check if a daily attendance record represents an active missing punch anomaly.
+     */
+    public function isMissingPunch(AttendanceDaily $daily): bool
+    {
+        if ($daily->status === 'missing_punch') {
+            return true;
+        }
+
+        $hasIn = ! empty($daily->check_in);
+        $hasOut = ! empty($daily->check_out);
+
+        return ($hasIn && ! $hasOut) || (! $hasIn && $hasOut);
+    }
+
+    /**
+     * Check if a daily attendance record represents an unapproved half day.
+     */
+    public function isUnapprovedHalfDay(AttendanceDaily $daily): bool
+    {
+        if ($daily->status !== 'half_day') {
+            return false;
+        }
+
+        if (! $daily->is_paid) {
+            return true;
+        }
+
+        // Check if explicitly flagged with unapproved half-day anomaly tag
+        if (! empty($daily->anomalies) && is_array($daily->anomalies)) {
+            foreach ($daily->anomalies as $anomaly) {
+                if (is_array($anomaly) && ($anomaly['type'] ?? '') === 'UNAPPROVED_HALF_DAY') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a daily record has actionable structured anomaly flags.
+     */
+    public function hasActionableAnomaly(AttendanceDaily $daily): bool
+    {
+        if (empty($daily->anomalies) || ! is_array($daily->anomalies)) {
+            return false;
+        }
+
+        foreach ($daily->anomalies as $anomaly) {
+            $type = is_array($anomaly) ? ($anomaly['type'] ?? '') : '';
+            if (in_array($type, ['MISSING_IN', 'MISSING_OUT', 'INCOMPLETE_PUNCH', 'UNAPPROVED_HALF_DAY'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a record is an actionable anomaly requiring managerial resolution.
+     */
+    public function isRecordActionableAnomaly(AttendanceDaily $daily, ?string $maxDate = null): bool
+    {
+        $maxDate = $maxDate ?? Carbon::today()->toDateString();
+        $attDate = Carbon::parse($daily->attendance_date)->toDateString();
+
+        if ($attDate > $maxDate) {
+            return false;
+        }
+
+        return $this->isMissingPunch($daily)
+            || $this->isUnapprovedHalfDay($daily)
+            || $this->hasActionableAnomaly($daily);
+    }
+
+    /**
+     * Reconcile unpunched absent records for a month against Duty Rosters, Holidays, and Approved Leaves.
+     * Enforces single source of truth across Timesheets and Exception Center.
+     */
+    public function reconcileMonthlySchedules(CarbonInterface $startDate, CarbonInterface $endDate, ?string $tenantId = null): int
+    {
+        $tenantId = $tenantId
+            ?? session('tenant_id')
+            ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
+
+        if (! $tenantId) {
+            return 0;
+        }
+
+        $candidates = AttendanceDaily::query()
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('attendance_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->where('is_manual', false)
+            ->whereNull('check_in')
+            ->whereNull('check_out')
+            ->where('status', 'absent')
+            ->with(['employee'])
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return 0;
+        }
+
+        $employeeIds = $candidates->pluck('employee_id')->unique();
+
+        $rosters = RosterEntry::query()
+            ->where('tenant_id', $tenantId)
+            ->whereIn('employee_id', $employeeIds)
+            ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->with('shift:id,name,code,start_time,end_time,color')
+            ->get()
+            ->groupBy('employee_id');
+
+        $leaves = LeaveRequest::query()
+            ->where('tenant_id', $tenantId)
+            ->whereIn('employee_id', $employeeIds)
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                    ->orWhereBetween('end_date', [$startDate, $endDate]);
+            })
+            ->with('leaveType:id,name,code,is_paid')
+            ->get()
+            ->groupBy('employee_id');
+
+        $holidays = PublicHoliday::query()
+            ->whereBetween('holiday_date', [$startDate, $endDate])
+            ->get()
+            ->keyBy(fn ($h) => Carbon::parse($h->holiday_date)->toDateString());
+
+        $reconciledCount = 0;
+
+        foreach ($candidates as $daily) {
+            if (! $daily->employee) {
+                continue;
+            }
+
+            $current = Carbon::parse($daily->attendance_date);
+            $dateStr = $current->toDateString();
+            $empId = $daily->employee_id;
+
+            $empRosters = $rosters->get($empId, collect());
+            $roster = $empRosters->firstWhere('roster_date', $dateStr);
+
+            $empLeaves = $leaves->get($empId, collect());
+            $activeLeave = $empLeaves->first(function ($l) use ($current) {
+                return $current->between(Carbon::parse($l->start_date), Carbon::parse($l->end_date));
+            });
+
+            $holiday = $holidays->get($dateStr);
+
+            $schedule = $this->shiftService->resolveDailySchedule(
+                $daily->employee,
+                $current,
+                $roster,
+                $activeLeave,
+                $holiday
+            );
+
+            $newStatus = null;
+            if ($activeLeave) {
+                $newStatus = $activeLeave->is_half_day ? 'half_day' : 'leave';
+            } elseif ($holiday) {
+                $newStatus = 'holiday';
+            } elseif ($schedule['is_off']) {
+                $newStatus = 'rest_day';
+            }
+
+            if ($newStatus !== null && $newStatus !== $daily->status) {
+                $daily->update(['status' => $newStatus]);
+                $reconciledCount++;
+            }
+        }
+
+        // Ensure unapproved half-days carry is_paid = false until adjudicated
+        $unapprovedHalfDays = AttendanceDaily::query()
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('attendance_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->where('status', 'half_day')
+            ->where('is_paid', true)
+            ->where('is_manual', false)
+            ->get();
+
+        foreach ($unapprovedHalfDays as $hd) {
+            if ($this->isUnapprovedHalfDay($hd)) {
+                $hd->update(['is_paid' => false]);
+                $reconciledCount++;
+            }
+        }
+
+        return $reconciledCount;
+    }
+
+    /**
+     * Build day-by-day roster and attendance records for an employee across a calendar month.
+     * Serves as the Single Source of Truth for Employee Timesheet & Auditing.
+     *
+     * @return array{days: array<int, array<string, mixed>>, summary: array<string, mixed>}
+     */
+    public function buildTimesheetDays(Employee $employee, Carbon $startDate, Carbon $endDate, ?string $tenantId = null): array
+    {
+        $tenantId = $tenantId
+            ?? session('tenant_id')
+            ?? (app()->bound('current_tenant_id') ? app('current_tenant_id') : null);
+
+        // Pre-reconcile unpunched absent records for this month
+        $this->reconcileMonthlySchedules($startDate, $endDate, $tenantId);
+
+        // 1. Fetch all attendance dailies
+        $dailies = AttendanceDaily::query()
+            ->with(['shift:id,name,code,start_time,end_time,color', 'editor:id,name', 'otApprover:id,name'])
+            ->where('employee_id', $employee->id)
+            ->whereBetween('attendance_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->get()
+            ->keyBy(fn ($r) => Carbon::parse($r->attendance_date)->toDateString());
+
+        // 2. Fetch duty roster entries
+        $rosters = RosterEntry::query()
+            ->with('shift:id,name,code,start_time,end_time,color')
+            ->where('employee_id', $employee->id)
+            ->whereBetween('roster_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->get()
+            ->keyBy(fn ($r) => Carbon::parse($r->roster_date)->toDateString());
+
+        // 3. Fetch approved leaves
+        $leaves = LeaveRequest::query()
+            ->with('leaveType:id,name,code,is_paid')
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                    ->orWhereBetween('end_date', [$startDate, $endDate]);
+            })
+            ->get();
+
+        // 4. Fetch holidays
+        $holidays = PublicHoliday::query()
+            ->whereBetween('holiday_date', [$startDate, $endDate])
+            ->get()
+            ->keyBy(fn ($h) => Carbon::parse($h->holiday_date)->toDateString());
+
+        $days = [];
+        $totalWorkedHours = 0.0;
+        $totalOtHours = 0.0;
+        $totalDoubleOtHours = 0.0;
+        $totalApprovedOtHours = 0.0;
+        $totalApprovedDoubleOtHours = 0.0;
+        $presentDays = 0;
+        $absentDays = 0;
+        $restDays = 0;
+        $holidayDays = 0;
+        $leaveDays = 0;
+        $halfDays = 0;
+        $missingPunchesCount = 0;
+        $lateDaysCount = 0;
+        $manualAdjustedCount = 0;
+
+        $current = $startDate->copy();
+        $dayIndex = 1;
+
+        while ($current->lte($endDate)) {
+            $dateStr = $current->toDateString();
+            $daily = $dailies->get($dateStr);
+            $roster = $rosters->get($dateStr);
+            $holiday = $holidays->get($dateStr);
+
+            // Check if on leave
+            $activeLeave = $leaves->first(function ($l) use ($current) {
+                return $current->between(Carbon::parse($l->start_date), Carbon::parse($l->end_date));
+            });
+
+            // Determine Roster & Schedule info via unified ShiftService schedule resolver
+            $schedule = $this->shiftService->resolveDailySchedule(
+                $employee,
+                $current,
+                $roster,
+                $activeLeave,
+                $holiday
+            );
+
+            $rosterShift = $schedule['shift'] ?? $daily?->shift;
+            $isRosterOff = $schedule['is_off'];
+            $rosterLabel = $schedule['label'];
+            $shiftTimes = $schedule['shift_times'] ?? ($rosterShift ? substr($rosterShift->start_time, 0, 5) . ' - ' . substr($rosterShift->end_time, 0, 5) : null);
+
+            // Attendance details
+            $status = 'scheduled';
+            $workedHours = 0.0;
+            $lateMinutes = 0;
+            $earlyMinutes = 0;
+            $otHours = 0.0;
+            $doubleOtHours = 0.0;
+            $approvedOtHours = 0.0;
+            $approvedDoubleOtHours = 0.0;
+            $otApprovalStatus = 'pending';
+            $isPaid = true;
+            $checkIn = null;
+            $checkOut = null;
+            $isManual = false;
+            $manualReason = null;
+            $anomalies = [];
+            $dailyId = null;
+
+            if ($daily) {
+                $dailyId = $daily->id;
+                $status = $daily->status;
+                $workedHours = (float) $daily->worked_hours;
+                $lateMinutes = (int) $daily->late_minutes;
+                $earlyMinutes = (int) $daily->early_departure_minutes;
+                $otHours = (float) $daily->ot_hours;
+                $doubleOtHours = (float) $daily->double_ot_hours;
+                $approvedOtHours = (float) ($daily->approved_ot_hours ?? 0.0);
+                $approvedDoubleOtHours = (float) ($daily->approved_double_ot_hours ?? 0.0);
+                $otApprovalStatus = $daily->ot_approval_status ?? 'pending';
+                $isPaid = (bool) $daily->is_paid;
+                $checkIn = $daily->check_in?->format('Y-m-d H:i:s');
+                $checkOut = $daily->check_out?->format('Y-m-d H:i:s');
+                $isManual = (bool) $daily->is_manual;
+                $manualReason = $daily->manual_reason;
+                $anomalies = $daily->anomalies ?? [];
+            } elseif ($activeLeave) {
+                $status = 'leave';
+            } elseif ($holiday) {
+                $status = 'holiday';
+            } elseif ($isRosterOff) {
+                $status = 'rest_day';
+            } elseif ($current->isPast()) {
+                $status = 'unprocessed';
+            }
+
+            // Flags
+            $isMissingPunch = $daily ? $this->isMissingPunch($daily) : false;
+            if ($isMissingPunch) {
+                $missingPunchesCount++;
+            }
+
+            if ($lateMinutes > 0) {
+                $lateDaysCount++;
+            }
+
+            if ($isManual) {
+                $manualAdjustedCount++;
+            }
+
+            // Summary metrics accumulation
+            $totalWorkedHours += $workedHours;
+            $totalOtHours += $otHours;
+            $totalDoubleOtHours += $doubleOtHours;
+            $totalApprovedOtHours += $approvedOtHours;
+            $totalApprovedDoubleOtHours += $approvedDoubleOtHours;
+
+            match ($status) {
+                'present' => $presentDays++,
+                'absent' => $absentDays++,
+                'rest_day' => $restDays++,
+                'holiday' => $holidayDays++,
+                'leave' => $leaveDays++,
+                'half_day' => $halfDays++,
+                default => null,
+            };
+
+            $days[] = [
+                'index' => $dayIndex++,
+                'date' => $dateStr,
+                'day_number' => $current->day,
+                'day_name' => $current->format('D'),
+                'is_weekend' => $current->isWeekend(),
+                'daily_id' => $dailyId,
+                'roster_label' => $rosterLabel,
+                'is_roster_off' => $isRosterOff,
+                'is_scheduled_work' => ! $isRosterOff,
+                'shift' => $rosterShift ? [
+                    'id' => $rosterShift->id,
+                    'name' => $rosterShift->name,
+                    'code' => $rosterShift->code,
+                    'shift_type' => $rosterShift->shift_type,
+                    'color' => $rosterShift->color,
+                ] : null,
+                'shift_times' => $shiftTimes,
+                'holiday' => $holiday ? ['name' => $holiday->name, 'type' => $holiday->type] : null,
+                'leave' => $activeLeave ? ['type' => $activeLeave->leaveType?->name ?? 'Approved Leave'] : null,
+                'check_in' => $checkIn,
+                'check_out' => $checkOut,
+                'worked_hours' => $workedHours,
+                'late_minutes' => $lateMinutes,
+                'early_departure_minutes' => $earlyMinutes,
+                'ot_hours' => $otHours,
+                'double_ot_hours' => $doubleOtHours,
+                'approved_ot_hours' => $approvedOtHours,
+                'approved_double_ot_hours' => $approvedDoubleOtHours,
+                'ot_approval_status' => $otApprovalStatus,
+                'is_paid' => $isPaid,
+                'status' => $status,
+                'is_manual' => $isManual,
+                'manual_reason' => $manualReason,
+                'anomalies' => $anomalies,
+                'is_missing_punch' => $isMissingPunch,
+            ];
+
+            $current->addDay();
+        }
+
+        $summary = [
+            'total_calendar_days' => count($days),
+            'present_days' => $presentDays,
+            'half_days' => $halfDays,
+            'absent_days' => $absentDays,
+            'rest_days' => $restDays,
+            'holiday_days' => $holidayDays,
+            'leave_days' => $leaveDays,
+            'missing_punches' => $missingPunchesCount,
+            'late_days' => $lateDaysCount,
+            'manual_adjusted_days' => $manualAdjustedCount,
+            'total_worked_hours' => round($totalWorkedHours, 2),
+            'total_ot_hours' => round($totalOtHours, 2),
+            'total_double_ot_hours' => round($totalDoubleOtHours, 2),
+            'total_approved_ot_hours' => round($totalApprovedOtHours, 2),
+            'total_approved_double_ot_hours' => round($totalApprovedDoubleOtHours, 2),
+        ];
+
+        return [
+            'days' => $days,
+            'summary' => $summary,
+        ];
     }
 }
 

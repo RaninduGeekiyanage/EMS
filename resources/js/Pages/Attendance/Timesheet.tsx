@@ -67,6 +67,10 @@ interface TimesheetDay {
     early_departure_minutes: number;
     ot_hours: number;
     double_ot_hours: number;
+    approved_ot_hours?: number | null;
+    approved_double_ot_hours?: number | null;
+    ot_approval_status?: string | null;
+    is_paid?: boolean;
     status: string;
     is_manual: boolean;
     manual_reason?: string | null;
@@ -88,6 +92,8 @@ interface TimesheetSummary {
     total_worked_hours: number;
     total_ot_hours: number;
     total_double_ot_hours: number;
+    total_approved_ot_hours?: number;
+    total_approved_double_ot_hours?: number;
 }
 
 interface Props {
@@ -806,6 +812,26 @@ export default function Timesheet({
                                                             {day.double_ot_hours > 0 && (
                                                                 <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/20 font-mono">
                                                                     +{day.double_ot_hours.toFixed(2)}h (2.0x)
+                                                                </span>
+                                                            )}
+                                                            {day.ot_approval_status === 'pending' && (
+                                                                <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20" title="Awaiting Manager OT Approval">
+                                                                    Pending OT
+                                                                </span>
+                                                            )}
+                                                            {day.ot_approval_status === 'hod_approved' && (
+                                                                <span className="text-[9px] font-semibold text-sky-400 bg-sky-500/10 px-1 py-0.2 rounded border border-sky-500/20" title="Recommended by HOD">
+                                                                    HOD Verified
+                                                                </span>
+                                                            )}
+                                                            {day.ot_approval_status === 'hr_confirmed' && (
+                                                                <span className="text-[9px] font-semibold text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/20" title={`Approved: ${(day.approved_ot_hours ?? 0) + (day.approved_double_ot_hours ?? 0)}h`}>
+                                                                    Approved ({((day.approved_ot_hours ?? 0) + (day.approved_double_ot_hours ?? 0)).toFixed(1)}h)
+                                                                </span>
+                                                            )}
+                                                            {day.ot_approval_status === 'rejected' && (
+                                                                <span className="text-[9px] font-semibold text-rose-400 bg-rose-500/10 px-1 py-0.2 rounded border border-rose-500/20" title="OT Rejected by Management">
+                                                                    Rejected
                                                                 </span>
                                                             )}
                                                         </div>

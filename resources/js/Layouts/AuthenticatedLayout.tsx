@@ -24,6 +24,7 @@ import {
     ArrowLeftRight,
     CheckCircle2,
     AlertCircle,
+    AlertTriangle,
     ShieldCheck,
     Sparkles,
     ArrowLeft,
@@ -292,6 +293,10 @@ export default function AuthenticatedLayout({
                                     <CalendarCheck className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Daily Attendance</span>}
                                 </Link>
+                                <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} title="Exceptions, Overtime & Regularizations">
+                                    <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                                    {!collapsed && <span>Exceptions & OT Approvals</span>}
+                                </Link>
                                 <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} title="Monthly Timesheets & Roster Reconciliation">
                                     <Calendar className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Monthly Timesheet</span>}
@@ -514,6 +519,10 @@ export default function AuthenticatedLayout({
                                     <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
                                         <CalendarCheck className="w-4 h-4" />
                                         <span>Daily Attendance</span>
+                                    </Link>
+                                    <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} onClick={() => setMobileOpen(false)}>
+                                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                        <span>Exceptions & OT Approvals</span>
                                     </Link>
                                     <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} onClick={() => setMobileOpen(false)}>
                                         <Calendar className="w-4 h-4" />
