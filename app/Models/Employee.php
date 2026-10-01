@@ -275,6 +275,36 @@ final class Employee extends Model
     {
         return $this->belongsTo(WagesBoardCategory::class, 'wages_board_category_id');
     }
+
+    /**
+     * Get the recurring pay items assigned to the employee.
+     *
+     * @return HasMany<EmployeePayItem, $this>
+     */
+    public function payItems(): HasMany
+    {
+        return $this->hasMany(EmployeePayItem::class, 'employee_id');
+    }
+
+    /**
+     * Get the loans and salary advances for the employee.
+     *
+     * @return HasMany<EmployeeLoan, $this>
+     */
+    public function loans(): HasMany
+    {
+        return $this->hasMany(EmployeeLoan::class, 'employee_id');
+    }
+
+    /**
+     * Get the monthly variable payroll adjustments for the employee.
+     *
+     * @return HasMany<PayrollMonthlyAdjustment, $this>
+     */
+    public function payrollAdjustments(): HasMany
+    {
+        return $this->hasMany(PayrollMonthlyAdjustment::class, 'employee_id');
+    }
 }
 
 

@@ -72,7 +72,7 @@ final class PayrollRunController extends Controller
         $annualEtf = (float) PayrollRun::where('tenant_id', $tenant->id)->where('period_year', $year)->sum('total_etf');
         $totalRunsCount = PayrollRun::where('tenant_id', $tenant->id)->where('period_year', $year)->count();
 
-        // Tenant statutory configuration
+        // Tenant statutory & payroll configuration
         $settings = [
             'epf_enabled' => (bool) $tenant->getSetting('epf_enabled', true),
             'epf_employee_rate' => (float) $tenant->getSetting('epf_employee_rate', 8.00),
@@ -80,6 +80,12 @@ final class PayrollRunController extends Controller
             'etf_employer_rate' => (float) $tenant->getSetting('etf_employer_rate', 3.00),
             'shop_office_nopay_divisor' => (int) $tenant->getSetting('shop_office_nopay_divisor', 30),
             'wages_board_nopay_divisor' => (int) $tenant->getSetting('wages_board_nopay_divisor', 26),
+            'payroll_ot_rate_single' => (float) $tenant->getSetting('payroll_ot_rate_single', 1.50),
+            'payroll_ot_rate_double' => (float) $tenant->getSetting('payroll_ot_rate_double', 2.00),
+            'payroll_cutoff_start_day' => (int) $tenant->getSetting('payroll_cutoff_start_day', 1),
+            'payroll_cutoff_end_day' => (int) $tenant->getSetting('payroll_cutoff_end_day', 31),
+            'payroll_cutoff_mode' => (string) $tenant->getSetting('payroll_cutoff_mode', 'calendar_month'),
+            'payroll_require_approved_ot' => (bool) $tenant->getSetting('payroll_require_approved_ot', false),
         ];
 
         return Inertia::render('Payroll/Index', [
@@ -384,6 +390,12 @@ final class PayrollRunController extends Controller
             'etf_employer_rate' => ['required', 'numeric', 'min:0', 'max:100'],
             'shop_office_nopay_divisor' => ['required', 'integer', 'min:20', 'max:31'],
             'wages_board_nopay_divisor' => ['required', 'integer', 'min:20', 'max:31'],
+            'payroll_ot_rate_single' => ['nullable', 'numeric', 'min:1.0', 'max:5.0'],
+            'payroll_ot_rate_double' => ['nullable', 'numeric', 'min:1.0', 'max:5.0'],
+            'payroll_cutoff_start_day' => ['nullable', 'integer', 'min:1', 'max:31'],
+            'payroll_cutoff_end_day' => ['nullable', 'integer', 'min:1', 'max:31'],
+            'payroll_cutoff_mode' => ['nullable', 'string', 'in:calendar_month,custom_cycle'],
+            'payroll_require_approved_ot' => ['nullable', 'boolean'],
         ]);
 
         $tenant->setSetting('epf_enabled', $validated['epf_enabled']);
@@ -392,6 +404,25 @@ final class PayrollRunController extends Controller
         $tenant->setSetting('etf_employer_rate', $validated['etf_employer_rate']);
         $tenant->setSetting('shop_office_nopay_divisor', $validated['shop_office_nopay_divisor']);
         $tenant->setSetting('wages_board_nopay_divisor', $validated['wages_board_nopay_divisor']);
+
+        if (array_key_exists('payroll_ot_rate_single', $validated) && $validated['payroll_ot_rate_single'] !== null) {
+            $tenant->setSetting('payroll_ot_rate_single', $validated['payroll_ot_rate_single']);
+        }
+        if (array_key_exists('payroll_ot_rate_double', $validated) && $validated['payroll_ot_rate_double'] !== null) {
+            $tenant->setSetting('payroll_ot_rate_double', $validated['payroll_ot_rate_double']);
+        }
+        if (array_key_exists('payroll_cutoff_start_day', $validated) && $validated['payroll_cutoff_start_day'] !== null) {
+            $tenant->setSetting('payroll_cutoff_start_day', $validated['payroll_cutoff_start_day']);
+        }
+        if (array_key_exists('payroll_cutoff_end_day', $validated) && $validated['payroll_cutoff_end_day'] !== null) {
+            $tenant->setSetting('payroll_cutoff_end_day', $validated['payroll_cutoff_end_day']);
+        }
+        if (array_key_exists('payroll_cutoff_mode', $validated) && $validated['payroll_cutoff_mode'] !== null) {
+            $tenant->setSetting('payroll_cutoff_mode', $validated['payroll_cutoff_mode']);
+        }
+        if (array_key_exists('payroll_require_approved_ot', $validated) && $validated['payroll_require_approved_ot'] !== null) {
+            $tenant->setSetting('payroll_require_approved_ot', $validated['payroll_require_approved_ot']);
+        }
 
         return back()->with('success', 'Payroll statutory configuration updated successfully.');
     }

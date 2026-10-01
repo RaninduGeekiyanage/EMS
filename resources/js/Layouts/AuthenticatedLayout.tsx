@@ -33,6 +33,9 @@ import {
     Cpu,
     SlidersHorizontal,
     Fingerprint,
+    Receipt,
+    CreditCard,
+    Percent,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -341,6 +344,18 @@ export default function AuthenticatedLayout({
                                     <DollarSign className="w-4 h-4 flex-shrink-0" />
                                     {!collapsed && <span>Payroll Runs</span>}
                                 </Link>
+                                <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} title="Pay Items Master & Formulas">
+                                    <Receipt className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Pay Items Master</span>}
+                                </Link>
+                                <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} title="Staff Loans & Advances Ledger">
+                                    <CreditCard className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Loans & Advances</span>}
+                                </Link>
+                                <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} title="Monthly Variable Inputs & Adjustments">
+                                    <Percent className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Variable Inputs</span>}
+                                </Link>
                             </div>
                         )}
 
@@ -553,10 +568,24 @@ export default function AuthenticatedLayout({
                                 <span>Leave & Entitlements</span>
                             </Link>
                             {auth?.tenant?.is_payroll_enabled && (
-                                <Link href="/payroll" className={navItemClass('/payroll')} onClick={() => setMobileOpen(false)}>
-                                    <DollarSign className="w-4 h-4" />
-                                    <span>Payroll Runs</span>
-                                </Link>
+                                <>
+                                    <Link href="/payroll" className={navItemClass('/payroll')} onClick={() => setMobileOpen(false)}>
+                                        <DollarSign className="w-4 h-4" />
+                                        <span>Payroll Runs</span>
+                                    </Link>
+                                    <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} onClick={() => setMobileOpen(false)}>
+                                        <Receipt className="w-4 h-4" />
+                                        <span>Pay Items Master</span>
+                                    </Link>
+                                    <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} onClick={() => setMobileOpen(false)}>
+                                        <CreditCard className="w-4 h-4" />
+                                        <span>Loans & Advances</span>
+                                    </Link>
+                                    <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} onClick={() => setMobileOpen(false)}>
+                                        <Percent className="w-4 h-4" />
+                                        <span>Variable Inputs</span>
+                                    </Link>
+                                </>
                             )}
                             <Link href="/reports/custom" className={navItemClass('/reports/custom')} onClick={() => setMobileOpen(false)}>
                                 <FileText className="w-4 h-4" />

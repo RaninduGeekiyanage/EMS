@@ -52,6 +52,12 @@ interface StatutorySettings {
     etf_employer_rate: number;
     shop_office_nopay_divisor: number;
     wages_board_nopay_divisor: number;
+    payroll_ot_rate_single?: number;
+    payroll_ot_rate_double?: number;
+    payroll_cutoff_start_day?: number;
+    payroll_cutoff_end_day?: number;
+    payroll_cutoff_mode?: string;
+    payroll_require_approved_ot?: boolean;
 }
 
 interface Props {
@@ -94,6 +100,12 @@ export default function Index({
         etf_employer_rate: settings.etf_employer_rate,
         shop_office_nopay_divisor: settings.shop_office_nopay_divisor,
         wages_board_nopay_divisor: settings.wages_board_nopay_divisor,
+        payroll_ot_rate_single: settings.payroll_ot_rate_single ?? 1.5,
+        payroll_ot_rate_double: settings.payroll_ot_rate_double ?? 2.0,
+        payroll_cutoff_start_day: settings.payroll_cutoff_start_day ?? 1,
+        payroll_cutoff_end_day: settings.payroll_cutoff_end_day ?? 31,
+        payroll_cutoff_mode: settings.payroll_cutoff_mode ?? 'calendar_month',
+        payroll_require_approved_ot: settings.payroll_require_approved_ot ?? false,
     });
 
     const formatLKR = (val: number) => {
@@ -690,6 +702,59 @@ export default function Index({
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                                     />
                                     <p className="text-[10px] text-slate-500 mt-1">Standard 26 working days in WBO</p>
+                                </div>
+                            </div>
+
+                            {/* Overtime Multipliers (M04-P06) */}
+                            <div className="pt-2 border-t border-slate-800">
+                                <label className="block text-xs font-semibold text-indigo-400 mb-2">
+                                    Overtime & Cut-Off Engine Parameters
+                                </label>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                            Single OT Multiplier (Standard)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.05"
+                                            min="1.0"
+                                            max="5.0"
+                                            value={settingsForm.data.payroll_ot_rate_single}
+                                            onChange={(e) => settingsForm.setData('payroll_ot_rate_single', Number(e.target.value))}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                        />
+                                        <p className="text-[10px] text-slate-500 mt-1">Default 1.5x hourly rate</p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                            Double OT Multiplier (Holiday)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.05"
+                                            min="1.0"
+                                            max="5.0"
+                                            value={settingsForm.data.payroll_ot_rate_double}
+                                            onChange={(e) => settingsForm.setData('payroll_ot_rate_double', Number(e.target.value))}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                        />
+                                        <p className="text-[10px] text-slate-500 mt-1">Default 2.0x hourly rate</p>
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-xs font-semibold text-slate-200">Require Manager / HR Approved OT</p>
+                                        <p className="text-[10px] text-slate-400">Only pay OT hours vetted in Exception Action Center</p>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={settingsForm.data.payroll_require_approved_ot}
+                                        onChange={(e) => settingsForm.setData('payroll_require_approved_ot', e.target.checked)}
+                                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                                    />
                                 </div>
                             </div>
 

@@ -77,16 +77,30 @@
     6. Verified 100% in test suite (`17 passed, 88 assertions`) and validated end-to-end via MCP Chrome browser.
 
 ## Phase 3: Dynamic Payroll Engine & Master Data (M04-P)
-- [ ] **M04-P01**: Create migrations `create_pay_items_table` and `create_employee_pay_items_table`.
-- [ ] **M04-P02**: Implement `PayItem` and `EmployeePayItem` models with calculation types and statutory flags.
-- [ ] **M04-P03**: Seed Sri Lankan standard pay items (Basic, BRA 2005, BRA 2016, Attendance Incentive, Travelling, Loan Deduction, Salary Advance).
-- [ ] **M04-P04**: Create migration `create_employee_loans_table` and `create_employee_loan_installments_table` with `EmployeeLoan` model.
-- [ ] **M04-P05**: Create migration `create_payroll_monthly_adjustments_table` for ad-hoc monthly variable additions/deductions.
-- [ ] **M04-P06**: Add configurable payroll parameters to `tenant_settings` (OT multipliers: 1.5x, 2.0x, cut-off start/end days, cut-off mode).
-- [ ] **M04-P07**: Refactor `PayrollCalculationService.php` to dynamically calculate recurring employee pay items, active loan installments, variable adjustments, approved OT hours (instead of unapproved raw OT), and dynamic OT multipliers instead of hardcoded 0.00.
-- [ ] **M04-P08**: Build UI `resources/js/Pages/Payroll/PayItems.tsx` (Pay Items Master & Formulas).
-- [ ] **M04-P09**: Build UI `resources/js/Pages/Payroll/Loans.tsx` (Staff Loans & Advances Ledger).
-- [ ] **M04-P10**: Build UI `resources/js/Pages/Payroll/VariableInputs.tsx` (Monthly Ad-hoc Adjustments).
+- [x] **M04-P01**: Create migrations `create_pay_items_table` and `create_employee_pay_items_table`.
+  - *Completed*: Created `2026_10_01_000006_create_pay_items_tables.php` with ULID PKs, tenant isolation, pay item classification (`allowance`, `deduction`), category (`statutory`, `fixed_allowance`, `variable_allowance`, `reimbursement`, `loan_repayment`, `salary_advance`, `penalty`, `other`), calculation types (`fixed`, `percentage_of_basic`, `formula`), statutory eligibility flags (`is_epf_eligible`, `is_etf_eligible`, `is_apit_eligible`, `is_active`, `is_system_default`), and employee assignment matrix table `employee_pay_items` with date-based validity range (`effective_from`, `effective_to`).
+- [x] **M04-P02**: Implement `PayItem` and `EmployeePayItem` models with calculation types and statutory flags.
+  - *Completed*: Created `App\Models\PayItem` and `App\Models\EmployeePayItem` with `BelongsToTenant`, `HasUlids`, and scoped query builders (`active`, `earnings`, `deductions`, `epfEligible`, `activeForPeriod`). Added relationships to `Employee` and `Tenant`.
+- [x] **M04-P03**: Seed Sri Lankan standard pay items (Basic, BRA 2005, BRA 2016, Attendance Incentive, Travelling, Loan Deduction, Salary Advance).
+  - *Completed*: Built `PayItemService::seedStandardSriLankanPayItems()` covering the 9 statutory & standard enterprise pay items compliant with the Sri Lankan Shop and Office Employees Act, Budgetary Relief Allowance Acts (BRA 2005 No. 36 & BRA 2016 No. 4 with mandatory EPF eligibility), Fixed Allowances, Salary Advances, Staff Loan Repayments, and Welfare Fund Deductions.
+- [x] **M04-P04**: Create migration `create_employee_loans_table` and `create_employee_loan_installments_table` with `EmployeeLoan` and `EmployeeLoanInstallment` models.
+  - *Completed*: Created `2026_10_01_000007_create_employee_loans_tables.php` with loan schedule engine (`principal_amount`, `interest_rate`, `installment_count`, `monthly_installment`, `remaining_balance`, `disbursement_date`, `status`), and `employee_loan_installments` tracking installment sequences, scheduled deduction periods, paid status, and skip/deferral logic. Implemented `EmployeeLoan` and `EmployeeLoanInstallment` models and `StaffLoanService`.
+- [x] **M04-P05**: Create migration `create_payroll_monthly_adjustments_table` for ad-hoc monthly variable additions/deductions.
+  - *Completed*: Created `2026_10_01_000008_create_payroll_monthly_adjustments_table.php` with monthly period tracking (`payroll_year`, `payroll_month`), adjustment classification (`addition`, `deduction`), amount, statutory taxation toggles (`taxable`, `epf_applicable`), approval workflow (`status = 'approved' | 'pending' | 'rejected'`), and created `PayrollMonthlyAdjustment` model with `PayrollAdjustmentService`.
+- [x] **M04-P06**: Add configurable payroll parameters to `tenant_settings` (OT multipliers: 1.5x, 2.0x, cut-off start/end days, cut-off mode).
+  - *Completed*: Updated `tenant_settings` with `payroll_ot_rate_single` (default: 1.50), `payroll_ot_rate_double` (default: 2.00), and `payroll_require_approved_ot` (default: true). Exposed via `PayrollRunController::updateSettings` and frontend configuration dialog.
+- [x] **M04-P07**: Refactor `PayrollCalculationService.php` to dynamically calculate recurring employee pay items, active loan installments, variable adjustments, approved OT hours (instead of unapproved raw OT), and dynamic OT multipliers instead of hardcoded 0.00.
+  - *Completed*: Single Source of Truth harmonization:
+    1. Overtime Calculation: Reads `approved_ot_hours` and `approved_double_ot_hours` from `attendance_daily` when `payroll_require_approved_ot` is enabled; applies dynamic multipliers (`payroll_ot_rate_single` and `payroll_ot_rate_double`) over hourly rate (`(basic_salary + statutory_bra) / 200`).
+    2. Dynamic Recurring Pay Items: Fetches `employee_pay_items` active for the payroll period; includes statutory items (e.g. BRA) into the EPF earnings baseline.
+    3. Staff Loan Installments: Automatically identifies pending installments scheduled for the payroll period, deducts from net salary, and updates installment status to paid upon finalization.
+    4. Variable Monthly Adjustments: Aggregates approved ad-hoc additions and deductions for the target month/year.
+- [x] **M04-P08**: Build UI `resources/js/Pages/Payroll/PayItems.tsx` (Pay Items Master & Formulas).
+  - *Completed*: Built modern dark-mode catalog UI featuring 4 KPI metric cards, filter bars, "1-Click Sync Statutory (Sri Lanka)" button, "+ New Pay Item" modal, and employee assignment ledger matrix.
+- [x] **M04-P09**: Build UI `resources/js/Pages/Payroll/Loans.tsx` (Staff Loans & Advances Ledger).
+  - *Completed*: Built comprehensive Staff Loans & Advances ledger with 4 KPI summary cards (Total Disbursed, Outstanding Balance, Active Portfolios, Fully Recovered), interactive loan disbursement modal with live monthly installment auto-calculator, status badges, progress bars, installment schedule drawer, and 1-click skip/defer modal.
+- [x] **M04-P10**: Build UI `resources/js/Pages/Payroll/VariableInputs.tsx` (Monthly Ad-hoc Adjustments).
+  - *Completed*: Built dynamic Monthly Adjustments page with month/year selector, KPI metric cards (Total Additions, Total Deductions, Net Payroll Impact, Records Count), "+ New Adjustment" modal with EPF/taxable toggles, and bulk staff adjustment matrix. All tested and verified with zero console errors.
 
 ## Phase 4: Employee Performance & KPI Evaluation (M04-E)
 - [ ] **M04-E01**: Create migration `create_employee_evaluations_table` and model `EmployeeEvaluation`.

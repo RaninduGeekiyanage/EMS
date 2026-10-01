@@ -117,4 +117,34 @@ final class Tenant extends Model
     {
         return $this->hasMany(AttendanceLog::class, 'tenant_id');
     }
+
+    /**
+     * Get all pay items for this tenant.
+     *
+     * @return HasMany<PayItem, $this>
+     */
+    public function payItems(): HasMany
+    {
+        return $this->hasMany(PayItem::class, 'tenant_id');
+    }
+
+    /**
+     * Get all employee loans for this tenant.
+     *
+     * @return HasMany<EmployeeLoan, $this>
+     */
+    public function employeeLoans(): HasMany
+    {
+        return $this->hasMany(EmployeeLoan::class, 'tenant_id');
+    }
+
+    /**
+     * Get all monthly payroll adjustments for this tenant.
+     *
+     * @return HasMany<PayrollMonthlyAdjustment, $this>
+     */
+    public function payrollAdjustments(): HasMany
+    {
+        return $this->hasMany(PayrollMonthlyAdjustment::class, 'tenant_id');
+    }
 }

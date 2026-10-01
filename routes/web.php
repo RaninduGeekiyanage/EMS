@@ -22,8 +22,11 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\PayItemController;
+use App\Http\Controllers\PayrollAdjustmentController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
+use App\Http\Controllers\StaffLoanController;
 use App\Http\Controllers\RawBiometricIngestController;
 use App\Http\Controllers\RosterController;
 use App\Http\Controllers\RosterExportController;
@@ -249,12 +252,31 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/payroll', [PayrollRunController::class, 'index'])->name('payroll.index');
         Route::post('/payroll/preview', [PayrollRunController::class, 'preview'])->name('payroll.preview');
         Route::post('/payroll/runs', [PayrollRunController::class, 'store'])->name('payroll.store');
-        Route::get('/payroll/{payrollRun}', [PayrollRunController::class, 'show'])->name('payroll.show');
-        Route::post('/payroll/{payrollRun}/approve', [PayrollRunController::class, 'approve'])->name('payroll.approve');
-        Route::post('/payroll/{payrollRun}/lock', [PayrollRunController::class, 'lock'])->name('payroll.lock');
-        Route::post('/payroll/{payrollRun}/recalculate', [PayrollRunController::class, 'recalculate'])->name('payroll.recalculate');
-        Route::delete('/payroll/{payrollRun}', [PayrollRunController::class, 'destroy'])->name('payroll.destroy');
         Route::post('/payroll/settings', [PayrollRunController::class, 'updateSettings'])->name('payroll.settings.update');
+
+        // M04-P08: Dynamic Pay Items Master & Recurring Allocations
+        Route::get('/payroll/pay-items', [PayItemController::class, 'index'])->name('payroll.pay-items.index');
+        Route::post('/payroll/pay-items', [PayItemController::class, 'store'])->name('payroll.pay-items.store');
+        Route::put('/payroll/pay-items/{payItem}', [PayItemController::class, 'update'])->name('payroll.pay-items.update');
+        Route::delete('/payroll/pay-items/{payItem}', [PayItemController::class, 'destroy'])->name('payroll.pay-items.destroy');
+        Route::post('/payroll/pay-items/seed-statutory', [PayItemController::class, 'seedStatutory'])->name('payroll.pay-items.seed-statutory');
+        Route::post('/payroll/pay-items/assign-employee', [PayItemController::class, 'assignEmployee'])->name('payroll.pay-items.assign-employee');
+        Route::delete('/payroll/pay-items/employee-items/{employeePayItem}', [PayItemController::class, 'removeEmployeeItem'])->name('payroll.pay-items.remove-employee');
+
+        // M04-P09: Staff Loans & Salary Advances Ledger
+        Route::get('/payroll/loans', [StaffLoanController::class, 'index'])->name('payroll.loans.index');
+        Route::post('/payroll/loans', [StaffLoanController::class, 'store'])->name('payroll.loans.store');
+        Route::post('/payroll/loans/{loan}/pause', [StaffLoanController::class, 'pause'])->name('payroll.loans.pause');
+        Route::post('/payroll/loans/{loan}/resume', [StaffLoanController::class, 'resume'])->name('payroll.loans.resume');
+        Route::post('/payroll/loans/{loan}/cancel', [StaffLoanController::class, 'cancel'])->name('payroll.loans.cancel');
+        Route::post('/payroll/loans/installments/{installment}/skip', [StaffLoanController::class, 'skipInstallment'])->name('payroll.loans.skip-installment');
+
+        // M04-P10: Monthly Variable Inputs & Ad-hoc Adjustments
+        Route::get('/payroll/variable-inputs', [PayrollAdjustmentController::class, 'index'])->name('payroll.variable-inputs.index');
+        Route::post('/payroll/variable-inputs', [PayrollAdjustmentController::class, 'store'])->name('payroll.variable-inputs.store');
+        Route::post('/payroll/variable-inputs/bulk', [PayrollAdjustmentController::class, 'bulkStore'])->name('payroll.variable-inputs.bulk');
+        Route::post('/payroll/variable-inputs/{adjustment}/approve', [PayrollAdjustmentController::class, 'approve'])->name('payroll.variable-inputs.approve');
+        Route::delete('/payroll/variable-inputs/{adjustment}', [PayrollAdjustmentController::class, 'destroy'])->name('payroll.variable-inputs.destroy');
 
         // Phase 3: Payslips & Bank Disbursals
         Route::get('/payroll/employees/{payrollEmployee}/payslip/download', [PayslipController::class, 'download'])->name('payroll.payslip.download');
@@ -262,6 +284,13 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/payroll/{payrollRun}/payslips/bulk', [PayslipController::class, 'bulk'])->name('payroll.payslips.bulk');
         Route::get('/payroll/{payrollRun}/bank-export', [BankExportController::class, 'export'])->name('payroll.bank-export');
         Route::get('/payroll/{payrollRun}/bank-export/banks', [BankExportController::class, 'banks'])->name('payroll.bank-export.banks');
+
+        // Parameterized Run Routes (Must be after static /payroll/* routes)
+        Route::get('/payroll/{payrollRun}', [PayrollRunController::class, 'show'])->name('payroll.show');
+        Route::post('/payroll/{payrollRun}/approve', [PayrollRunController::class, 'approve'])->name('payroll.approve');
+        Route::post('/payroll/{payrollRun}/lock', [PayrollRunController::class, 'lock'])->name('payroll.lock');
+        Route::post('/payroll/{payrollRun}/recalculate', [PayrollRunController::class, 'recalculate'])->name('payroll.recalculate');
+        Route::delete('/payroll/{payrollRun}', [PayrollRunController::class, 'destroy'])->name('payroll.destroy');
     });
 });
 
