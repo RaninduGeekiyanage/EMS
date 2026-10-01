@@ -54,6 +54,7 @@ interface TimesheetDay {
         id: string;
         name: string;
         code: string;
+        shift_type?: string;
         color?: string | null;
     } | null;
     shift_times?: string | null;
@@ -340,7 +341,7 @@ export default function Timesheet({
                     </span>
                 );
             case 'half_day': {
-                const isUnapproved = day.anomalies?.some((a: any) => a.type === 'UNAPPROVED_HALF_DAY') || (!day.leave && !day.is_manual);
+                const isUnapproved = day.anomalies?.some((a: any) => a.type === 'UNAPPROVED_HALF_DAY');
                 if (isUnapproved) {
                     return (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1 shadow-sm" title="Unapproved Half Day: employee worked half-day duration without approved leave">

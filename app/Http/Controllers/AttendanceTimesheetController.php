@@ -371,6 +371,7 @@ final class AttendanceTimesheetController extends Controller
                     'id' => $rosterShift->id,
                     'name' => $rosterShift->name,
                     'code' => $rosterShift->code,
+                    'shift_type' => $rosterShift->shift_type,
                     'color' => $rosterShift->color,
                 ] : null,
                 'shift_times' => $shiftTimes,
