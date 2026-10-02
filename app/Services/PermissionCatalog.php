@@ -47,6 +47,16 @@ final class PermissionCatalog
             'description' => 'Salary runs, EPF/ETF returns, IRD APIT tax schedules, payslips, and bank exports',
             'icon' => 'DollarSign',
         ],
+        'performance' => [
+            'name' => 'Performance & KPI Appraisals (M04)',
+            'description' => 'Employee performance evaluations, structured HOD ratings, and HR confirmation',
+            'icon' => 'Award',
+        ],
+        'portal' => [
+            'name' => 'Employee Self-Service (M04 - ESS)',
+            'description' => 'Personal employee portal, attendance tracking, self-service leave applications, and confidential payslips',
+            'icon' => 'UserCheck',
+        ],
     ];
 
     /**
@@ -457,6 +467,46 @@ final class PermissionCatalog
             'name' => 'Generate Bank Disbursal Files',
             'description' => 'Export commercial bank SLIPS / CEFT bulk salary disbursement files',
             'is_critical' => true,
+        ],
+
+        // Performance & Evaluation (M04)
+        'evaluation.view' => [
+            'domain' => 'performance',
+            'name' => 'View Performance Evaluations',
+            'description' => 'View departmental or company-wide performance evaluations and appraisal scores',
+            'is_critical' => false,
+        ],
+        'evaluation.hod_submit' => [
+            'domain' => 'performance',
+            'name' => 'Submit HOD Evaluations',
+            'description' => 'Draft and submit structured performance and KPI evaluation forms for team members',
+            'is_critical' => false,
+        ],
+        'evaluation.hr_review' => [
+            'domain' => 'performance',
+            'name' => 'HR Review & Finalize Evaluations',
+            'description' => 'Review HOD appraisals, amend ratings, issue final sign-off, or execute managerial bypass',
+            'is_critical' => false,
+        ],
+        'evaluation.print_export' => [
+            'domain' => 'performance',
+            'name' => 'Export Appraisal Records',
+            'description' => 'Generate and download official printable executive PDF evaluation records',
+            'is_critical' => false,
+        ],
+
+        // Employee Self-Service (M04 - ESS)
+        'portal.view' => [
+            'domain' => 'portal',
+            'name' => 'Access ESS Portal',
+            'description' => 'Access personal employee self-service dashboard, punch records, and time-off tracker',
+            'is_critical' => false,
+        ],
+        'evaluation.view_own' => [
+            'domain' => 'portal',
+            'name' => 'View Own Performance Appraisals',
+            'description' => 'View personal finalized performance appraisal scorecards and development feedback',
+            'is_critical' => false,
         ],
     ];
 

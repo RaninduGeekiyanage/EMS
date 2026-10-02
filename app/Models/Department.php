@@ -80,6 +80,16 @@ final class Department extends Model
     }
 
     /**
+     * Alias for head relationship.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne<DepartmentHead, $this>
+     */
+    public function departmentHead(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->head();
+    }
+
+    /**
      * Get all employees belonging to this department.
      *
      * @return HasMany<Employee, $this>

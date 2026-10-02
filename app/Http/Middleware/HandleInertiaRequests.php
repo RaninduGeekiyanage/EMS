@@ -65,6 +65,37 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
+        $isHod = false;
+        $canManage = false;
+
+        if ($user !== null && $tenant !== null) {
+            $isHod = $user->isSuperAdmin()
+                || $user->isCompanyOwner()
+                || $user->hasRole(['Supervisor', 'Company Admin', 'HR Manager'])
+                || $user->hasAnyPermission([
+                    'attendance.hod_approve_regularization',
+                    'attendance.hod_approve_ot',
+                    'shift_swap.approve_department',
+                    'leave.approve',
+                    'evaluation.hod_submit',
+                    'attendance.period_freeze',
+                ])
+                || \App\Models\DepartmentHead::where('tenant_id', $tenant->id)
+                    ->whereHas('employee', fn ($q) => $q->where('email', $user->email))
+                    ->exists();
+
+            $canManage = $user->isSuperAdmin()
+                || $user->isCompanyOwner()
+                || $user->hasRole(['Company Admin', 'HR Manager', 'HR Executive'])
+                || $user->hasAnyPermission([
+                    'employee.view',
+                    'shift.view',
+                    'payroll.view',
+                    'access-control.view',
+                    'company.view',
+                ]);
+        }
+
         return [
             ...parent::share($request),
             'auth' => [
@@ -76,6 +107,9 @@ class HandleInertiaRequests extends Middleware
                     'is_super_admin' => $user->isSuperAdmin(),
                     'is_company_owner' => $user->isCompanyOwner(),
                     'roles' => $user->getRoleNames(),
+                    'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
+                    'is_hod' => $isHod,
+                    'can_manage' => $canManage,
                 ] : null,
                 'tenant' => $tenant !== null ? [
                     'id' => $tenant->id,

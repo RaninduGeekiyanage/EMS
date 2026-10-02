@@ -21,11 +21,13 @@ use App\Http\Controllers\CustomReportController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\EmployeeEvaluationController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PayItemController;
 use App\Http\Controllers\PayrollAdjustmentController;
 use App\Http\Controllers\PayrollRunController;
 use App\Http\Controllers\PayslipController;
+use App\Http\Controllers\PortalController;
 use App\Http\Controllers\StaffLoanController;
 use App\Http\Controllers\RawBiometricIngestController;
 use App\Http\Controllers\RosterController;
@@ -87,6 +89,15 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/access-control', [AccessControlController::class, 'index'])->name('access-control.index');
         Route::put('/access-control/users/{user}', [AccessControlController::class, 'update'])->name('access-control.update');
         Route::post('/access-control/users/{user}/reset', [AccessControlController::class, 'resetToRole'])->name('access-control.reset');
+        Route::post('/access-control/users/{user}/hod-authority', [AccessControlController::class, 'updateHodAuthority'])->name('access-control.hod-authority.update');
+    });
+
+    // M04-ESS: Employee Self-Service (ESS) Portal
+    Route::middleware(['auth'])->group(function (): void {
+        Route::get('/portal/attendance', [PortalController::class, 'myAttendance'])->name('portal.attendance');
+        Route::get('/portal/leaves', [PortalController::class, 'myLeaves'])->name('portal.leaves');
+        Route::get('/portal/payslips', [PortalController::class, 'myPayslips'])->name('portal.payslips');
+        Route::get('/portal/payslips/{payrollEmployee}/download', [PortalController::class, 'downloadPayslip'])->name('portal.payslips.download');
     });
 
     // M01 Company Profile
@@ -246,6 +257,15 @@ Route::middleware(['tenant'])->group(function (): void {
         Route::get('/reports/custom/csv', [CustomReportController::class, 'exportCsv'])->name('reports.custom.csv');
         Route::get('/reports/custom/pdf', [CustomReportController::class, 'exportPdf'])->name('reports.custom.pdf');
     });
+
+    // M04-E: Employee Performance & KPI Evaluation
+    Route::get('/evaluations', [EmployeeEvaluationController::class, 'index'])->name('evaluations.index');
+    Route::post('/evaluations', [EmployeeEvaluationController::class, 'store'])->name('evaluations.store');
+    Route::put('/evaluations/{evaluation}', [EmployeeEvaluationController::class, 'update'])->name('evaluations.update');
+    Route::post('/evaluations/{evaluation}/submit', [EmployeeEvaluationController::class, 'submitToHr'])->name('evaluations.submit');
+    Route::post('/evaluations/{evaluation}/hr-review', [EmployeeEvaluationController::class, 'hrReview'])->name('evaluations.hr-review');
+    Route::get('/evaluations/{evaluation}/pdf', [EmployeeEvaluationController::class, 'exportPdf'])->name('evaluations.pdf');
+    Route::delete('/evaluations/{evaluation}', [EmployeeEvaluationController::class, 'destroy'])->name('evaluations.destroy');
 
     // M03 Payroll & Statutory Compliance (Protected by module:payroll)
     Route::middleware(['module:payroll'])->group(function (): void {

@@ -36,6 +36,7 @@ import {
     Receipt,
     CreditCard,
     Percent,
+    Award,
 } from 'lucide-react';
 
 interface AuthProps {
@@ -48,6 +49,8 @@ interface AuthProps {
         is_company_owner: boolean;
         roles: string[];
         permissions?: string[];
+        is_hod?: boolean;
+        can_manage?: boolean;
     } | null;
     tenant: {
         id: string;
@@ -136,16 +139,33 @@ export default function AuthenticatedLayout({
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-900/80'}
     `;
 
+    const isSuperAdmin = Boolean(auth?.user?.is_super_admin);
+    const isOwner = Boolean(auth?.user?.is_company_owner);
+    const isHod = Boolean(
+        auth?.user?.is_hod ||
+        auth?.user?.roles?.includes('Supervisor') ||
+        isSuperAdmin ||
+        isOwner
+    );
+    const canManage = Boolean(
+        auth?.user?.can_manage ||
+        auth?.user?.roles?.includes('Company Admin') ||
+        auth?.user?.roles?.includes('HR Manager') ||
+        auth?.user?.roles?.includes('HR Executive') ||
+        isSuperAdmin ||
+        isOwner
+    );
+
     const canAccessAttendanceSettings = Boolean(
-        auth?.user?.is_super_admin ||
-        auth?.user?.is_company_owner ||
+        isSuperAdmin ||
+        isOwner ||
         auth?.user?.roles?.includes('Company Admin') ||
         auth?.user?.permissions?.includes('attendance.settings.view')
     );
 
     const canAccessSettings = Boolean(
-        auth?.user?.is_super_admin ||
-        auth?.user?.is_company_owner ||
+        isSuperAdmin ||
+        isOwner ||
         auth?.user?.roles?.includes('Company Admin') ||
         auth?.user?.roles?.includes('HR Manager') ||
         canAccessAttendanceSettings
@@ -229,168 +249,206 @@ export default function AuthenticatedLayout({
                         {/* Overview Section */}
                         <div className="space-y-1">
                             {!collapsed && (
-                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                                     Overview
                                 </p>
                             )}
-                            <Link href="/dashboard" className={navItemClass('/dashboard')} title="Dashboard">
+                            <Link href="/dashboard" className={navItemClass('/dashboard')} title="Executive Dashboard">
                                 <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
                                 {!collapsed && <span>Executive Dashboard</span>}
                             </Link>
                         </div>
 
-                        {/* Workforce Management */}
-                        <div className="space-y-1">
+                        {/* Group 1: My Self-Service (ESS) */}
+                        <div className="space-y-1 pt-1">
                             {!collapsed && (
-                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                    Workforce
+                                <p className="px-3 text-[10px] font-bold text-indigo-500 dark:text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                                    <span>My Self-Service</span>
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 font-mono">ESS</span>
                                 </p>
                             )}
-                            <Link href="/employees" className={navItemClass('/employees')} title="Employees">
-                                <Users className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Employees Master</span>}
+                            <Link href="/portal/attendance" className={navItemClass('/portal/attendance')} title="My Attendance & Punch Records">
+                                <CalendarCheck className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
+                                {!collapsed && <span>My Attendance</span>}
                             </Link>
-                            <Link href="/departments" className={navItemClass('/departments')} title="Departments & HODs">
-                                <FolderTree className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Departments & HODs</span>}
+                            <Link href="/portal/leaves" className={navItemClass('/portal/leaves')} title="My Leaves & Time-Off">
+                                <Palmtree className="w-4 h-4 flex-shrink-0 text-teal-500 dark:text-teal-400" />
+                                {!collapsed && <span>My Leaves & Absence</span>}
                             </Link>
-                            <Link href="/company/profile" className={navItemClass('/company/profile')} title="Company Profile">
-                                <Building2 className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Company Profile</span>}
-                            </Link>
-                            <Link href="/users" className={navItemClass('/users')} title="User Accounts">
-                                <UserCheck className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>User Accounts</span>}
-                            </Link>
-                            <Link href="/access-control" className={navItemClass('/access-control')} title="Access Control">
-                                <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Roles & Permissions</span>}
+                            <Link href="/portal/payslips" className={navItemClass('/portal/payslips')} title="My Confidential Payslips">
+                                <Receipt className="w-4 h-4 flex-shrink-0 text-emerald-500 dark:text-emerald-400" />
+                                {!collapsed && <span>My Payslips</span>}
                             </Link>
                         </div>
 
-                        {/* Time & Attendance (AMS) */}
-                        {auth?.tenant?.is_ams_enabled && (
-                            <div className="space-y-1">
+                        {/* Group 2: Team Approvals (HODs / Supervisors) */}
+                        {isHod && (
+                            <div className="space-y-1 pt-1">
                                 {!collapsed && (
-                                    <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                        Time & Attendance
+                                    <p className="px-3 text-[10px] font-bold text-amber-500 dark:text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                                        <span>Team Approvals</span>
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-mono">HOD</span>
                                     </p>
                                 )}
-                                <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions & Master Timings">
-                                    <Clock className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Master</span>}
-                                </Link>
-                                <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} title="Shift Groups & Rotation Templates">
-                                    <Sparkles className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Groups & Patterns</span>}
-                                </Link>
-                                <Link href="/roster" className={navItemClass('/roster')} title="Monthly Duty Roster Calendar">
-                                    <CalendarRange className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Duty Roster</span>}
-                                </Link>
-                                <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} title="Shift Swap Requests">
-                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Shift Swap Requests</span>}
-                                </Link>
-                                <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} title="Daily Attendance Ledger">
-                                    <CalendarCheck className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Daily Attendance</span>}
-                                </Link>
-                                <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} title="Exceptions, Overtime & Regularizations">
+                                <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} title="Exceptions & Overtime Approvals">
                                     <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-500" />
                                     {!collapsed && <span>Exceptions & OT Approvals</span>}
                                 </Link>
-                                <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} title="Monthly Timesheets & Roster Reconciliation">
-                                    <Calendar className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Monthly Timesheet</span>}
+                                <Link href="/attendance/regularizations" className={navItemClass('/attendance/regularizations')} title="Attendance Regularization Requests">
+                                    <CalendarRange className="w-4 h-4 flex-shrink-0 text-cyan-400" />
+                                    {!collapsed && <span>Regularization Claims</span>}
                                 </Link>
-                                <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} title="Biometric Raw Punch Logs & Engine Audit">
-                                    <Fingerprint className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Attendance Logs</span>}
+                                <Link href="/leave/requests" className={navItemClass('/leave/requests')} title="Leave Applications Review">
+                                    <Palmtree className="w-4 h-4 flex-shrink-0 text-teal-400" />
+                                    {!collapsed && <span>Leave Approvals</span>}
                                 </Link>
-                                <Link href="/attendance/import" className={navItemClass('/attendance/import')} title="Biometric Ingestion">
-                                    <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Biometric Import</span>}
+                                <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} title="Shift Swap Review">
+                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0 text-indigo-400" />
+                                    {!collapsed && <span>Shift Swap Reviews</span>}
                                 </Link>
-                                <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar & Holidays">
-                                    <CalendarDays className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Work Calendar & Holidays</span>}
-                                </Link>
-                            </div>
-                        )}
-
-                        {/* Leave Management */}
-                        <div className="space-y-1">
-                            {!collapsed && (
-                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                    Leave Management
-                                </p>
-                            )}
-                            <Link href="/leave/requests" className={navItemClass('/leave/requests')} title="Leave Requests & Entitlements">
-                                <Palmtree className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Leave & Entitlements</span>}
-                            </Link>
-                        </div>
-
-                        {/* Payroll & Compliance */}
-                        {auth?.tenant?.is_payroll_enabled && (
-                            <div className="space-y-1">
-                                {!collapsed && (
-                                    <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                        Payroll & Finance
-                                    </p>
-                                )}
-                                <Link href="/payroll" className={navItemClass('/payroll')} title="Payroll Runs & Disbursal">
-                                    <DollarSign className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Payroll Runs</span>}
-                                </Link>
-                                <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} title="Pay Items Master & Formulas">
-                                    <Receipt className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Pay Items Master</span>}
-                                </Link>
-                                <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} title="Staff Loans & Advances Ledger">
-                                    <CreditCard className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Loans & Advances</span>}
-                                </Link>
-                                <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} title="Monthly Variable Inputs & Adjustments">
-                                    <Percent className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Variable Inputs</span>}
+                                <Link href="/evaluations" className={navItemClass('/evaluations')} title="Performance & KPI Appraisals">
+                                    <Award className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                                    {!collapsed && <span>Team Appraisals</span>}
                                 </Link>
                             </div>
                         )}
 
-                        {/* Reports & Analytics */}
-                        <div className="space-y-1">
-                            {!collapsed && (
-                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                    Intelligence & Reports
-                                </p>
-                            )}
-                            <Link href="/reports/custom" className={navItemClass('/reports/custom')} title="Custom HR Report Builder">
-                                <FileText className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Custom HR Builder</span>}
-                            </Link>
-                        </div>
-
-                        {/* Settings */}
-                        {canAccessSettings && (
-                            <div className="space-y-1">
-                                {!collapsed && (
-                                    <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                        Settings
-                                    </p>
-                                )}
-                                <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} title="Biometric Device Configuration">
-                                    <Cpu className="w-4 h-4 flex-shrink-0" />
-                                    {!collapsed && <span>Biometric Config</span>}
-                                </Link>
-                                {canAccessAttendanceSettings && (
-                                    <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} title="Attendance Policy & Engine Settings">
-                                        <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
-                                        {!collapsed && <span>Attendance Settings</span>}
+                        {/* Group 3: Management Modules (HR & Administrators) */}
+                        {canManage && (
+                            <>
+                                {/* Workforce & Organization */}
+                                <div className="space-y-1 pt-1">
+                                    {!collapsed && (
+                                        <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                            Workforce & Org
+                                        </p>
+                                    )}
+                                    <Link href="/employees" className={navItemClass('/employees')} title="Employees">
+                                        <Users className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Employees Master</span>}
                                     </Link>
+                                    <Link href="/departments" className={navItemClass('/departments')} title="Departments & HODs">
+                                        <FolderTree className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Departments & HODs</span>}
+                                    </Link>
+                                    <Link href="/company/profile" className={navItemClass('/company/profile')} title="Company Profile">
+                                        <Building2 className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Company Profile</span>}
+                                    </Link>
+                                    <Link href="/users" className={navItemClass('/users')} title="User Accounts">
+                                        <UserCheck className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>User Accounts</span>}
+                                    </Link>
+                                    <Link href="/access-control" className={navItemClass('/access-control')} title="Access Control & Permissions">
+                                        <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Roles & Permissions</span>}
+                                    </Link>
+                                </div>
+
+                                {/* Time & Attendance (AMS) */}
+                                {auth?.tenant?.is_ams_enabled && (
+                                    <div className="space-y-1 pt-1">
+                                        {!collapsed && (
+                                            <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                                Time & Attendance
+                                            </p>
+                                        )}
+                                        <Link href="/shifts" className={navItemClass('/shifts')} title="Shift Definitions & Master Timings">
+                                            <Clock className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Shift Master</span>}
+                                        </Link>
+                                        <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} title="Shift Groups & Rotation Templates">
+                                            <Sparkles className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Shift Groups & Patterns</span>}
+                                        </Link>
+                                        <Link href="/roster" className={navItemClass('/roster')} title="Monthly Duty Roster Calendar">
+                                            <CalendarRange className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Duty Roster</span>}
+                                        </Link>
+                                        <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} title="Daily Attendance Ledger">
+                                            <CalendarCheck className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Daily Attendance</span>}
+                                        </Link>
+                                        <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} title="Monthly Timesheets & Reconciliation">
+                                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Monthly Timesheet</span>}
+                                        </Link>
+                                        <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} title="Biometric Raw Punch Logs">
+                                            <Fingerprint className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Attendance Logs</span>}
+                                        </Link>
+                                        <Link href="/attendance/import" className={navItemClass('/attendance/import')} title="Biometric Ingestion">
+                                            <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Biometric Import</span>}
+                                        </Link>
+                                        <Link href="/work-calendar" className={navItemClass('/work-calendar')} title="Work Calendar & Holidays">
+                                            <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Work Calendar & Holidays</span>}
+                                        </Link>
+                                    </div>
                                 )}
-                            </div>
+
+                                {/* Payroll & Finance */}
+                                {auth?.tenant?.is_payroll_enabled && (
+                                    <div className="space-y-1 pt-1">
+                                        {!collapsed && (
+                                            <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                                Payroll & Finance
+                                            </p>
+                                        )}
+                                        <Link href="/payroll" className={navItemClass('/payroll')} title="Payroll Runs & Disbursal">
+                                            <DollarSign className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Payroll Runs</span>}
+                                        </Link>
+                                        <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} title="Pay Items Master & Formulas">
+                                            <Receipt className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Pay Items Master</span>}
+                                        </Link>
+                                        <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} title="Staff Loans & Advances Ledger">
+                                            <CreditCard className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Loans & Advances</span>}
+                                        </Link>
+                                        <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} title="Monthly Variable Inputs & Adjustments">
+                                            <Percent className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Variable Inputs</span>}
+                                        </Link>
+                                    </div>
+                                )}
+
+                                {/* Reports & Analytics */}
+                                <div className="space-y-1 pt-1">
+                                    {!collapsed && (
+                                        <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                            Intelligence & Reports
+                                        </p>
+                                    )}
+                                    <Link href="/reports/custom" className={navItemClass('/reports/custom')} title="Custom HR Report Builder">
+                                        <FileText className="w-4 h-4 flex-shrink-0" />
+                                        {!collapsed && <span>Custom HR Builder</span>}
+                                    </Link>
+                                </div>
+
+                                {/* Settings */}
+                                {canAccessSettings && (
+                                    <div className="space-y-1 pt-1">
+                                        {!collapsed && (
+                                            <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                                Settings
+                                            </p>
+                                        )}
+                                        <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} title="Biometric Device Configuration">
+                                            <Cpu className="w-4 h-4 flex-shrink-0" />
+                                            {!collapsed && <span>Biometric Config</span>}
+                                        </Link>
+                                        {canAccessAttendanceSettings && (
+                                            <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} title="Attendance Policy & Engine Settings">
+                                                <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
+                                                {!collapsed && <span>Attendance Settings</span>}
+                                            </Link>
+                                        )}
+                                    </div>
+                                )}
+                            </>
                         )}
 
                         {/* Super Admin Switcher Link */}
@@ -483,139 +541,195 @@ export default function AuthenticatedLayout({
                         </button>
                     </div>
 
-                    <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-                        <Link href="/dashboard" className={navItemClass('/dashboard')} onClick={() => setMobileOpen(false)}>
-                            <LayoutDashboard className="w-4 h-4" />
-                            <span>Executive Dashboard</span>
-                        </Link>
-                        <Link href="/employees" className={navItemClass('/employees')} onClick={() => setMobileOpen(false)}>
-                            <Users className="w-4 h-4" />
-                            <span>Employees Master</span>
-                        </Link>
-                        <Link href="/departments" className={navItemClass('/departments')} onClick={() => setMobileOpen(false)}>
-                            <FolderTree className="w-4 h-4" />
-                            <span>Departments & HODs</span>
-                        </Link>
-                        <Link href="/company/profile" className={navItemClass('/company/profile')} onClick={() => setMobileOpen(false)}>
-                            <Building2 className="w-4 h-4" />
-                            <span>Company Profile</span>
-                        </Link>
-                        <Link href="/users" className={navItemClass('/users')} onClick={() => setMobileOpen(false)}>
-                            <UserCheck className="w-4 h-4" />
-                            <span>User Accounts</span>
-                        </Link>
-                        <Link href="/access-control" className={navItemClass('/access-control')} onClick={() => setMobileOpen(false)}>
-                            <ShieldCheck className="w-4 h-4" />
-                            <span>Roles & Permissions</span>
-                        </Link>
-
-                        {auth?.tenant?.is_ams_enabled && (
-                            <>
-                                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                                    <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">
-                                        Time & Attendance
-                                    </p>
-                                    <Link href="/shifts" className={navItemClass('/shifts')} onClick={() => setMobileOpen(false)}>
-                                        <Clock className="w-4 h-4" />
-                                        <span>Shift Master</span>
-                                    </Link>
-                                    <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} onClick={() => setMobileOpen(false)}>
-                                        <Sparkles className="w-4 h-4" />
-                                        <span>Shift Groups & Patterns</span>
-                                    </Link>
-                                    <Link href="/roster" className={navItemClass('/roster')} onClick={() => setMobileOpen(false)}>
-                                        <CalendarRange className="w-4 h-4" />
-                                        <span>Duty Roster</span>
-                                    </Link>
-                                    <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} onClick={() => setMobileOpen(false)}>
-                                        <ArrowLeftRight className="w-4 h-4" />
-                                        <span>Shift Swap Requests</span>
-                                    </Link>
-                                    <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
-                                        <CalendarCheck className="w-4 h-4" />
-                                        <span>Daily Attendance</span>
-                                    </Link>
-                                    <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} onClick={() => setMobileOpen(false)}>
-                                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                                        <span>Exceptions & OT Approvals</span>
-                                    </Link>
-                                    <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} onClick={() => setMobileOpen(false)}>
-                                        <Calendar className="w-4 h-4" />
-                                        <span>Monthly Timesheet</span>
-                                    </Link>
-                                    <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} onClick={() => setMobileOpen(false)}>
-                                        <Fingerprint className="w-4 h-4" />
-                                        <span>Attendance Logs</span>
-                                    </Link>
-                                    <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
-                                        <FileSpreadsheet className="w-4 h-4" />
-                                        <span>Biometric Import</span>
-                                    </Link>
-                                    <Link href="/work-calendar" className={navItemClass('/work-calendar')} onClick={() => setMobileOpen(false)}>
-                                        <CalendarDays className="w-4 h-4" />
-                                        <span>Work Calendar</span>
-                                    </Link>
-                                </div>
-                            </>
-                        )}
-
-                        <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                            <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">
-                                Leave & Payroll
+                    <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                        {/* Group 1: My Self-Service (Always available to every staff member) */}
+                        <div className="space-y-1">
+                            <p className="px-3 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                                My Self-Service
                             </p>
-                            <Link href="/leave/requests" className={navItemClass('/leave/requests')} onClick={() => setMobileOpen(false)}>
-                                <Palmtree className="w-4 h-4" />
-                                <span>Leave & Entitlements</span>
+                            <Link href="/dashboard" className={navItemClass('/dashboard')} onClick={() => setMobileOpen(false)}>
+                                <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+                                <span>Overview</span>
                             </Link>
-                            {auth?.tenant?.is_payroll_enabled && (
-                                <>
-                                    <Link href="/payroll" className={navItemClass('/payroll')} onClick={() => setMobileOpen(false)}>
-                                        <DollarSign className="w-4 h-4" />
-                                        <span>Payroll Runs</span>
-                                    </Link>
-                                    <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} onClick={() => setMobileOpen(false)}>
-                                        <Receipt className="w-4 h-4" />
-                                        <span>Pay Items Master</span>
-                                    </Link>
-                                    <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} onClick={() => setMobileOpen(false)}>
-                                        <CreditCard className="w-4 h-4" />
-                                        <span>Loans & Advances</span>
-                                    </Link>
-                                    <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} onClick={() => setMobileOpen(false)}>
-                                        <Percent className="w-4 h-4" />
-                                        <span>Variable Inputs</span>
-                                    </Link>
-                                </>
-                            )}
-                            <Link href="/reports/custom" className={navItemClass('/reports/custom')} onClick={() => setMobileOpen(false)}>
-                                <FileText className="w-4 h-4" />
-                                <span>Custom HR Builder</span>
+                            <Link href="/portal/attendance" className={navItemClass('/portal/attendance')} onClick={() => setMobileOpen(false)}>
+                                <CalendarCheck className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
+                                <span>My Attendance</span>
+                            </Link>
+                            <Link href="/portal/leaves" className={navItemClass('/portal/leaves')} onClick={() => setMobileOpen(false)}>
+                                <Palmtree className="w-4 h-4 flex-shrink-0 text-teal-500 dark:text-teal-400" />
+                                <span>My Leaves & Absence</span>
+                            </Link>
+                            <Link href="/portal/payslips" className={navItemClass('/portal/payslips')} onClick={() => setMobileOpen(false)}>
+                                <Receipt className="w-4 h-4 flex-shrink-0 text-emerald-500 dark:text-emerald-400" />
+                                <span>My Payslips</span>
                             </Link>
                         </div>
 
-                        {canAccessSettings && (
-                            <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                                <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">
-                                    Settings
+                        {/* Group 2: Team Approvals (HODs / Supervisors) */}
+                        {isHod && (
+                            <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                <p className="px-3 text-[10px] font-bold text-amber-500 dark:text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                                    <span>Team Approvals</span>
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-mono">HOD</span>
                                 </p>
-                                <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} onClick={() => setMobileOpen(false)}>
-                                    <Cpu className="w-4 h-4" />
-                                    <span>Biometric Config</span>
+                                <Link href="/attendance/anomalies" className={navItemClass('/attendance/anomalies')} onClick={() => setMobileOpen(false)}>
+                                    <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                                    <span>Exceptions & OT Approvals</span>
                                 </Link>
-                                {canAccessAttendanceSettings && (
-                                    <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} onClick={() => setMobileOpen(false)}>
-                                        <SlidersHorizontal className="w-4 h-4" />
-                                        <span>Attendance Settings</span>
-                                    </Link>
-                                )}
+                                <Link href="/attendance/regularizations" className={navItemClass('/attendance/regularizations')} onClick={() => setMobileOpen(false)}>
+                                    <CalendarRange className="w-4 h-4 flex-shrink-0 text-cyan-400" />
+                                    <span>Regularization Claims</span>
+                                </Link>
+                                <Link href="/leave/requests" className={navItemClass('/leave/requests')} onClick={() => setMobileOpen(false)}>
+                                    <Palmtree className="w-4 h-4 flex-shrink-0 text-teal-400" />
+                                    <span>Leave Approvals</span>
+                                </Link>
+                                <Link href="/roster/shift-swaps" className={navItemClass('/roster/shift-swaps')} onClick={() => setMobileOpen(false)}>
+                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0 text-indigo-400" />
+                                    <span>Shift Swap Reviews</span>
+                                </Link>
+                                <Link href="/evaluations" className={navItemClass('/evaluations')} onClick={() => setMobileOpen(false)}>
+                                    <Award className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                                    <span>Team Appraisals</span>
+                                </Link>
                             </div>
                         )}
 
+                        {/* Group 3: Management Modules (HR & Administrators) */}
+                        {canManage && (
+                            <>
+                                <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                    <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                        Workforce & Org
+                                    </p>
+                                    <Link href="/employees" className={navItemClass('/employees')} onClick={() => setMobileOpen(false)}>
+                                        <Users className="w-4 h-4 flex-shrink-0" />
+                                        <span>Employees Master</span>
+                                    </Link>
+                                    <Link href="/departments" className={navItemClass('/departments')} onClick={() => setMobileOpen(false)}>
+                                        <FolderTree className="w-4 h-4 flex-shrink-0" />
+                                        <span>Departments & HODs</span>
+                                    </Link>
+                                    <Link href="/company/profile" className={navItemClass('/company/profile')} onClick={() => setMobileOpen(false)}>
+                                        <Building2 className="w-4 h-4 flex-shrink-0" />
+                                        <span>Company Profile</span>
+                                    </Link>
+                                    <Link href="/users" className={navItemClass('/users')} onClick={() => setMobileOpen(false)}>
+                                        <UserCheck className="w-4 h-4 flex-shrink-0" />
+                                        <span>User Accounts</span>
+                                    </Link>
+                                    <Link href="/access-control" className={navItemClass('/access-control')} onClick={() => setMobileOpen(false)}>
+                                        <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                                        <span>Roles & Permissions</span>
+                                    </Link>
+                                </div>
+
+                                {auth?.tenant?.is_ams_enabled && (
+                                    <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                        <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                            Time & Attendance
+                                        </p>
+                                        <Link href="/shifts" className={navItemClass('/shifts')} onClick={() => setMobileOpen(false)}>
+                                            <Clock className="w-4 h-4 flex-shrink-0" />
+                                            <span>Shift Master</span>
+                                        </Link>
+                                        <Link href="/roster/patterns" className={navItemClass('/roster/patterns')} onClick={() => setMobileOpen(false)}>
+                                            <Sparkles className="w-4 h-4 flex-shrink-0" />
+                                            <span>Shift Groups & Patterns</span>
+                                        </Link>
+                                        <Link href="/roster" className={navItemClass('/roster')} onClick={() => setMobileOpen(false)}>
+                                            <CalendarRange className="w-4 h-4 flex-shrink-0" />
+                                            <span>Duty Roster</span>
+                                        </Link>
+                                        <Link href="/attendance/daily" className={navItemClass('/attendance/daily')} onClick={() => setMobileOpen(false)}>
+                                            <CalendarCheck className="w-4 h-4 flex-shrink-0" />
+                                            <span>Daily Attendance</span>
+                                        </Link>
+                                        <Link href="/attendance/timesheet" className={navItemClass('/attendance/timesheet')} onClick={() => setMobileOpen(false)}>
+                                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                                            <span>Monthly Timesheet</span>
+                                        </Link>
+                                        <Link href="/attendance/logs" className={navItemClass('/attendance/logs')} onClick={() => setMobileOpen(false)}>
+                                            <Fingerprint className="w-4 h-4 flex-shrink-0" />
+                                            <span>Attendance Logs</span>
+                                        </Link>
+                                        <Link href="/attendance/import" className={navItemClass('/attendance/import')} onClick={() => setMobileOpen(false)}>
+                                            <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
+                                            <span>Biometric Import</span>
+                                        </Link>
+                                        <Link href="/work-calendar" className={navItemClass('/work-calendar')} onClick={() => setMobileOpen(false)}>
+                                            <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                                            <span>Work Calendar</span>
+                                        </Link>
+                                    </div>
+                                )}
+
+                                {auth?.tenant?.is_payroll_enabled && (
+                                    <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                        <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                            Payroll & Finance
+                                        </p>
+                                        <Link href="/payroll" className={navItemClass('/payroll')} onClick={() => setMobileOpen(false)}>
+                                            <DollarSign className="w-4 h-4 flex-shrink-0" />
+                                            <span>Payroll Runs</span>
+                                        </Link>
+                                        <Link href="/payroll/pay-items" className={navItemClass('/payroll/pay-items')} onClick={() => setMobileOpen(false)}>
+                                            <Receipt className="w-4 h-4 flex-shrink-0" />
+                                            <span>Pay Items Master</span>
+                                        </Link>
+                                        <Link href="/payroll/loans" className={navItemClass('/payroll/loans')} onClick={() => setMobileOpen(false)}>
+                                            <CreditCard className="w-4 h-4 flex-shrink-0" />
+                                            <span>Loans & Advances</span>
+                                        </Link>
+                                        <Link href="/payroll/variable-inputs" className={navItemClass('/payroll/variable-inputs')} onClick={() => setMobileOpen(false)}>
+                                            <Percent className="w-4 h-4 flex-shrink-0" />
+                                            <span>Variable Inputs</span>
+                                        </Link>
+                                    </div>
+                                )}
+
+                                <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                    <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                        Intelligence & Reports
+                                    </p>
+                                    <Link href="/reports/custom" className={navItemClass('/reports/custom')} onClick={() => setMobileOpen(false)}>
+                                        <FileText className="w-4 h-4 flex-shrink-0" />
+                                        <span>Custom HR Builder</span>
+                                    </Link>
+                                </div>
+
+                                {canAccessSettings && (
+                                    <div className="space-y-1 pt-2 border-t border-slate-200 dark:border-slate-800">
+                                        <p className="px-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                            Settings
+                                        </p>
+                                        <Link href="/settings/biometric" className={navItemClass('/settings/biometric')} onClick={() => setMobileOpen(false)}>
+                                            <Cpu className="w-4 h-4 flex-shrink-0" />
+                                            <span>Biometric Config</span>
+                                        </Link>
+                                        {canAccessAttendanceSettings && (
+                                            <Link href="/settings/attendance" className={navItemClass('/settings/attendance')} onClick={() => setMobileOpen(false)}>
+                                                <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
+                                                <span>Attendance Settings</span>
+                                            </Link>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
+
                         {auth?.user?.is_super_admin && (
-                            <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1">
+                                <p className="px-3 text-[10px] font-semibold text-amber-600 dark:text-amber-400/80 uppercase tracking-wider">
+                                    Platform Hub
+                                </p>
                                 <Link href="/admin/dashboard" className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-500/20" onClick={() => setMobileOpen(false)}>
-                                    <ShieldAlert className="w-4 h-4" />
+                                    <ShieldAlert className="w-4 h-4 flex-shrink-0" />
                                     <span>Super Admin Panel</span>
+                                </Link>
+                                <Link href="/admin/access-control" className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-500/20" onClick={() => setMobileOpen(false)}>
+                                    <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                                    <span>Global Access Control</span>
                                 </Link>
                             </div>
                         )}

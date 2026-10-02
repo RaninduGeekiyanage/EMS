@@ -97,6 +97,16 @@ final class RolesAndPermissionsSeeder extends Seeder
         'statutory.epf.export',
         'statutory.apit.export',
         'bank.export',
+
+        // 8. Performance & Evaluation (M04)
+        'evaluation.view',
+        'evaluation.hod_submit',
+        'evaluation.hr_review',
+        'evaluation.print_export',
+
+        // 9. Employee Self-Service (M04 - ESS)
+        'portal.view',
+        'evaluation.view_own',
     ];
 
     /**
@@ -201,6 +211,11 @@ final class RolesAndPermissionsSeeder extends Seeder
             'statutory.epf.export',
             'statutory.apit.export',
             'bank.export',
+            'evaluation.view',
+            'evaluation.hr_review',
+            'evaluation.print_export',
+            'portal.view',
+            'evaluation.view_own',
         ]);
 
         // 6. HR Executive (Operations without payroll approve/lock or config deletes)
@@ -234,6 +249,11 @@ final class RolesAndPermissionsSeeder extends Seeder
             'payroll.view',
             'payslip.view',
             'payslip.download-own',
+            'evaluation.view',
+            'evaluation.hr_review',
+            'evaluation.print_export',
+            'portal.view',
+            'evaluation.view_own',
         ]);
 
         // 7. Supervisor / Line Manager
@@ -256,6 +276,10 @@ final class RolesAndPermissionsSeeder extends Seeder
             'leave.apply',
             'leave.approve',
             'payslip.download-own',
+            'evaluation.view',
+            'evaluation.hod_submit',
+            'portal.view',
+            'evaluation.view_own',
         ]);
 
         // 8. Staff (Self-Service)
@@ -273,6 +297,8 @@ final class RolesAndPermissionsSeeder extends Seeder
             'attendance.regularize_own',
             'leave.apply',
             'payslip.download-own',
+            'portal.view',
+            'evaluation.view_own',
         ]);
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();

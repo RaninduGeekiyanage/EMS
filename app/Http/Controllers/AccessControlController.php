@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AccessControl\UpdateUserAccessRequest;
+use App\Models\Department;
+use App\Models\Employee;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PermissionCatalog;
@@ -19,6 +21,20 @@ use Spatie\Permission\PermissionRegistrar;
 
 final class AccessControlController extends Controller
 {
+    /**
+     * Standard HOD authority permission keys.
+     *
+     * @var array<int, string>
+     */
+    public const HOD_PERMISSIONS = [
+        'attendance.hod_approve_regularization',
+        'attendance.hod_approve_ot',
+        'shift_swap.approve_department',
+        'leave.approve',
+        'evaluation.hod_submit',
+        'attendance.period_freeze',
+    ];
+
     /**
      * Display the Access Control & Permissions management page for the current tenant.
      */
@@ -97,12 +113,67 @@ final class AccessControlController extends Controller
             'custom_overrides_count' => $users->filter(fn ($u) => $u['has_custom_overrides'])->count(),
         ];
 
+        $departments = Department::where('tenant_id', $tenant->id)
+            ->with(['departmentHead.employee'])
+            ->orderBy('name')
+            ->get()
+            ->map(function (Department $dept) use ($tenant): array {
+                $head = $dept->departmentHead;
+                $employee = $head?->employee;
+                $user = null;
+                $hodPermissions = [];
+                $isFullyAuthorized = false;
+
+                if ($employee && $employee->email) {
+                    $user = User::where('tenant_id', $tenant->id)
+                        ->where('email', $employee->email)
+                        ->first();
+
+                    if ($user !== null) {
+                        foreach (self::HOD_PERMISSIONS as $perm) {
+                            $hodPermissions[$perm] = $user->can($perm);
+                        }
+                        $isFullyAuthorized = ! in_array(false, $hodPermissions, true);
+                    }
+                }
+
+                return [
+                    'id' => $dept->id,
+                    'name' => $dept->name,
+                    'code' => $dept->code ?? null,
+                    'head' => $head ? [
+                        'id' => $head->id,
+                        'appointed_at' => $head->appointed_at?->format('Y-m-d'),
+                        'employee_id' => $employee?->id,
+                        'employee_name' => $employee?->full_name,
+                        'employee_emp_no' => $employee?->emp_no,
+                        'employee_email' => $employee?->email,
+                        'user' => $user ? [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'email' => $user->email,
+                            'primary_role' => $user->roles()->wherePivot('team_id', $tenant->id)->first()?->name ?? 'Staff',
+                            'hod_permissions' => $hodPermissions,
+                            'is_fully_authorized' => $isFullyAuthorized,
+                        ] : null,
+                    ] : null,
+                ];
+            });
+
+        $employeesForHodSelect = Employee::where('tenant_id', $tenant->id)
+            ->where('employment_status', 'active')
+            ->orderBy('full_name')
+            ->get(['id', 'emp_no', 'full_name', 'email', 'department_id']);
+
         return Inertia::render('AccessControl/Index', [
             'users' => $users,
             'selectedUserId' => $selectedUserId ?? ($users->first()['id'] ?? null),
             'rolePermissionsMap' => $rolePermissionsMap,
             'groupedPermissions' => PermissionCatalog::getGrouped(),
             'availableRoles' => PermissionCatalog::getAvailableRoles($canAssignOwner),
+            'departmentHeads' => $departments,
+            'employeesForHodSelect' => $employeesForHodSelect,
+            'hodPermissionsList' => self::HOD_PERMISSIONS,
             'metrics' => $metrics,
             'canManageAccess' => $canManageAccess,
             'currentUserId' => Auth::id(),
@@ -111,6 +182,64 @@ final class AccessControlController extends Controller
                 'search' => $search,
             ],
         ]);
+    }
+
+    /**
+     * Update or toggle HOD authority approval rights for a user.
+     */
+    public function updateHodAuthority(Request $request, User $user): RedirectResponse
+    {
+        /** @var Tenant $tenant */
+        $tenant = app('current_tenant');
+
+        /** @var User $currentUser */
+        $currentUser = Auth::user();
+
+        if ($currentUser === null || (! $currentUser->isSuperAdmin() && ! $currentUser->isCompanyOwner() && ! $currentUser->can('access-control.manage'))) {
+            abort(403, 'Unauthorized to manage HOD approval rights.');
+        }
+
+        if ($user->tenant_id !== $tenant->id && ! $currentUser->isSuperAdmin()) {
+            abort(403, 'Unauthorized access to user from another organization.');
+        }
+
+        $validated = $request->validate([
+            'action' => ['required', 'string', 'in:grant_all,revoke_all,toggle'],
+            'permission' => ['nullable', 'string'],
+            'enabled' => ['nullable', 'boolean'],
+        ]);
+
+        DB::transaction(function () use ($tenant, $user, $validated): void {
+            if (function_exists('setPermissionsTeamId')) {
+                setPermissionsTeamId($tenant->id);
+            }
+
+            $currentDirect = $user->getDirectPermissions()->pluck('name')->toArray();
+
+            if ($validated['action'] === 'grant_all') {
+                $updatedDirect = array_values(array_unique(array_merge($currentDirect, self::HOD_PERMISSIONS)));
+                $user->syncPermissions($updatedDirect);
+            } elseif ($validated['action'] === 'revoke_all') {
+                $updatedDirect = array_values(array_diff($currentDirect, self::HOD_PERMISSIONS));
+                $user->syncPermissions($updatedDirect);
+            } elseif ($validated['action'] === 'toggle') {
+                $targetPerm = (string) $validated['permission'];
+                $enable = (bool) ($validated['enabled'] ?? false);
+
+                if ($enable) {
+                    if (! in_array($targetPerm, $currentDirect, true)) {
+                        $currentDirect[] = $targetPerm;
+                    }
+                } else {
+                    $currentDirect = array_values(array_diff($currentDirect, [$targetPerm]));
+                }
+                $user->syncPermissions($currentDirect);
+            }
+
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        });
+
+        return back()->with('success', "HOD authority rights for '{$user->name}' updated successfully.");
     }
 
     /**

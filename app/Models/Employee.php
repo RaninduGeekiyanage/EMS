@@ -257,6 +257,16 @@ final class Employee extends Model
 
 
     /**
+     * Get the performance and KPI evaluations for the employee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<EmployeeEvaluation, $this>
+     */
+    public function evaluations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(EmployeeEvaluation::class, 'employee_id');
+    }
+
+    /**
      * Get the organizational Job Grade (OC Grade) of the employee.
      *
      * @return BelongsTo<JobGrade, $this>

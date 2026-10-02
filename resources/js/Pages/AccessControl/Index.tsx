@@ -26,6 +26,12 @@ import {
     Palmtree,
     Layers,
     UserCheck,
+    FolderTree,
+    UserPlus,
+    CheckSquare,
+    Square,
+    Zap,
+    Award,
 } from 'lucide-react';
 
 interface UserAccount {
@@ -58,12 +64,45 @@ interface GroupedDomain {
     permissions: PermissionItem[];
 }
 
+interface DepartmentHeadInfo {
+    id: string;
+    name: string;
+    code: string | null;
+    head: {
+        id: string;
+        appointed_at: string | null;
+        employee_id: string;
+        employee_name: string;
+        employee_emp_no: string;
+        employee_email: string | null;
+        user: {
+            id: number;
+            name: string;
+            email: string;
+            primary_role: string;
+            hod_permissions: Record<string, boolean>;
+            is_fully_authorized: boolean;
+        } | null;
+    } | null;
+}
+
+interface EmployeeSelectOption {
+    id: string;
+    emp_no: string;
+    full_name: string;
+    email: string | null;
+    department_id: string | null;
+}
+
 interface Props {
     users: UserAccount[];
     selectedUserId: number | null;
     rolePermissionsMap: Record<string, string[]>;
     groupedPermissions: Record<string, GroupedDomain>;
     availableRoles: string[];
+    departmentHeads?: DepartmentHeadInfo[];
+    employeesForHodSelect?: EmployeeSelectOption[];
+    hodPermissionsList?: string[];
     metrics: {
         total_users: number;
         admins_count: number;
@@ -83,6 +122,9 @@ export default function TenantAccessControl({
     rolePermissionsMap,
     groupedPermissions,
     availableRoles,
+    departmentHeads = [],
+    employeesForHodSelect = [],
+    hodPermissionsList = [],
     metrics,
     canManageAccess,
     currentUserId,
@@ -90,6 +132,13 @@ export default function TenantAccessControl({
     filters,
 }: Props) {
     const { auth } = usePage().props as any;
+
+    // Main Tab State ('users' vs 'hods')
+    const [activeMainTab, setActiveMainTab] = useState<'users' | 'hods'>('users');
+    const [hodActionLoading, setHodActionLoading] = useState<number | null>(null);
+    const [assignHodModalDept, setAssignHodModalDept] = useState<DepartmentHeadInfo | null>(null);
+    const [selectedEmployeeForHod, setSelectedEmployeeForHod] = useState<string>('');
+    const [hodSearch, setHodSearch] = useState('');
 
     // Selection state
     const [activeUserId, setActiveUserId] = useState<number | null>(() => {
@@ -127,6 +176,81 @@ export default function TenantAccessControl({
     const [confirmModalOpen, setConfirmModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
+
+    // HOD Authority Action Handlers
+    const handleBatchHodAction = (userId: number, action: 'grant_all' | 'revoke_all') => {
+        setHodActionLoading(userId);
+        router.post(
+            `/access-control/users/${userId}/hod-authority`,
+            { action },
+            {
+                preserveScroll: true,
+                onFinish: () => setHodActionLoading(null),
+            }
+        );
+    };
+
+    const handleToggleHodPerm = (userId: number, permKey: string, currentVal: boolean) => {
+        setHodActionLoading(userId);
+        router.post(
+            `/access-control/users/${userId}/hod-authority`,
+            {
+                action: 'toggle',
+                permission: permKey,
+                enabled: !currentVal,
+            },
+            {
+                preserveScroll: true,
+                onFinish: () => setHodActionLoading(null),
+            }
+        );
+    };
+
+    const handleAssignHodSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!assignHodModalDept || !selectedEmployeeForHod) return;
+        router.post(
+            `/departments/${assignHodModalDept.id}/hod`,
+            { employee_id: selectedEmployeeForHod },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setAssignHodModalDept(null);
+                    setSelectedEmployeeForHod('');
+                },
+            }
+        );
+    };
+
+    const filteredDepartmentHeads = useMemo(() => {
+        if (!hodSearch.trim()) return departmentHeads;
+        const q = hodSearch.toLowerCase();
+        return departmentHeads.filter(
+            (dept) =>
+                dept.name.toLowerCase().includes(q) ||
+                (dept.code && dept.code.toLowerCase().includes(q)) ||
+                (dept.head?.employee_name && dept.head.employee_name.toLowerCase().includes(q)) ||
+                (dept.head?.employee_emp_no && dept.head.employee_emp_no.toLowerCase().includes(q)) ||
+                (dept.head?.employee_email && dept.head.employee_email.toLowerCase().includes(q))
+        );
+    }, [departmentHeads, hodSearch]);
+
+    const hodMetrics = useMemo(() => {
+        const total = departmentHeads.length;
+        const appointed = departmentHeads.filter((d) => d.head !== null).length;
+        const fullyAuthorized = departmentHeads.filter((d) => d.head?.user?.is_fully_authorized).length;
+        const missingAction = total - fullyAuthorized;
+        return { total, appointed, fullyAuthorized, missingAction };
+    }, [departmentHeads]);
+
+    const HOD_PERM_DEFINITIONS = [
+        { key: 'attendance.hod_approve_regularization', label: 'Regularizations', badge: 'Punch & Missing Punch' },
+        { key: 'attendance.hod_approve_ot', label: 'Overtime', badge: 'OT Hours Approval' },
+        { key: 'leave.approve', label: 'Leaves', badge: 'Leave Approvals' },
+        { key: 'shift_swap.approve_department', label: 'Shift Swaps', badge: 'Shift Exchange Review' },
+        { key: 'evaluation.hod_submit', label: 'KPI Appraisals', badge: 'KPI Evaluations' },
+        { key: 'attendance.period_freeze', label: 'Timesheet Sign-Off', badge: 'Monthly Sign-Off' },
+    ];
 
     // Is the user editing themselves?
     const isSelfEditing = activeUser?.id === currentUserId;
@@ -320,8 +444,40 @@ export default function TenantAccessControl({
                     </div>
                 </div>
 
-                {/* Master-Detail Content Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Primary Mode Tabs: User Roles Matrix vs HOD Approval Authorities */}
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <button
+                        type="button"
+                        onClick={() => setActiveMainTab('users')}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-sm ${
+                            activeMainTab === 'users'
+                                ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+                                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800'
+                        }`}
+                    >
+                        <Users className="w-4 h-4" />
+                        User Roles & Custom Overrides
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveMainTab('hods')}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-sm ${
+                            activeMainTab === 'hods'
+                                ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+                                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800'
+                        }`}
+                    >
+                        <FolderTree className="w-4 h-4 text-emerald-400" />
+                        HOD Approval Authorities & Department Leaders
+                        <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-300">
+                            {departmentHeads.length}
+                        </span>
+                    </button>
+                </div>
+
+                {/* TAB 1: User Roles & Granular Overrides */}
+                {activeMainTab === 'users' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left Column: User Directory */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl">
@@ -718,6 +874,328 @@ export default function TenantAccessControl({
                         )}
                     </div>
                 </div>
+                )}
+
+                {/* TAB 2: HOD Approval Authorities & Leaders */}
+                {activeMainTab === 'hods' && (
+                    <div className="space-y-6">
+                        {/* HOD Metrics */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-lg">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold">
+                                    <FolderTree className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Departments</p>
+                                    <p className="text-xl font-extrabold text-white mt-0.5">{hodMetrics.total}</p>
+                                </div>
+                            </div>
+                            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-lg">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold">
+                                    <UserCheck className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Appointed HODs</p>
+                                    <p className="text-xl font-extrabold text-white mt-0.5">{hodMetrics.appointed}</p>
+                                </div>
+                            </div>
+                            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-lg">
+                                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center font-bold">
+                                    <CheckSquare className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Fully Authorized</p>
+                                    <p className="text-xl font-extrabold text-white mt-0.5">{hodMetrics.fullyAuthorized}</p>
+                                </div>
+                            </div>
+                            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-lg">
+                                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+                                    <AlertTriangle className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Pending Attention</p>
+                                    <p className="text-xl font-extrabold text-white mt-0.5">{hodMetrics.missingAction}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Search & Actions Bar */}
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl">
+                            <div className="relative w-full sm:w-80">
+                                <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                                <input
+                                    type="text"
+                                    value={hodSearch}
+                                    onChange={(e) => setHodSearch(e.target.value)}
+                                    placeholder="Filter department, HOD name, emp #..."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                                />
+                            </div>
+                            <div className="text-xs text-slate-400 flex items-center gap-2">
+                                <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                                <span>HOD approval rights empower leaders to sign-off timesheets, approve OT, review leaves, and evaluate KPIs.</span>
+                            </div>
+                        </div>
+
+                        {/* Departments & HOD Authority Cards Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            {filteredDepartmentHeads.map((dept) => {
+                                const hasHead = dept.head !== null;
+                                const hasUser = dept.head?.user !== null && dept.head?.user !== undefined;
+                                const user = dept.head?.user;
+                                const isFullyAuth = Boolean(user?.is_fully_authorized);
+                                const isLoading = user && hodActionLoading === user.id;
+
+                                return (
+                                    <div
+                                        key={dept.id}
+                                        className={`bg-slate-900/90 border rounded-2xl p-5 shadow-xl transition space-y-4 ${
+                                            isFullyAuth
+                                                ? 'border-emerald-500/30'
+                                                : hasHead && hasUser
+                                                ? 'border-amber-500/30'
+                                                : 'border-slate-800'
+                                        }`}
+                                    >
+                                        {/* Department Header */}
+                                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-800">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="text-sm font-bold text-white tracking-tight">{dept.name}</h3>
+                                                    {dept.code && (
+                                                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                                            {dept.code}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                                    {hasHead ? `Appointed: ${dept.head?.appointed_at ?? 'Active'}` : 'No Department Head Assigned'}
+                                                </p>
+                                            </div>
+
+                                            <div>
+                                                {isFullyAuth ? (
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                                        <CheckCircle2 className="w-3 h-3" />
+                                                        Full HOD Suite
+                                                    </span>
+                                                ) : hasUser ? (
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                                                        <AlertTriangle className="w-3 h-3" />
+                                                        Partial Suite
+                                                    </span>
+                                                ) : hasHead ? (
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                                                        <Lock className="w-3 h-3" />
+                                                        No Login Account
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                                                        Unassigned
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* HOD Officer Card */}
+                                        {hasHead ? (
+                                            <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 shadow-md">
+                                                        {dept.head?.employee_name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div className="truncate">
+                                                        <p className="text-xs font-bold text-white truncate">{dept.head?.employee_name}</p>
+                                                        <p className="text-[10px] text-slate-400 font-mono">
+                                                            {dept.head?.employee_emp_no} • {dept.head?.employee_email ?? 'No email'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                    {user && (
+                                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                                            {user.primary_role}
+                                                        </span>
+                                                    )}
+                                                    {canManageAccess && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setAssignHodModalDept(dept);
+                                                                setSelectedEmployeeForHod(dept.head?.employee_id ?? '');
+                                                            }}
+                                                            className="text-[10px] text-slate-400 hover:text-white underline"
+                                                        >
+                                                            Change
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="bg-slate-950/50 border border-dashed border-slate-800 rounded-xl p-4 text-center space-y-2">
+                                                <p className="text-xs text-slate-400">No designated Department Head found.</p>
+                                                {canManageAccess && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setAssignHodModalDept(dept);
+                                                            setSelectedEmployeeForHod('');
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-400 hover:text-white bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 transition shadow-sm"
+                                                    >
+                                                        <UserPlus className="w-3.5 h-3.5" />
+                                                        Appoint Department Head
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* HOD Approval Rights Switches */}
+                                        {hasHead && user && (
+                                            <div className="space-y-3 pt-1">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                        Approval Rights & Authority Matrix
+                                                    </p>
+                                                    {canManageAccess && (
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                disabled={isLoading}
+                                                                onClick={() => handleBatchHodAction(user.id, 'grant_all')}
+                                                                className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30 transition disabled:opacity-50"
+                                                            >
+                                                                Grant All
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={isLoading}
+                                                                onClick={() => handleBatchHodAction(user.id, 'revoke_all')}
+                                                                className="text-[10px] font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30 transition disabled:opacity-50"
+                                                            >
+                                                                Revoke All
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {HOD_PERM_DEFINITIONS.map((perm) => {
+                                                        const isGranted = Boolean(user.hod_permissions[perm.key]);
+
+                                                        return (
+                                                            <button
+                                                                key={perm.key}
+                                                                type="button"
+                                                                disabled={!canManageAccess || isLoading}
+                                                                onClick={() => handleToggleHodPerm(user.id, perm.key, isGranted)}
+                                                                className={`p-2.5 rounded-xl border text-left flex items-start justify-between gap-2 transition ${
+                                                                    isGranted
+                                                                        ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200'
+                                                                        : 'bg-slate-950/40 border-slate-800 text-slate-500 hover:border-slate-700'
+                                                                }`}
+                                                            >
+                                                                <div>
+                                                                    <p className={`text-xs font-bold ${isGranted ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                                                        {perm.label}
+                                                                    </p>
+                                                                    <p className="text-[10px] text-slate-500 truncate">{perm.badge}</p>
+                                                                </div>
+
+                                                                {isGranted ? (
+                                                                    <CheckSquare className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                                                                ) : (
+                                                                    <Square className="w-4 h-4 text-slate-600 flex-shrink-0 mt-0.5" />
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* If HOD appointed but no user login account */}
+                                        {hasHead && !user && (
+                                            <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-300">
+                                                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                                                <span>
+                                                    This employee does not have a registered user login. Create a login account in <strong>User Accounts</strong> with matching email to grant HOD permissions.
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* Assign / Change HOD Modal */}
+                {assignHodModalDept && (
+                    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+                            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold">
+                                        <UserPlus className="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-white">Appoint Department Head</h3>
+                                        <p className="text-xs text-slate-400">{assignHodModalDept.name}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setAssignHodModalDept(null)}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-white"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <form onSubmit={handleAssignHodSubmit} className="space-y-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-slate-300">Select Employee</label>
+                                    <select
+                                        value={selectedEmployeeForHod}
+                                        onChange={(e) => setSelectedEmployeeForHod(e.target.value)}
+                                        required
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                    >
+                                        <option value="">-- Choose Staff Member --</option>
+                                        {employeesForHodSelect.map((emp) => (
+                                            <option key={emp.id} value={emp.id}>
+                                                {emp.full_name} ({emp.emp_no}) {emp.email ? `• ${emp.email}` : '• No email'}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <p className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800/80">
+                                    The selected employee will become the administrative Department Head (HOD). After appointment, you can immediately grant their approval rights suite on this screen.
+                                </p>
+
+                                <div className="flex items-center justify-end gap-2 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssignHodModalDept(null)}
+                                        className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={!selectedEmployeeForHod}
+                                        className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition disabled:opacity-50"
+                                    >
+                                        Confirm Appointment
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
 
                 {/* Confirmation Diff Modal */}
                 {confirmModalOpen && activeUser && (

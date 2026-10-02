@@ -103,18 +103,33 @@
   - *Completed*: Built dynamic Monthly Adjustments page with month/year selector, KPI metric cards (Total Additions, Total Deductions, Net Payroll Impact, Records Count), "+ New Adjustment" modal with EPF/taxable toggles, and bulk staff adjustment matrix. All tested and verified with zero console errors.
 
 ## Phase 4: Employee Performance & KPI Evaluation (M04-E)
-- [ ] **M04-E01**: Create migration `create_employee_evaluations_table` and model `EmployeeEvaluation`.
-- [ ] **M04-E02**: Implement `EmployeeEvaluationService` for HOD evaluation submission, structured rating validation, and HR review/confirmation.
-- [ ] **M04-E03**: Create `EmployeeEvaluationController` with endpoints for HOD drafting/submitting, HR reviewing/bypassing, and PDF export.
-- [ ] **M04-E04**: Build UI `resources/js/Pages/Evaluations/Index.tsx` with HOD appraisal modal and HR sign-off dashboard.
-- [ ] **M04-E05**: Build clean printable PDF evaluation template for management review.
+- [x] **M04-E01**: Create migration `create_employee_evaluations_table` and model `EmployeeEvaluation`.
+  - *Completed*: Created `2026_10_01_000009_create_employee_evaluations_table.php` with ULID PK, tenant isolation, employee and user relations, structured `ratings_json`, `overall_score`, `performance_grade`, `status`, HR bypass tracking (`is_bypassed_by_hr`, `hr_actioned_at`), soft deletes, and safe indexes (`idx_eval_tenant`, `idx_eval_status`, `idx_eval_emp`, `idx_eval_period`, `idx_eval_date`). Built `App\Models\EmployeeEvaluation` with standard criteria definitions, grade computer (`computeGrade`), scopes, and relations. Added `evaluations` relation to `Employee`.
+- [x] **M04-E02**: Implement `EmployeeEvaluationService` for HOD evaluation submission, structured rating validation, and HR review/confirmation.
+  - *Completed*: Created `App\Services\EmployeeEvaluationService` implementing:
+    1. Weighted score and letter grade auto-calculation (`calculateOverallScore`) normalizing scores out of 100 with standard weights (Attendance 20%, Performance 25%, Teamwork 20%, Leadership 15%, Technical 20%).
+    2. Anti-overlap and anti-duplicate evaluation period enforcement (`checkAntiDuplicate`).
+    3. HOD drafting (`createDraft`) and submission to HR (`submitEvaluation`, `submitDraft`).
+    4. HR review, confirmation, rating amendment, or rejection with direct bypass capabilities (`hrReview`).
+    5. Statistical metric aggregation (`getStatistics`).
+    6. Executive PDF document generation (`generatePdf`).
+- [x] **M04-E03**: Create `EmployeeEvaluationController` with endpoints for HOD drafting/submitting, HR reviewing/bypassing, and PDF export.
+  - *Completed*: Built `EmployeeEvaluationController` and FormRequests (`StoreEvaluationRequest`, `UpdateEvaluationRequest`, `HrReviewEvaluationRequest`). Exposed RESTful endpoints for index listing, drafting, submitting to HR, HR review & sign-off (`POST /evaluations/{id}/hr-review`), draft deletion, and PDF stream export (`GET /evaluations/{id}/pdf`). Registered in `routes/web.php`.
+- [x] **M04-E04**: Build UI `resources/js/Pages/Evaluations/Index.tsx` with HOD appraisal modal and HR sign-off dashboard.
+  - *Completed*: Created `resources/js/Pages/Evaluations/Index.tsx` with dark-mode aesthetic, 4 KPI cards (Total Appraisals, Pending HR Review, Confirmed & Finalized, Company Average Score), filter bars, "+ New Appraisal" modal with live score calculator and interactive sliders, "HR Sign-off" review modal with direct bypass support, and slide-over appraisal detail inspector drawer. Added `KPI & Appraisals` navigation link to `AuthenticatedLayout.tsx`.
+- [x] **M04-E05**: Build clean printable PDF evaluation template for management review.
+  - *Completed*: Created `resources/views/pdf/employee-evaluation.blade.php` with company header, confidential document metadata, employee details grid, score highlight card with grade badge, multi-criteria breakdown table, evaluator comments, HR review comments, and tripartite signature blocks (HOD, HR, Employee). Verified in test suite (9/9 passed) and tested live with Chrome DevTools MCP.
 
 ## Phase 5: Employee Self-Service (ESS), IAM & System Hardening (M04-ESS)
-- [ ] **M04-ESS01**: Register all M04 permissions in `PermissionCatalog.php` and `RolesAndPermissionsSeeder.php` (HR Group, HOD Group, ESS Group).
-- [ ] **M04-ESS02**: Implement HOD Authority Management UI on Access Control page (allow HR/Admin to easily grant or revoke approval rights per HOD).
-- [ ] **M04-ESS03**: Build Employee Self-Service (ESS) pages:
-  - `resources/js/Pages/Portal/MyAttendance.tsx`
-  - `resources/js/Pages/Portal/MyLeaves.tsx`
-  - `resources/js/Pages/Portal/MyPayslips.tsx`
-- [ ] **M04-ESS04**: Update `AuthenticatedLayout.tsx` with role-based navigation groups (`My Self-Service` for staff, `Team Approvals` for HODs, `Management Modules` for HR/Admins).
-- [ ] **M04-ESS05**: Run comprehensive test suite, verify database seeders, check TypeScript compilation (`npm run build`), and verify payroll calculation precision.
+- [x] **M04-ESS01**: Register all M04 permissions in `PermissionCatalog.php` and `RolesAndPermissionsSeeder.php` (HR Group, HOD Group, ESS Group).
+  - *Completed*: Registered new `'portal'` domain (`Employee Self-Service (M04 - ESS)`) in `PermissionCatalog.php` with `portal.view` and `evaluation.view_own`. Updated `RolesAndPermissionsSeeder.php` to seed these permissions and assign them across all tenant roles (Super Admin, Owner, Admin, HR Manager, HR Executive, Supervisor, Staff). Executed `db:seed --class=RolesAndPermissionsSeeder`.
+- [x] **M04-ESS02**: Implement HOD Authority Management UI on Access Control page (allow HR/Admin to easily grant or revoke approval rights per HOD).
+  - *Completed*: Enhanced `AccessControlController.php` with `updateHodAuthority` endpoint (`grant_all`, `revoke_all`, `toggle`) for 6 standardized HOD approval authorities (`attendance.hod_approve_regularization`, `attendance.hod_approve_ot`, `shift_swap.approve_department`, `leave.approve`, `evaluation.hod_submit`, `attendance.period_freeze`). Added `departmentHead` alias on `Department` model. Built dedicated `HOD Approval Authorities & Department Leaders` tab in `AccessControl/Index.tsx` with metrics, quick authorization toggles, and appointment modals.
+- [x] **M04-ESS03**: Build Employee Self-Service (ESS) pages:
+  - `resources/js/Pages/Portal/MyAttendance.tsx`: Monthly punch ledger, OT approvals, lateness tracking, and interactive regularization claim modal (`/attendance/regularizations`).
+  - `resources/js/Pages/Portal/MyLeaves.tsx`: Statutory balance cards, 2-hour monthly short leave tracker (max 2/mo quota), unexpired C-Off pool, and application modal with covering colleague conflict prevention.
+  - `resources/js/Pages/Portal/MyPayslips.tsx`: Sri Lankan statutory EPF (8% employee, 12% employer) and ETF (3% employer) itemized slide-over drawer, active staff loan schedules, and official downloadable PDF salary receipts.
+- [x] **M04-ESS04**: Update `AuthenticatedLayout.tsx` with role-based navigation groups (`My Self-Service` for staff, `Team Approvals` for HODs, `Management Modules` for HR/Admins).
+  - *Completed*: Updated `HandleInertiaRequests.php` to share `is_hod`, `can_manage`, and `permissions`. Restructured `AuthenticatedLayout.tsx` across both the desktop sidebar and mobile off-canvas drawer into three distinct semantic groups: `My Self-Service` (always accessible to all staff), `Team Approvals` (conditional for assigned HODs), and `Management Modules` (reserved for Admins and HR Managers).
+- [x] **M04-ESS05**: Run comprehensive test suite, verify database seeders, check TypeScript compilation (`npm run build`), and verify payroll calculation precision.
+  - *Completed*: Created `EmployeePortalAndHodAuthorityTest.php` covering portal access, foreign payslip 403 authorization protection, and HOD authority grant/toggle/revoke flows. Executed full test suite: 60/60 M04 tests passed (314 assertions) and all 304 application tests passed. Verified `npm run build` compiled with 0 errors (`vite v5.4.21 built in 9.19s`). Validated UI/UX, modals, and zero console errors via Chrome DevTools MCP.

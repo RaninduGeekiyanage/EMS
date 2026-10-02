@@ -66,7 +66,7 @@ final class WorkCalendarTest extends TestCase
         $response->assertRedirect();
         $this->assertDatabaseHas('public_holidays', [
             'tenant_id' => $this->tenant->id,
-            'holiday_date' => '2026-07-15 00:00:00',
+            'holiday_date' => '2026-07-15',
             'name' => 'Special Mercantile Day',
             'type' => 'mercantile',
         ]);
