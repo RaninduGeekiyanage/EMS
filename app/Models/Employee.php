@@ -315,6 +315,16 @@ final class Employee extends Model
     {
         return $this->hasMany(PayrollMonthlyAdjustment::class, 'employee_id');
     }
+
+    /**
+     * Get the user portal account linked to this employee.
+     *
+     * @return HasOne<User, $this>
+     */
+    public function user(): HasOne
+    {
+        return $this->hasOne(User::class, 'employee_id');
+    }
 }
 
 

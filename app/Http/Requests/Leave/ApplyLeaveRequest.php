@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Leave;
 
+use App\Models\Employee;
 use Illuminate\Foundation\Http\FormRequest;
 
 final class ApplyLeaveRequest extends FormRequest
@@ -14,6 +15,32 @@ final class ApplyLeaveRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    /**
+     * Prepare the data for validation.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->has('employee_id') || empty($this->input('employee_id'))) {
+            $user = $this->user();
+            if ($user !== null) {
+                $tenantId = session('tenant_id') ?? (app()->has('current_tenant_id') ? app('current_tenant_id') : null);
+                $employee = null;
+                if (! empty($user->employee_id)) {
+                    $employee = Employee::find($user->employee_id);
+                } elseif (! empty($user->username)) {
+                    $empNo = preg_replace('/^EMP-?/i', '', (string) $user->username);
+                    $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->where('emp_no', $empNo)->first();
+                } elseif (! empty($user->email)) {
+                    $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->where('email', $user->email)->first();
+                }
+
+                if ($employee !== null) {
+                    $this->merge(['employee_id' => $employee->id]);
+                }
+            }
+        }
     }
 
     /**

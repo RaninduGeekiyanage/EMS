@@ -26,10 +26,15 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'username',
         'email',
+        'phone',
         'password',
         'is_super_admin',
         'tenant_id',
+        'employee_id',
+        'must_change_password',
+        'last_password_changed_at',
     ];
 
     /**
@@ -53,6 +58,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_super_admin' => 'boolean',
+            'must_change_password' => 'boolean',
+            'last_password_changed_at' => 'datetime',
         ];
     }
 
@@ -64,6 +71,16 @@ class User extends Authenticatable
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class, 'tenant_id');
+    }
+
+    /**
+     * Get the employee linked to this user account.
+     *
+     * @return BelongsTo<Employee, $this>
+     */
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'employee_id');
     }
 
     /**

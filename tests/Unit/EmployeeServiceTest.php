@@ -59,7 +59,7 @@ final class EmployeeServiceTest extends TestCase
         );
 
         $this->assertNotNull($employee->id);
-        $this->assertStringStartsWith('EMP-', $employee->emp_no);
+        $this->assertNotEmpty($employee->emp_no);
         $this->assertEquals('Kamal Wickramasinghe', $employee->full_name);
         $this->assertEquals(PaymentMode::Daily, $employee->paymentInfo->payment_mode);
         $this->assertEquals('3500.00', $employee->paymentInfo->daily_rate);

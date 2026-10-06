@@ -52,14 +52,25 @@ final class UserAccountController extends Controller
             }
 
             // Check linked employee
-            $linkedEmployee = Employee::where('tenant_id', $tenant->id)
-                ->where('email', $user->email)
-                ->first(['id', 'emp_no', 'full_name', 'designation_id']);
+            $linkedEmployee = null;
+            if (! empty($user->employee_id)) {
+                $linkedEmployee = Employee::where('tenant_id', $tenant->id)->find($user->employee_id, ['id', 'emp_no', 'full_name', 'designation_id']);
+            }
+            if (! $linkedEmployee && ! empty($user->username)) {
+                $empNo = preg_replace('/^EMP-?/i', '', (string) $user->username);
+                $linkedEmployee = Employee::where('tenant_id', $tenant->id)->where('emp_no', $empNo)->first(['id', 'emp_no', 'full_name', 'designation_id']);
+            }
+            if (! $linkedEmployee && ! empty($user->email)) {
+                $linkedEmployee = Employee::where('tenant_id', $tenant->id)->where('email', $user->email)->first(['id', 'emp_no', 'full_name', 'designation_id']);
+            }
 
             return [
                 'id' => $user->id,
                 'name' => $user->name,
+                'username' => $user->username,
                 'email' => $user->email,
+                'phone' => $user->phone,
+                'must_change_password' => (bool) $user->must_change_password,
                 'is_super_admin' => $user->isSuperAdmin(),
                 'is_company_owner' => in_array('Company Owner', $roles, true),
                 'roles' => $roles,

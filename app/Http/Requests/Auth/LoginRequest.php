@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -29,7 +31,8 @@ final class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email'],
+            'login' => ['nullable', 'string'],
+            'email' => ['nullable', 'string'],
             'password' => ['required', 'string'],
             'remember' => ['nullable', 'boolean'],
         ];
@@ -44,14 +47,42 @@ final class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
-            RateLimiter::hit($this->throttleKey());
+        $rawInput = trim((string) ($this->input('login') ?? $this->input('email')));
+        $password = (string) $this->input('password');
 
+        if (empty($rawInput)) {
             throw ValidationException::withMessages([
-                'email' => trans('auth.failed'),
+                'email' => 'Please enter your email, Employee ID, or username.',
             ]);
         }
 
+        // Clean numeric candidate (e.g. EMP1001 or EMP-1001 -> 1001)
+        $empNoCandidate = preg_replace('/^EMP-?/i', '', $rawInput);
+
+        $user = User::where(function ($query) use ($rawInput, $empNoCandidate): void {
+            $query->where('email', $rawInput)
+                ->orWhere('username', $rawInput)
+                ->orWhere('phone', $rawInput);
+
+            if (! empty($empNoCandidate)) {
+                $query->orWhereHas('employee', function ($empQuery) use ($empNoCandidate, $rawInput): void {
+                    $empQuery->where('emp_no', $empNoCandidate)
+                        ->orWhere('emp_no', $rawInput)
+                        ->orWhere('phone', $rawInput);
+                });
+            }
+        })->first();
+
+        if (! $user || ! Hash::check($password, $user->password)) {
+            RateLimiter::hit($this->throttleKey());
+
+            $errorField = $this->has('login') ? 'login' : 'email';
+            throw ValidationException::withMessages([
+                $errorField => trans('auth.failed'),
+            ]);
+        }
+
+        Auth::login($user, $this->boolean('remember'));
         RateLimiter::clear($this->throttleKey());
     }
 
@@ -69,9 +100,10 @@ final class LoginRequest extends FormRequest
         event(new Lockout($this));
 
         $seconds = RateLimiter::availableIn($this->throttleKey());
+        $errorField = $this->has('login') ? 'login' : 'email';
 
         throw ValidationException::withMessages([
-            'email' => trans('auth.throttle', [
+            $errorField => trans('auth.throttle', [
                 'seconds' => $seconds,
                 'minutes' => ceil($seconds / 60),
             ]),
@@ -83,6 +115,8 @@ final class LoginRequest extends FormRequest
      */
     public function throttleKey(): string
     {
-        return Str::transliterate(Str::lower((string) $this->input('email')).'|'.$this->ip());
+        $rawInput = trim((string) ($this->input('login') ?? $this->input('email')));
+
+        return Str::transliterate(Str::lower($rawInput).'|'.$this->ip());
     }
 }

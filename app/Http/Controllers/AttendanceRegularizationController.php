@@ -113,10 +113,16 @@ final class AttendanceRegularizationController extends Controller
         if (! empty($validated['employee_id'])) {
             $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->findOrFail($validated['employee_id']);
         } else {
-            // Find employee matching user email
-            $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
-                ->where('email', $user->email)
-                ->first();
+            if (! empty($user->employee_id)) {
+                $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->find($user->employee_id);
+            }
+            if (! $employee && ! empty($user->username)) {
+                $empNo = preg_replace('/^EMP-?/i', '', (string) $user->username);
+                $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->where('emp_no', $empNo)->first();
+            }
+            if (! $employee && ! empty($user->email)) {
+                $employee = Employee::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->where('email', $user->email)->first();
+            }
 
             if (! $employee) {
                 return redirect()->back()->with('error', 'No linked employee profile found for your account. Please select an employee.');

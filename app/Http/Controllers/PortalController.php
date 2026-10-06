@@ -16,6 +16,8 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\LeaveService;
 use App\Services\PayslipGeneratorService;
+use App\Models\RosterEntry;
+use App\Models\Shift;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -31,6 +33,44 @@ final class PortalController extends Controller
     ) {}
 
     /**
+     * Resolve the Employee model for the current authenticated user safely.
+     */
+    private function resolveCurrentEmployee(User $user, Tenant $tenant): ?Employee
+    {
+        if (! empty($user->employee_id)) {
+            $emp = Employee::where('tenant_id', $tenant->id)
+                ->where('id', $user->employee_id)
+                ->with(['department', 'designation', 'branch'])
+                ->first();
+
+            if ($emp !== null) {
+                return $emp;
+            }
+        }
+
+        if (! empty($user->username)) {
+            $empNo = preg_replace('/^EMP-?/i', '', (string) $user->username);
+            $emp = Employee::where('tenant_id', $tenant->id)
+                ->where('emp_no', $empNo)
+                ->with(['department', 'designation', 'branch'])
+                ->first();
+
+            if ($emp !== null) {
+                return $emp;
+            }
+        }
+
+        if (! empty($user->email)) {
+            return Employee::where('tenant_id', $tenant->id)
+                ->where('email', $user->email)
+                ->with(['department', 'designation', 'branch'])
+                ->first();
+        }
+
+        return null;
+    }
+
+    /**
      * Display personal attendance ledger and punch exceptions for current employee.
      */
     public function myAttendance(Request $request): InertiaResponse
@@ -40,10 +80,7 @@ final class PortalController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
-        $employee = Employee::where('tenant_id', $tenant->id)
-            ->where('email', $user->email)
-            ->with(['department', 'designation'])
-            ->first();
+        $employee = $this->resolveCurrentEmployee($user, $tenant);
 
         $selectedMonth = (string) $request->query('month', now()->format('Y-m'));
         $startDate = Carbon::parse($selectedMonth . '-01')->startOfMonth();
@@ -158,10 +195,7 @@ final class PortalController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
-        $employee = Employee::where('tenant_id', $tenant->id)
-            ->where('email', $user->email)
-            ->with(['department', 'designation'])
-            ->first();
+        $employee = $this->resolveCurrentEmployee($user, $tenant);
 
         $selectedYear = (int) $request->query('year', now()->year);
 
@@ -200,7 +234,7 @@ final class PortalController extends Controller
             // History of requests
             $reqs = LeaveRequest::where('tenant_id', $tenant->id)
                 ->where('employee_id', $employee->id)
-                ->with(['leaveType', 'coveringEmployee', 'hod', 'hr'])
+                ->with(['leaveType', 'coveringEmployee', 'hod', 'actionedBy'])
                 ->orderBy('start_date', 'desc')
                 ->take(50)
                 ->get();
@@ -240,7 +274,7 @@ final class PortalController extends Controller
             // Available leave types
             $leaveTypes = LeaveType::where('tenant_id', $tenant->id)
                 ->where('is_active', true)
-                ->get(['id', 'name', 'code', 'is_paid', 'requires_document'])
+                ->get(['id', 'name', 'code', 'is_paid', 'requires_attachment'])
                 ->toArray();
         }
 
@@ -271,10 +305,7 @@ final class PortalController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
-        $employee = Employee::where('tenant_id', $tenant->id)
-            ->where('email', $user->email)
-            ->with(['department', 'designation'])
-            ->first();
+        $employee = $this->resolveCurrentEmployee($user, $tenant);
 
         $payslips = [];
         $loans = [];
@@ -377,9 +408,7 @@ final class PortalController extends Controller
             abort(404, 'Payslip not found.');
         }
 
-        $employee = Employee::where('tenant_id', $tenant->id)
-            ->where('email', $user->email)
-            ->first();
+        $employee = $this->resolveCurrentEmployee($user, $tenant);
 
         // Enforce employee identity boundary unless user has administrative payslip permission
         if (! $user->isSuperAdmin() && ! $user->isCompanyOwner() && ! $user->can('payslip.view')) {
@@ -394,5 +423,249 @@ final class PortalController extends Controller
         $filename = "Payslip-{$empNo}-" . str_replace(' ', '-', $period) . '.pdf';
 
         return $pdf->download($filename);
+    }
+
+    /**
+     * Display the dedicated Employee Self-Service Dashboard (Home Hub).
+     */
+    public function dashboard(Request $request): InertiaResponse
+    {
+        /** @var Tenant $tenant */
+        $tenant = app('current_tenant');
+        /** @var User $user */
+        $user = Auth::user();
+
+        $employee = $this->resolveCurrentEmployee($user, $tenant);
+
+        if ($employee === null) {
+            return Inertia::render('Portal/Dashboard', [
+                'employee' => null,
+                'schedule' => ['last_month' => [], 'this_month' => [], 'next_month' => [], 'keys' => []],
+                'timesheet' => ['last_month' => [], 'this_month' => []],
+                'leave_balances' => [],
+                'recent_requests' => [],
+                'latest_payslip' => null,
+                'leave_types' => [],
+            ]);
+        }
+
+        // 1. Single Source of Truth: 3-Month Duty Schedule from RosterEntry
+        $lastMonthStart = now()->subMonth()->startOfMonth();
+        $nextMonthEnd = now()->addMonth()->endOfMonth();
+
+        $rosterEntries = RosterEntry::where('tenant_id', $tenant->id)
+            ->where('employee_id', $employee->id)
+            ->whereBetween('roster_date', [$lastMonthStart->toDateString(), $nextMonthEnd->toDateString()])
+            ->with('shift')
+            ->orderBy('roster_date')
+            ->get();
+
+        $lastMonthKey = now()->subMonth()->format('Y-m');
+        $thisMonthKey = now()->format('Y-m');
+        $nextMonthKey = now()->addMonth()->format('Y-m');
+
+        $formatRosterEntry = function (RosterEntry $entry): array {
+            $shift = $entry->shift;
+
+            return [
+                'id' => $entry->id,
+                'date' => $entry->roster_date?->format('Y-m-d') ?? (string) $entry->roster_date,
+                'day_name' => Carbon::parse($entry->roster_date)->format('D'),
+                'day_num' => Carbon::parse($entry->roster_date)->format('j'),
+                'schedule_type' => $entry->schedule_type ?? 'shift',
+                'status' => $entry->status,
+                'shift_name' => $shift?->name ?? ($entry->schedule_type === 'rest_day' ? 'Rest Day' : 'Day Off'),
+                'start_time' => $shift ? substr((string) $shift->start_time, 0, 5) : null,
+                'end_time' => $shift ? substr((string) $shift->end_time, 0, 5) : null,
+                'is_night' => (bool) ($shift?->is_night_shift ?? false),
+            ];
+        };
+
+        $schedule = [
+            'last_month' => $rosterEntries->filter(fn ($e) => Carbon::parse($e->roster_date)->format('Y-m') === $lastMonthKey)->map($formatRosterEntry)->values()->toArray(),
+            'this_month' => $rosterEntries->filter(fn ($e) => Carbon::parse($e->roster_date)->format('Y-m') === $thisMonthKey)->map($formatRosterEntry)->values()->toArray(),
+            'next_month' => $rosterEntries->filter(fn ($e) => Carbon::parse($e->roster_date)->format('Y-m') === $nextMonthKey)->map($formatRosterEntry)->values()->toArray(),
+            'keys' => [
+                'last_month' => ['key' => $lastMonthKey, 'label' => now()->subMonth()->format('F Y')],
+                'this_month' => ['key' => $thisMonthKey, 'label' => now()->format('F Y')],
+                'next_month' => ['key' => $nextMonthKey, 'label' => now()->addMonth()->format('F Y')],
+            ],
+        ];
+
+        // 2. Interactive Day-by-Day Timesheet Comparison (Last Month & This Month)
+        $buildTimesheet = function (Carbon $month) use ($tenant, $employee, $rosterEntries): array {
+            $start = $month->copy()->startOfMonth();
+            $end = $month->copy()->endOfMonth();
+            $limitDate = $month->isCurrentMonth() ? now() : $end;
+
+            $attendanceRecords = AttendanceDaily::where('tenant_id', $tenant->id)
+                ->where('employee_id', $employee->id)
+                ->whereBetween('attendance_date', [$start->toDateString(), $end->toDateString()])
+                ->with('shift')
+                ->get()
+                ->keyBy(fn ($a) => Carbon::parse($a->attendance_date)->format('Y-m-d'));
+
+            $regularizationRecords = AttendanceRegularizationRequest::where('tenant_id', $tenant->id)
+                ->where('employee_id', $employee->id)
+                ->whereBetween('attendance_date', [$start->toDateString(), $end->toDateString()])
+                ->get()
+                ->keyBy(fn ($r) => Carbon::parse($r->attendance_date)->format('Y-m-d'));
+
+            $days = [];
+            $curr = $start->copy();
+            while ($curr->lte($end)) {
+                $dateStr = $curr->format('Y-m-d');
+                $att = $attendanceRecords->get($dateStr);
+                $roster = $rosterEntries->first(fn ($r) => Carbon::parse($r->roster_date)->format('Y-m-d') === $dateStr);
+                $reg = $regularizationRecords->get($dateStr);
+
+                $schedShift = $roster?->shift?->name ?? ($roster?->schedule_type === 'rest_day' ? 'Rest Day' : ($att?->shift?->name ?? 'General Shift'));
+                $schedStart = $roster?->shift?->start_time ?? $att?->shift?->start_time;
+                $schedEnd = $roster?->shift?->end_time ?? $att?->shift?->end_time;
+
+                $status = 'scheduled';
+                if ($curr->lte($limitDate)) {
+                    if ($att !== null) {
+                        $status = $att->status ?? 'present';
+                    } elseif ($roster?->schedule_type === 'rest_day') {
+                        $status = 'rest_day';
+                    } else {
+                        $status = 'absent';
+                    }
+                } elseif ($roster?->schedule_type === 'rest_day') {
+                    $status = 'rest_day';
+                }
+
+                $punchIn = $att?->check_in ? Carbon::parse($att->check_in)->format('H:i') : null;
+                $punchOut = $att?->check_out ? Carbon::parse($att->check_out)->format('H:i') : null;
+
+                $days[] = [
+                    'date' => $dateStr,
+                    'day_name' => $curr->format('D'),
+                    'day_num' => $curr->format('j'),
+                    'is_past_or_today' => $curr->lte($limitDate),
+                    'scheduled_shift' => $schedShift,
+                    'scheduled_time' => ($schedStart && $schedEnd) ? substr((string) $schedStart, 0, 5) . ' - ' . substr((string) $schedEnd, 0, 5) : null,
+                    'punch_in' => $punchIn,
+                    'punch_out' => $punchOut,
+                    'worked_hours' => (float) ($att?->worked_hours ?? 0.0),
+                    'late_minutes' => (int) ($att?->late_minutes ?? 0),
+                    'early_departure_minutes' => (int) ($att?->early_departure_minutes ?? 0),
+                    'status' => $status,
+                    'is_late' => (bool) (($att?->late_minutes ?? 0) > 0 || $att?->status === 'late'),
+                    'is_half_day' => (bool) ($att?->status === 'half_day'),
+                    'has_missing_punch' => (bool) ($att && (! $att->check_in || ! $att->check_out) && $status !== 'rest_day'),
+                    'leave_type_name' => null,
+                    'has_regularization' => $reg !== null,
+                    'regularization_status' => $reg?->status,
+                ];
+
+                $curr->addDay();
+            }
+
+            return $days;
+        };
+
+        $timesheet = [
+            'last_month' => $buildTimesheet(now()->subMonth()),
+            'this_month' => $buildTimesheet(now()),
+        ];
+
+        // 3. Leave Balances
+        $entitlements = LeaveEntitlement::where('tenant_id', $tenant->id)
+            ->where('employee_id', $employee->id)
+            ->where('year', (int) now()->year)
+            ->with('leaveType')
+            ->get()
+            ->map(fn ($e) => [
+                'id' => $e->id,
+                'leave_type' => $e->leaveType?->name ?? 'Standard Leave',
+                'allocated_days' => (float) $e->allocated_days,
+                'utilized_days' => (float) $e->used_days,
+                'balance_days' => max(0, (float) $e->allocated_days - (float) $e->used_days),
+                'color' => $e->leaveType?->color ?? '#6366f1',
+            ])->toArray();
+
+        // 4. Recent Requests (Leaves & Regularizations)
+        $recentLeaves = LeaveRequest::where('tenant_id', $tenant->id)
+            ->where('employee_id', $employee->id)
+            ->with('leaveType')
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function ($l) {
+                $start = Carbon::parse($l->start_date)->toDateString();
+                $end = Carbon::parse($l->end_date)->toDateString();
+                return [
+                    'id' => $l->id,
+                    'type' => 'leave',
+                    'title' => ($l->leaveType?->name ?? 'Leave') . ' (' . (float) $l->days_count . 'd)',
+                    'dates' => $start === $end ? $start : ($start . ' to ' . $end),
+                    'status' => $l->status,
+                    'approval_stage' => $l->approval_stage,
+                    'is_bypassed_by_hr' => (bool) $l->is_bypassed_by_hr,
+                    'submitted_at' => $l->created_at?->diffForHumans() ?? 'Recently',
+                ];
+            })->toArray();
+
+        $recentRegs = AttendanceRegularizationRequest::where('tenant_id', $tenant->id)
+            ->where('employee_id', $employee->id)
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function ($r) {
+                $date = Carbon::parse($r->attendance_date)->toDateString();
+                return [
+                    'id' => $r->id,
+                    'type' => 'regularization',
+                    'title' => 'Punch Regularization (' . $date . ')',
+                    'dates' => $date,
+                    'status' => $r->status,
+                    'approval_stage' => $r->approval_stage ?? $r->status,
+                    'is_bypassed_by_hr' => (bool) $r->is_bypassed_by_hr,
+                    'submitted_at' => $r->created_at?->diffForHumans() ?? 'Recently',
+                ];
+            })->toArray();
+
+        $recentRequests = array_slice(array_merge($recentLeaves, $recentRegs), 0, 6);
+
+        // 5. Latest Payslip Snapshot
+        $latestPe = PayrollEmployee::where('tenant_id', $tenant->id)
+            ->where('employee_id', $employee->id)
+            ->whereHas('payrollRun', fn ($q) => $q->whereIn('status', ['approved', 'locked', 'completed', 'paid']))
+            ->with('payrollRun')
+            ->latest('created_at')
+            ->first();
+
+        $latestPayslip = $latestPe ? [
+            'id' => $latestPe->id,
+            'period' => $latestPe->payrollRun?->period_label ?? $latestPe->created_at?->format('Y-m'),
+            'net_pay' => (float) $latestPe->net_pay,
+            'gross_pay' => (float) $latestPe->gross_pay,
+            'epf_employee' => (float) $latestPe->epf_employee,
+            'worked_days' => (float) $latestPe->worked_days,
+            'download_url' => route('portal.payslips.download', $latestPe->id),
+        ] : null;
+
+        // 6. Leave Types for Quick Apply Modal
+        $leaveTypes = LeaveType::where('tenant_id', $tenant->id)->where('is_active', true)->get();
+
+        return Inertia::render('Portal/Dashboard', [
+            'employee' => [
+                'id' => $employee->id,
+                'emp_no' => $employee->emp_no,
+                'full_name' => $employee->full_name,
+                'department_name' => $employee->department?->name ?? 'Operations',
+                'designation_name' => $employee->designation?->name ?? 'Staff Member',
+                'branch_name' => $employee->branch?->name ?? 'HQ',
+                'date_of_joining' => $employee->date_of_joining,
+            ],
+            'schedule' => $schedule,
+            'timesheet' => $timesheet,
+            'leave_balances' => $entitlements,
+            'recent_requests' => $recentRequests,
+            'latest_payslip' => $latestPayslip,
+            'leave_types' => $leaveTypes,
+        ]);
     }
 }

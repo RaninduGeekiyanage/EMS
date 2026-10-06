@@ -12,6 +12,7 @@ use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\AttendanceTimesheetController;
 use App\Http\Controllers\BiometricDeviceProfileController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\ForcePasswordChangeController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\BankExportController;
@@ -51,6 +52,7 @@ Route::get('/', function () {
 Route::middleware(['guest'])->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store']);
+    Route::get('/emp-self', [AuthenticatedSessionController::class, 'createEmployeePortal'])->name('emp-self.login');
 
     Route::get('/forgot-password', [PasswordResetLinkController::class, 'create'])->name('password.request');
     Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->name('password.email');
@@ -79,6 +81,8 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function ():
 // Authenticated Session & Dashboard Routes
 Route::middleware(['auth'])->group(function (): void {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+    Route::get('/force-password-change', [ForcePasswordChangeController::class, 'create'])->name('password.force-change');
+    Route::post('/force-password-change', [ForcePasswordChangeController::class, 'update'])->name('password.force-change.update');
     Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['tenant'])->name('dashboard');
 });
 
@@ -94,6 +98,7 @@ Route::middleware(['tenant'])->group(function (): void {
 
     // M04-ESS: Employee Self-Service (ESS) Portal
     Route::middleware(['auth'])->group(function (): void {
+        Route::get('/portal/dashboard', [PortalController::class, 'dashboard'])->name('portal.dashboard');
         Route::get('/portal/attendance', [PortalController::class, 'myAttendance'])->name('portal.attendance');
         Route::get('/portal/leaves', [PortalController::class, 'myLeaves'])->name('portal.leaves');
         Route::get('/portal/payslips', [PortalController::class, 'myPayslips'])->name('portal.payslips');

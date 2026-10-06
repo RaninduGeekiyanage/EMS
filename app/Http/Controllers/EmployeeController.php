@@ -10,10 +10,12 @@ use App\Http\Requests\Employee\StoreEmployeeRequest;
 use App\Http\Requests\Employee\UpdateEmployeeRequest;
 use App\Models\Branch;
 use App\Models\Designation;
+use App\Models\User;
 use App\Services\CompanyService;
 use App\Services\EmployeeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -94,14 +96,44 @@ final class EmployeeController extends Controller
             $this->authorize('create', \App\Models\Employee::class);
         }
 
-        $this->employeeService->createEmployee(
+        $employee = $this->employeeService->createEmployee(
             $request->employeeData(),
             $request->paymentData(),
             $request->bankData(),
             $request->epfData()
         );
 
-        return redirect()->route('employees.index')->with('success', 'Employee record created successfully.');
+        $tempPassword = (string) ($request->input('portal_password') ?: '123456');
+
+        if ($request->boolean('create_portal_account', true)) {
+            $tenant = app('current_tenant');
+            $username = 'EMP' . $employee->emp_no;
+
+            $user = User::create([
+                'name' => $employee->full_name,
+                'username' => $username,
+                'email' => $employee->email,
+                'phone' => $employee->phone,
+                'password' => Hash::make($tempPassword),
+                'tenant_id' => $tenant->id,
+                'employee_id' => $employee->id,
+                'must_change_password' => true,
+            ]);
+
+            if (function_exists('setPermissionsTeamId')) {
+                setPermissionsTeamId($tenant->id);
+            }
+            $staffRole = \Spatie\Permission\Models\Role::firstOrCreate([
+                'name' => 'Staff',
+                'guard_name' => 'web',
+            ]);
+            $user->assignRole($staffRole);
+        }
+
+        return redirect()->route('employees.index')->with(
+            'success',
+            "Employee record created successfully. Portal Login: EMP{$employee->emp_no} (Password: {$tempPassword})"
+        );
     }
 
     /**

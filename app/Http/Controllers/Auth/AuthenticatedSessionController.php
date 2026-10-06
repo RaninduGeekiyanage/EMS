@@ -35,6 +35,20 @@ final class AuthenticatedSessionController extends Controller
     }
 
     /**
+     * Display the employee self-service login view.
+     */
+    public function createEmployeePortal(): Response|RedirectResponse
+    {
+        if (Auth::check()) {
+            return redirect()->intended('/portal/dashboard');
+        }
+
+        return Inertia::render('Auth/EmployeeLogin', [
+            'status' => session('status'),
+        ]);
+    }
+
+    /**
      * Handle an incoming authentication request.
      */
     public function store(LoginRequest $request): RedirectResponse
@@ -71,6 +85,23 @@ final class AuthenticatedSessionController extends Controller
 
             if (function_exists('setPermissionsTeamId')) {
                 setPermissionsTeamId($tenant->id);
+            }
+
+            if ((bool) $user->must_change_password) {
+                return redirect()->route('password.force-change');
+            }
+
+            $isEmployee = $user->employee_id !== null
+                || $user->hasRole('Staff')
+                || ! empty($user->username);
+
+            $canManage = $user->hasRole('Company Owner')
+                || $user->hasRole('Company Admin')
+                || $user->hasRole('HR Manager')
+                || $user->hasRole('HR Executive');
+
+            if ($isEmployee && ! $canManage) {
+                return redirect()->intended('/portal/dashboard');
             }
         }
 

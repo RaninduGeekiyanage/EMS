@@ -64,6 +64,10 @@ final class StoreEmployeeRequest extends FormRequest
             // EPF Details
             'is_epf_member' => ['boolean'],
             'epf_no' => ['nullable', 'string', 'max:50'],
+
+            // Portal Account Creation
+            'create_portal_account' => ['nullable', 'boolean'],
+            'portal_password' => ['nullable', 'string', 'min:6'],
         ];
     }
 

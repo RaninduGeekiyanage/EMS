@@ -247,19 +247,22 @@ export default function AuthenticatedLayout({
                     {/* Navigation Menu Links */}
                     <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
                         {/* Overview Section */}
-                        <div className="space-y-1">
-                            {!collapsed && (
-                                <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                    Overview
-                                </p>
-                            )}
-                            <Link href="/dashboard" className={navItemClass('/dashboard')} title="Executive Dashboard">
-                                <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
-                                {!collapsed && <span>Executive Dashboard</span>}
-                            </Link>
-                        </div>
+                        {/* Overview (Reserved for Management / HR / Admins) */}
+                        {canManage && (
+                            <div className="space-y-1">
+                                {!collapsed && (
+                                    <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                        Executive Suite
+                                    </p>
+                                )}
+                                <Link href="/dashboard" className={navItemClass('/dashboard')} title="Executive Dashboard">
+                                    <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+                                    {!collapsed && <span>Executive Dashboard</span>}
+                                </Link>
+                            </div>
+                        )}
 
-                        {/* Group 1: My Self-Service (ESS) */}
+                        {/* Group 1: My Self-Service (ESS - For all employees) */}
                         <div className="space-y-1 pt-1">
                             {!collapsed && (
                                 <p className="px-3 text-[10px] font-bold text-indigo-500 dark:text-indigo-400 uppercase tracking-wider flex items-center justify-between">
@@ -267,6 +270,10 @@ export default function AuthenticatedLayout({
                                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 font-mono">ESS</span>
                                 </p>
                             )}
+                            <Link href="/portal/dashboard" className={navItemClass('/portal/dashboard')} title="My Overview & Schedule Hub">
+                                <LayoutDashboard className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
+                                {!collapsed && <span>My Overview</span>}
+                            </Link>
                             <Link href="/portal/attendance" className={navItemClass('/portal/attendance')} title="My Attendance & Punch Records">
                                 <CalendarCheck className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
                                 {!collapsed && <span>My Attendance</span>}
@@ -542,14 +549,27 @@ export default function AuthenticatedLayout({
                     </div>
 
                     <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                        {/* Executive Overview (Management / HR only) */}
+                        {canManage && (
+                            <div className="space-y-1">
+                                <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Executive Suite
+                                </p>
+                                <Link href="/dashboard" className={navItemClass('/dashboard')} onClick={() => setMobileOpen(false)}>
+                                    <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+                                    <span>Executive Dashboard</span>
+                                </Link>
+                            </div>
+                        )}
+
                         {/* Group 1: My Self-Service (Always available to every staff member) */}
                         <div className="space-y-1">
                             <p className="px-3 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-                                My Self-Service
+                                My Self-Service (ESS)
                             </p>
-                            <Link href="/dashboard" className={navItemClass('/dashboard')} onClick={() => setMobileOpen(false)}>
-                                <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
-                                <span>Overview</span>
+                            <Link href="/portal/dashboard" className={navItemClass('/portal/dashboard')} onClick={() => setMobileOpen(false)}>
+                                <LayoutDashboard className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
+                                <span>My Overview</span>
                             </Link>
                             <Link href="/portal/attendance" className={navItemClass('/portal/attendance')} onClick={() => setMobileOpen(false)}>
                                 <CalendarCheck className="w-4 h-4 flex-shrink-0 text-indigo-500 dark:text-indigo-400" />

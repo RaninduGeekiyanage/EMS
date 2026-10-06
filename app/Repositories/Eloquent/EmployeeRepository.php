@@ -83,8 +83,23 @@ final class EmployeeRepository implements EmployeeRepositoryInterface
 
     public function getNextEmpNo(): string
     {
-        $count = Employee::withTrashed()->count() + 1;
+        $allEmpNos = Employee::withTrashed()->pluck('emp_no');
+        $maxNum = 1000;
 
-        return 'EMP-'.str_pad((string) $count, 4, '0', STR_PAD_LEFT);
+        foreach ($allEmpNos as $empNo) {
+            if (is_numeric($empNo)) {
+                $num = (int) $empNo;
+                if ($num > $maxNum) {
+                    $maxNum = $num;
+                }
+            } elseif (preg_match('/(?:EMP-?)?(\d+)/i', (string) $empNo, $matches)) {
+                $num = (int) $matches[1];
+                if ($num > $maxNum) {
+                    $maxNum = $num;
+                }
+            }
+        }
+
+        return (string) ($maxNum + 1);
     }
 }

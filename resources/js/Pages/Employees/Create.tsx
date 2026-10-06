@@ -17,6 +17,8 @@ import {
     Mail,
     User,
     Lock,
+    Eye,
+    EyeOff,
     AlertCircle,
 } from 'lucide-react';
 import { DepartmentSummary, DesignationSummary, BranchSummary, JobGradeSummary, WagesBoardCategorySummary } from '../../Types/employee';
@@ -32,13 +34,14 @@ interface Props {
     paymentModes: Array<{ value: string; label: string }>;
 }
 
-type SectionKey = 'personal' | 'job' | 'compensation' | 'banking';
+type SectionKey = 'personal' | 'job' | 'compensation' | 'banking' | 'login';
 
 const sectionFields: Record<SectionKey, string[]> = {
     personal: ['full_name', 'nic', 'email', 'phone', 'landline', 'date_of_birth', 'gender', 'marital_status', 'permanent_address', 'temporary_address', 'city', 'date_of_joining'],
     job: ['emp_no', 'employment_type', 'department_id', 'designation_id', 'branch_id', 'job_grade_id', 'employment_category', 'wages_board_category_id', 'attendance_mode', 'biometric_device_id', 'employment_status'],
     compensation: ['payment_mode', 'effective_date', 'basic_salary', 'daily_rate', 'hourly_rate'],
     banking: ['is_epf_member', 'epf_no', 'bank_code', 'bank_name', 'branch_name', 'account_no', 'account_holder_name'],
+    login: ['create_portal_account', 'portal_password'],
 };
 
 export default function Create({
@@ -96,13 +99,20 @@ export default function Create({
         account_holder_name: '',
         is_epf_member: true,
         epf_no: '',
+
+        // Login & Portal Access (5th Tab)
+        create_portal_account: true,
+        portal_password: '123456',
     });
+
+    const [showPortalPassword, setShowPortalPassword] = useState(false);
 
     const getSectionForField = (field: string): SectionKey => {
         if (sectionFields.personal.includes(field)) return 'personal';
         if (sectionFields.job.includes(field)) return 'job';
         if (sectionFields.compensation.includes(field)) return 'compensation';
-        return 'banking';
+        if (sectionFields.banking.includes(field)) return 'banking';
+        return 'login';
     };
 
     const getSectionErrorsCount = (section: SectionKey) => {
@@ -201,7 +211,7 @@ export default function Create({
                 )}
 
                 {/* Stepper Tabs */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8">
                     <button
                         type="button"
                         onClick={() => setActiveSection('personal')}
@@ -214,7 +224,7 @@ export default function Create({
                         <div className="flex items-center gap-3">
                             <User className="w-5 h-5 text-indigo-400" />
                             <div>
-                                <div className="text-xs font-bold">1. Personal Details</div>
+                                <div className="text-xs font-bold">1. Personal</div>
                                 <div className="text-[11px] text-slate-400">NIC & Contact</div>
                             </div>
                         </div>
@@ -237,7 +247,7 @@ export default function Create({
                         <div className="flex items-center gap-3">
                             <Briefcase className="w-5 h-5 text-sky-400" />
                             <div>
-                                <div className="text-xs font-bold">2. Job Assignment</div>
+                                <div className="text-xs font-bold">2. Job Info</div>
                                 <div className="text-[11px] text-slate-400">Dept, Role & Branch</div>
                             </div>
                         </div>
@@ -284,12 +294,35 @@ export default function Create({
                             <Landmark className="w-5 h-5 text-amber-400" />
                             <div>
                                 <div className="text-xs font-bold">4. Bank & EPF</div>
-                                <div className="text-[11px] text-slate-400">Encrypted Remittance</div>
+                                <div className="text-[11px] text-slate-400">Remittance</div>
                             </div>
                         </div>
                         {getSectionErrorsCount('banking') > 0 && (
                             <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold">
                                 {getSectionErrorsCount('banking')} err
+                            </span>
+                        )}
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setActiveSection('login')}
+                        className={`p-4 rounded-2xl border text-left transition flex items-center justify-between gap-3 ${
+                            activeSection === 'login'
+                                ? 'bg-indigo-600/10 border-indigo-500 text-white'
+                                : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                    >
+                        <div className="flex items-center gap-3">
+                            <Lock className="w-5 h-5 text-teal-400" />
+                            <div>
+                                <div className="text-xs font-bold">5. Login & Access</div>
+                                <div className="text-[11px] text-slate-400">Portal Credentials</div>
+                            </div>
+                        </div>
+                        {getSectionErrorsCount('login') > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold">
+                                {getSectionErrorsCount('login')} err
                             </span>
                         )}
                     </button>
@@ -1080,14 +1113,122 @@ export default function Create({
                                     onClick={() => setActiveSection('compensation')}
                                     className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 hover:text-white text-xs font-semibold transition"
                                 >
-                                    ← Back
+                                    ← Back to Compensation
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSection('login')}
+                                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex items-center gap-1.5"
+                                >
+                                    <span>Proceed to Login & Access</span>
+                                    <span>→</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Section 5: Login & Portal Access */}
+                    {activeSection === 'login' && (
+                        <div className="space-y-6 animate-in fade-in duration-200">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                                <div className="flex items-center gap-2 text-sm font-bold text-white">
+                                    <Lock className="w-4 h-4 text-teal-400" />
+                                    <span>Self-Service Portal Login & Credential Provisioning</span>
+                                </div>
+                                <label className="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+                                    <input
+                                        type="checkbox"
+                                        checked={form.data.create_portal_account}
+                                        onChange={(e) => form.setData('create_portal_account', e.target.checked)}
+                                        className="w-4 h-4 rounded text-teal-500 bg-slate-900 border-slate-700 focus:ring-teal-500"
+                                    />
+                                    <span className="text-xs font-semibold text-slate-200">
+                                        Enable Self-Service Portal Access
+                                    </span>
+                                </label>
+                            </div>
+
+                            {form.data.create_portal_account ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                                    {/* Username Card */}
+                                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                                                Assigned Login Username
+                                            </label>
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                                                Auto-generated
+                                            </span>
+                                        </div>
+                                        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-base font-bold text-teal-400 flex items-center justify-between">
+                                            <span>
+                                                {form.data.email ? form.data.email : `EMP${form.data.emp_no || nextEmpNo}`}
+                                            </span>
+                                            <span className="text-[10px] font-normal text-slate-500 uppercase">
+                                                {form.data.email ? 'Email ID' : 'Employee ID'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 leading-relaxed">
+                                            {form.data.email ? (
+                                                <>Employee can log in using either their registered email or <strong className="text-slate-300">EMP{form.data.emp_no || nextEmpNo}</strong>.</>
+                                            ) : (
+                                                <>Deskless employee without email. Standard login username is <strong className="text-teal-300">EMP{form.data.emp_no || nextEmpNo}</strong>.</>
+                                            )}
+                                        </p>
+                                    </div>
+
+                                    {/* Password Card */}
+                                    <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                                                Initial Password
+                                            </label>
+                                            <span className="text-[10px] text-amber-400 font-medium bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                                Mandatory Reset on 1st Login
+                                            </span>
+                                        </div>
+                                        <div className="relative">
+                                            <input
+                                                type={showPortalPassword ? 'text' : 'password'}
+                                                value={form.data.portal_password}
+                                                onChange={(e) => form.setData('portal_password', e.target.value)}
+                                                placeholder="Default: 123456"
+                                                className="w-full pl-3 pr-10 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm font-mono text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPortalPassword(!showPortalPassword)}
+                                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white"
+                                            >
+                                                {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-slate-400 leading-relaxed">
+                                            Defaulted to <strong className="text-slate-200">123456</strong> for simple onboarding. HR can view and communicate this verbally or via memo. Employee will set their private password upon first sign-in.
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="p-6 rounded-2xl bg-slate-950/40 border border-slate-800 text-center text-xs text-slate-500">
+                                    Portal access is disabled for this employee. No user credentials will be generated.
+                                </div>
+                            )}
+
+                            <div className="pt-6 border-t border-slate-800 flex justify-between">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSection('banking')}
+                                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 hover:text-white text-xs font-semibold transition"
+                                >
+                                    ← Back to Bank & EPF
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={form.processing}
-                                    className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition disabled:opacity-50"
+                                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-slate-950 text-xs font-bold shadow-lg shadow-teal-500/20 transition disabled:opacity-50 flex items-center gap-2"
                                 >
-                                    {form.processing ? 'Saving...' : 'Complete & Register Employee'}
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>{form.processing ? 'Saving...' : 'Complete & Register Employee'}</span>
                                 </button>
                             </div>
                         </div>

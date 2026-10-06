@@ -69,9 +69,12 @@ class HandleInertiaRequests extends Middleware
         $canManage = false;
 
         if ($user !== null && $tenant !== null) {
-            $isHod = $user->isSuperAdmin()
+            $isAdministrative = $user->isSuperAdmin()
                 || $user->isCompanyOwner()
-                || $user->hasRole(['Supervisor', 'Company Admin', 'HR Manager'])
+                || $user->hasRole(['Company Admin', 'HR Manager', 'HR Executive']);
+
+            $isHod = $isAdministrative
+                || $user->hasRole('Supervisor')
                 || $user->hasAnyPermission([
                     'attendance.hod_approve_regularization',
                     'attendance.hod_approve_ot',
@@ -81,19 +84,24 @@ class HandleInertiaRequests extends Middleware
                     'attendance.period_freeze',
                 ])
                 || \App\Models\DepartmentHead::where('tenant_id', $tenant->id)
-                    ->whereHas('employee', fn ($q) => $q->where('email', $user->email))
+                    ->where(function ($q) use ($user) {
+                        if ($user->employee_id) {
+                            $q->where('employee_id', $user->employee_id);
+                        }
+                        if ($user->email) {
+                            $q->orWhereHas('employee', fn ($eq) => $eq->where('email', $user->email));
+                        }
+                    })
                     ->exists();
 
-            $canManage = $user->isSuperAdmin()
-                || $user->isCompanyOwner()
-                || $user->hasRole(['Company Admin', 'HR Manager', 'HR Executive'])
-                || $user->hasAnyPermission([
+            $canManage = $isAdministrative
+                || (! $user->hasRole('Staff') && $user->hasAnyPermission([
                     'employee.view',
                     'shift.view',
                     'payroll.view',
                     'access-control.view',
                     'company.view',
-                ]);
+                ]));
         }
 
         return [
